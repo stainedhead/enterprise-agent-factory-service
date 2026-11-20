@@ -1,0 +1,15 @@
+# Documentation-only root repo. Every sub-directory is an independent repository
+# (enterprise-agent-factory-service-restapi, enterprise-agent-factory-service-website) and must never be tracked here.
+# Ignore all top-level directories, then allowlist the ones that belong to this repo.
+/*/
+!/.github/
+!/docs/
+!/user-docs/
+!/skills/
+!/specs/
+
+# OS / editor noise
+.DS_Store
+*.swp
+.idea/
+.vscode/
