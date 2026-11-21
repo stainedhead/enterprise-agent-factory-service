@@ -88,9 +88,10 @@ is not scoped to one team and needs a permission, such as `ListTeams`: there is 
 to hide (CD-10).
 
 **Identity providers: two client ids.** The contract and OpenAPI carry `consoleClientId` and
-`cliClientId` (D48). The database (`afs.identity_providers`, 000009) has a single `client_id`. `-restapi`
-M0 keeps both fields in `api/openapi.yaml` and has not yet built the mapping; how the second id is stored
-is open and needs a `-db` change (a second column) before `-restapi` can serve distinct ids (CD-9).
+`cliClientId` (D48). They map to `afs.identity_providers.client_id` (the console client) and
+`cli_client_id` (-db 000017, optional, the public client for the CLI device grant). When
+`cli_client_id` is empty, `ListSignInProviders` omits `cliClientId` and `afs sso login` exits 255 naming
+the provider (CD-9).
 
 ## 3. Permission catalog
 
