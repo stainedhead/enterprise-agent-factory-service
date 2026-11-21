@@ -168,3 +168,26 @@ Accepted, Proposed (needs review), Superseded.
 - Consequences: schema 000009 adds `identity_providers` and `teams.may_manage_aws_accounts`. The website
   toolchain moves to Bun in its own change. BUD-6 loses variance alerts. See PRD §10.1 for the full log.
 
+
+## ADR-013 Cost allocation tags, team sign-in provider, price sync, zero-impact delivery
+
+- Status: Accepted (J, 2026-11-21)
+- Context: J clarified Q1 and R3, asked for cost allocation tags passed on Bedrock and external calls
+  with team and agent ids as automatic system tags, and asked that agents receive secrets and
+  configuration with the least possible lift.
+- Decision:
+  - Identity providers are service-level only. When more than one is configured, each team's provider
+    is chosen at creation (service admins) or later (team-admins). Supersedes the team-level providers of
+    ADR-012.
+  - Price sync is restored: the billing job proposes AWS Price List changes daily for service admin
+    approval; CUR variance above a threshold (default 5%) alerts. Supersedes "no price-drift management".
+  - Cost allocation tags: system (`afs-team-id`, `afs-agent-id`, never configurable), service (fixed or
+    required) and optional team tags; applied to AWS resources, sent as Bedrock request metadata, exposed
+    to pods, rolled up in reports. AFS cannot alter agents' calls to external systems; their traffic is
+    attributed by agent and so by tag.
+  - Zero impact on the container: secrets, configuration, AWS profiles and tags are injected as
+    environment variables and files. External Secrets Operator stays.
+- Consequences: schema 000010 (`service_tags`, `team_tags`, tag views, `teams.identity_provider_id`,
+  `model_price_proposals`, settings `pricing.price_list_sync` and `billing.variance_alert_pct`). PRD
+  §6.12, SEC-6, BUD-9, RPT-9, screens S9 and T13; S1, S3 and S4 updated. The website moved to Bun
+  (website ADR-004).
