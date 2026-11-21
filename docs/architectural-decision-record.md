@@ -69,3 +69,18 @@ Accepted, Proposed (needs review), Superseded.
   `afs-team-id` tag as a second check.
 - Consequences: team slug, agent name and secret name are immutable. An agent secret can be bound only
   to its own agent. Moving a secret between scopes means creating a new one.
+
+## ADR-007 One persistent volume per agent
+
+- Status: Proposed (from J's PRD review, 2026-11-21)
+- Context: agents keep memory, configuration and work in progress that must survive restarts,
+  upgrades and reschedules.
+- Decision: each agent's StatefulSet has one `volumeClaimTemplate` (EBS through the CSI driver,
+  encrypted, gp3 by default) mounted at `/var/lib/agent`. Size, storage class, on-delete rule and
+  snapshot schedule are part of the agent definition. PVC retention is `Retain`; the reconciler alone
+  deletes volumes, after a final snapshot by default. Snapshots are recorded in the database and
+  referenced by export bundles. Phase 2 pool workers get ephemeral scratch volumes, with an optional
+  shared EFS volume per pool.
+- Consequences: volumes grow but never shrink, and the class is fixed after creation. An agent is tied
+  to its volume's Availability Zone until restored from a snapshot elsewhere. Storage counts toward team
+  quotas and costs are attributed by tag.
