@@ -50,11 +50,10 @@ Accepted, Proposed (needs review), Superseded.
   example a GitHub App installation) and audit trail. Replicas of one agent would share that identity,
   with no sensible way to split work between them.
 - Decision: no replica count. The reconciler renders each agent as a StatefulSet with exactly one
-  replica; pause scales it to zero. A team adds capacity by adding agents. The exception is the phase 2
+  replica; pause scales it to zero. A team adds capacity by adding agents. The exception is the
   swarm (AGT-8): a swarm holds several pools of different identities that work together; each pool has
   one identity and a worker count, and its workers share that identity because they do similar work
-  across many repositories. Swarm → pools (one identity, N workers) → worker pods. Its schema lands with
-  phase 2 as a new migration.
+  across many repositories. Swarm → pools (one identity, N workers) → worker pods. Its schema is db migration 000012.
 - Consequences: `agents.replicas` is dropped (db migration 000003); the console and CLI have no scale
   action. Every action in AWS, GitHub or the audit log maps to exactly one running agent.
 
@@ -79,7 +78,7 @@ Accepted, Proposed (needs review), Superseded.
   encrypted, gp3 by default) mounted at `/var/lib/agent`. Size, storage class, on-delete rule and
   snapshot schedule are part of the agent definition. PVC retention is `Retain`; the reconciler alone
   deletes volumes, after a final snapshot by default. Snapshots are recorded in the database and
-  referenced by export bundles. Phase 2 pool workers get ephemeral scratch volumes, with an optional
+  referenced by export bundles. Swarm pool workers get ephemeral scratch volumes, with an optional
   shared EFS volume per pool.
 - Consequences: volumes grow but never shrink, and the class is fixed after creation. An agent is tied
   to its volume's Availability Zone until restored from a snapshot elsewhere. Storage counts toward team
@@ -113,7 +112,7 @@ Accepted, Proposed (needs review), Superseded.
   patterns over account ids and names, recommended to be set by service admins. The filter is enforced
   in the API, in the database by trigger and in the team's IAM permissions boundary. The reconciler
   mirrors AWS Organizations, grants `sts:AssumeRole` per link, writes an AWS config file with one profile
-  per link, and verifies each link by assuming it. Phase 2 swarm pools can use one shared named role
+  per link, and verifies each link by assuming it. Swarm pools can use one shared named role
   across several accounts.
 - Consequences: globs rather than regular expressions, so the same filter works in SQL and IAM.
   Cross-account access needs one manual step in each target account (the trust policy), and links stay
@@ -191,3 +190,40 @@ Accepted, Proposed (needs review), Superseded.
   `model_price_proposals`, settings `pricing.price_list_sync` and `billing.variance_alert_pct`). PRD
   §6.12, SEC-6, BUD-9, RPT-9, screens S9 and T13; S1, S3 and S4 updated. The website moved to Bun
   (website ADR-004).
+
+## ADR-014 Feature-complete scope, as-of tag snapshots, swarms and work orders
+
+- Status: Accepted (J, 2026-11-21; items marked *Claude* are for J's review)
+- Context: J set the implementation target to feature complete: swarms and pools, ephemeral teams,
+  budgeted POCs and CVE work orders are in scope with full stories and acceptance criteria, and phases
+  are build order only. J also answered the five database gaps and asked that spend roll up by the tags
+  in effect when it happened.
+- Decision:
+  - **As-of tags.** Usage, activity, traffic and daily cost rows carry an immutable `tag_set_id`
+    snapshot (`afs.tag_sets`, content-addressed, system tags excluded). Rollups by tag read the snapshot,
+    not current tags. External systems are attributed by agent and reported as traffic, with no dollars
+    unless a cost is actually known.
+  - **Report schedules** are owned by team-admins and delivered only to the team's own channels.
+  - **Isolation tier** (`shared` | `dedicated`) is set per team by service admins; dedicated node cost
+    is charged to the team.
+  - **Idempotency keys** are stored in the database for 1 hour (service setting
+    `api.idempotency_key_ttl_seconds`, *Claude*: made a setting rather than a constant).
+  - **Agent sign-ins** to external systems go to logs only (team log delivery); no table, not in the
+    console.
+  - **Ephemeral teams and budgeted POCs.** Teams carry `lifecycle` (`long_running` | `ephemeral`),
+    `expires_at`, `teardown_on_budget_exhausted` and an optional lifetime budget; the reconciler tears
+    them down when due.
+  - **Swarms.** An ephemeral team holds ordered stages; each stage holds pools; each pool has one
+    identity and a worker count rendered as a Deployment. Pools hand work to other pools through SQS
+    queues delivered as environment variables (*Claude*).
+  - **Work orders.** A service-level `security_operator` role (*Claude*), which service-level API keys may
+    hold, creates CVE work orders by API or by EventBridge event (queued to SQS and drained by the
+    reconciler, *Claude*). Work orders are tracked per repository with SLA state; owning teams are
+    notified once per event, and contacts outside AFS through the service-level channel named in
+    `work_orders.notification_channel_id` (*Claude*).
+  - **Viewer kubectl** (read-only kubeconfig for team viewers) is enabled per team by service admins
+    only (*Claude*).
+- Consequences: db migrations 000011 and 000012. New permissions and operations in the API contract;
+  new CLI services (`pools`, `swarm-templates`, `work-orders`) and console screens 27–29.
+  `role_bindings` stays without RLS (read through the API's own checks). Decisions D13–D21 in the root
+  PRD record the detail.

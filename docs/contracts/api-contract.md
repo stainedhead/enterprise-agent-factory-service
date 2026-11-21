@@ -17,14 +17,14 @@ shapes, errors and events. A client never decides access; it reads `GET /v1/me` 
 | Topic | Rule |
 |---|---|
 | Base | `https://<host>/v1`, JSON (`application/json; charset=utf-8`), UTF-8, camelCase fields |
-| Ids | Server-generated prefixed ULIDs: `team_`, `agt_`, `sec_`, `rb_`, `key_`, `idp_`, `ext_`, `arl_`, `ncv_`, `acv_`, `bud_`, `mpp_`, `snap_`, `wo_`, `exp_`, `sched_`, `log_`, `chan_`. Clients treat them as opaque strings |
+| Ids | Server-generated prefixed ULIDs: `team_`, `agt_`, `pool_`, `stg_`, `sec_`, `rb_`, `key_`, `usr_`, `idp_`, `ext_`, `arl_`, `prl_`, `aid_`, `ncv_`, `acv_`, `pcv_`, `bud_`, `mpp_`, `vsnap_`, `wo_`, `swt_`, `exp_`, `rsc_`, `log_`, `nch_`, `egr_`, `xso_`, the same prefixes as the database contract. Clients treat them as opaque strings |
 | Names | Team `slug`, agent `name`, secret `name`: `^[a-z][a-z0-9-]{1,38}[a-z0-9]$`, immutable after create |
 | Timestamps | RFC 3339 UTC with `Z` (`2026-11-21T18:00:00Z`) |
 | Money | Decimal string with up to 6 fraction digits, USD only (`"1234.50"`). Never a JSON number |
 | Pagination | `?maxResults=1..100` (default 50) and `?nextToken=…` → `{"items": [...], "nextToken": "…"}`. `nextToken` absent on the last page. Tokens are opaque and expire after 24 h |
 | Filtering | Query parameters named after fields (`?state=active&kind=ephemeral`). Unknown parameters → `ValidationError` |
 | Concurrency | Every mutable resource has `version` (integer) and is returned with `ETag: "<version>"`. `PATCH`, `PUT` and `DELETE` on an existing resource require `If-Match`; a mismatch → `412 PreconditionFailed` |
-| Idempotency | `POST` that creates accepts `Idempotency-Key` (≤ 64 chars). A repeat within 24 h with the same body returns the original response; a different body → `409 Conflict` |
+| Idempotency | `POST` that creates (and `POST …:verb` actions) accepts `Idempotency-Key` (1–255 chars). Keys are scoped to the calling principal and kept for service setting `api.idempotency_key_ttl_seconds` (default 3600, so 1 hour). A repeat with the same key and the same operation and body returns the stored status and body with header `Idempotent-Replayed: true`; the same key with a different body or operation → `409 Conflict` (`details.reason = idempotency_mismatch`); a repeat while the first is still running → `409 Conflict` (`details.reason = idempotency_in_progress`, `Retry-After: 1`). Error responses of 5xx are not stored, so a retry runs again |
 | Actions | Non-CRUD verbs are `POST …/{id}:verb` (`:suspend`, `:restart`, `:approve`) |
 | Async | Mutations return the stored desired state at once with `status.phase` `Pending`. Clients poll `GET …` (or `…/status`) until `Ready`, `Degraded` or `Failed`. `status.observedGeneration` equals `generation` when applied |
 | Request id | Every response has `X-Request-Id`; a client may send its own (≤ 64 chars). It appears in errors and audit |
@@ -52,11 +52,15 @@ Every desired-state resource carries:
 | Console | OIDC authorization code + PKCE against the team's or the default provider (`GET /v1/identity-providers`) | `Authorization: Bearer <IdP access token>` |
 | CLI | OIDC device authorization grant (`afs sso login`) | Same; cached under `~/.afs/sso/cache` (0600) |
 | Pipelines | Team API key (`afsk_…`), created once and shown once | `Authorization: Bearer afsk_…` |
+| Security tooling | Service-level API key with the `security_operator` role (created by service admins) | `Authorization: Bearer afsk_…` |
 
 The API validates IdP tokens against the provider's JWKS (any enabled service-level provider). The
 groups claim (`groupsClaim` of the provider) maps to group role bindings. For a team-scoped request, a
 group binding counts only when the token's issuer is the team's provider (or the default provider when
-the team has none). API keys carry one team and one role (`team_admin` or `team_viewer`).
+the team has none). Team API keys carry one team and one role (`team_admin` or `team_viewer`). Service-level API keys
+carry no team and only the `security_operator` role. Security operators (people bound to the role, or
+those keys) can use only the work order operations and `GetMe`; `afs-api` sets `afs.security_operator`
+for them so the database lets them read and write work orders across teams.
 
 `401 Unauthenticated` for a missing, expired or unknown credential; `403 AccessDenied` for a valid
 caller without the permission.
@@ -91,10 +95,19 @@ mirrors it for UX. A change here is a change in both, in the same cycle.
 | `revisions:restore` | | ✓ | ✓ | |
 | `models:read` | ✓ | ✓ | ✓ | Enabled models |
 | `admin:settings`, `admin:models`, `admin:pricing`, `admin:identity-providers`, `admin:service-tags`, `admin:external-systems`, `admin:storage-classes`, `admin:accounts`, `admin:reports`, `admin:audit`, `admin:export` | | | ✓ | Service level |
-| `work-orders:read` / `work-orders:write` | | | ✓ | Phase 3 (P2) |
+| `pools:read` / `pools:write` | ✓ / | ✓ / ✓ | ✓ / ✓ | Stages, pools, handoffs, pool secrets, config, external systems and role links; ephemeral teams only. Write covers scale, pause, resume |
+| `teams:get-kubeconfig` | ✓ when `viewerKubectl` | ✓ when `viewerKubectl` | ✓ | Read-only kubeconfig for the namespace (ACC-5). Service admins turn it on with `teams:set-guardrails` |
+| `work-orders:read` | ✓ assigned or own repos | ✓ assigned or own repos | ✓ | Security operators: all work orders |
+| `work-orders:write` | | | ✓ | Security operators: create, update, cancel. A remediation team's agents and pools report repository progress with `work-orders:report` |
+| `work-orders:report` | | ✓ on the assigned team | ✓ | Update the status and PR of the assigned work order's repositories |
+| `admin:swarm-templates`, `admin:cost-tag-status` | | | ✓ | Service level |
+
+**Security operator** (service-level role, D18): `work-orders:read` and `work-orders:write` on every
+work order, and nothing else. It cannot be granted by team-admins and never appears in a team binding.
 
 Service admins hold every permission on every team. `GET /v1/me` returns, per bound team, the
-effective permission list; for service admins it returns `"serviceAdmin": true` and the full list.
+effective permission list; for service admins it returns `"serviceAdmin": true` and the full list;
+for security operators `"securityOperator": true` with `work-orders:read` and `work-orders:write`.
 
 ## 4. Operations
 
@@ -125,10 +138,14 @@ P = priority from the root PRD.
 | `GetTeamTags` | `GET /v1/teams/{teamId}/tags` | `tags:read` | `teams get-team-tags` | `teams.tags.get()` | T13 | P1 |
 | `PutTeamTags` | `PUT /v1/teams/{teamId}/tags` | `tags:write` | `teams put-team-tags` | `teams.tags.put()` | T13, S3 | P1 |
 | `ListAllowedAccounts` | `GET /v1/teams/{teamId}/allowed-accounts` | `identities:read` | `teams list-allowed-accounts` | `teams.allowedAccounts.list()` | S6, T8 | P1 |
+| `GetTeamKubeconfig` | `GET /v1/teams/{teamId}/kubeconfig` (YAML, `exec` credential plugin, no token in the file) | `teams:get-kubeconfig` | `teams get-kubeconfig` | `teams.getKubeconfig()` | T1, V1 | P2 |
 
 `CreateTeam` body includes the first team-admin binding, the team's models, required tag values and,
 when more than one provider exists, `identityProviderId`. A team missing a required tag is refused
-with `ValidationError` naming the keys.
+with `ValidationError` naming the keys. An ephemeral team (`kind: ephemeral`) also needs `expiresAt`
+(at most `teams.ephemeral_max_days` ahead), `teardownRule` (`at_expiry` \| `at_cap_or_expiry` \|
+`at_work_complete`) and a lifetime `budget` in the same request; `kind` cannot change later.
+`isolationTier` and `viewerKubectl` are guardrail fields (`teams:set-guardrails`).
 
 ### 4.3 Members and API keys
 
@@ -141,6 +158,8 @@ with `ValidationError` naming the keys.
 | `ListApiKeys` | `GET /v1/teams/{teamId}/api-keys` | `api-keys:read` | `api-keys list-api-keys` | `apiKeys.list()` | T6 | P1 |
 | `CreateApiKey` | `POST /v1/teams/{teamId}/api-keys` | `api-keys:write` | `api-keys create-api-key` | `apiKeys.create()` | T6 | P1 |
 | `DeleteApiKey` | `DELETE /v1/teams/{teamId}/api-keys/{keyId}` | `api-keys:write` | `api-keys delete-api-key` | `apiKeys.delete()` | T6 | P1 |
+| `ListServiceApiKeys` / `CreateServiceApiKey` / `DeleteServiceApiKey` | `/v1/admin/api-keys[/{keyId}]` (role `security_operator` only) | `admin:settings` *svc* | `admin list-api-keys` / `create-api-key` / `delete-api-key` | `admin.apiKeys.*` | settings | P2 |
+| `ListSecurityOperators` / `AddSecurityOperator` / `RemoveSecurityOperator` | `/v1/admin/security-operators[/{bindingId}]` (users or IdP groups) | `admin:settings` *svc* | `admin list-security-operators` … | `admin.securityOperators.*` | settings | P2 |
 
 `CreateApiKey` returns `secretKey` once; it is never returned again and never logged.
 
@@ -163,6 +182,31 @@ Agent spec fields (create and update): `name` (create only), `description`, `tem
 (digest-pinned), `modelId`, `resources`, `iamIdentity` (`team_shared` \| `dedicated`), `volume`
 {`sizeGiB` grow-only, `storageClass` create-only, `onDelete`, `snapshotSchedule`, `snapshotRetain`},
 `secretBindings[]` {`secretId`, `delivery` `env` \| `file`, `target`}. The agent has no replica count.
+
+### 4.4a Swarms: stages and pools
+
+Ephemeral teams only (`409 Conflict` on a persistent team). Pool names share the team's agent names.
+
+| Op | Method and path | Perm | CLI | SDK | Screen | P |
+|---|---|---|---|---|---|---|
+| `ListStages` … `DeleteStage` | `/v1/teams/{teamId}/stages[/{stageId}]` (`name`, `position`) | `pools:read` / `pools:write` | `pools list-stages` / `create-stage` / `update-stage` / `delete-stage` | `pools.stages.*` | P4 | P2 |
+| `ListPools` | `GET /v1/teams/{teamId}/pools` | `pools:read` | `pools list-pools` | `pools.list()` | P4 | P2 |
+| `CreatePool` | `POST /v1/teams/{teamId}/pools` | `pools:write` | `pools create-pool` | `pools.create()` | P4 | P2 |
+| `GetPool` / `UpdatePool` / `DeletePool` | `GET`/`PATCH`/`DELETE …/pools/{poolId}` | `pools:read` / `pools:write` | `pools describe-pool` / `update-pool` / `delete-pool` | `pools.get()` / `update()` / `delete()` | P4 | P2 |
+| `ScalePool` | `POST …/pools/{poolId}:scale` `{workers}` (0–200) | `pools:write` | `pools scale-pool` | `pools.scale()` | P4 | P2 |
+| `PausePool` / `ResumePool` | `POST …/pools/{poolId}:pause` / `:resume` | `pools:write` | `pools pause-pool` / `resume-pool` | `pools.pause()` / `resume()` | P4 | P2 |
+| `GetPoolStatus` | `GET …/pools/{poolId}/status` (desired, reporting, working, idle, impaired workers) | `pools:read` | `pools get-pool-status` | `pools.getStatus()` | P4 | P2 |
+| `ListPoolHandoffs` / `PutPoolHandoffs` | `GET`/`PUT …/pools/{poolId}/handoffs` `{toPoolIds[]}` | `pools:read` / `pools:write` | `pools list-handoffs` / `put-handoffs` | `pools.handoffs.*` | P4 | P2 |
+| `ListPoolSecretBindings` / `PutPoolSecretBindings` | `GET`/`PUT …/pools/{poolId}/secret-bindings` | `pools:read` / `pools:write` | `pools list-secret-bindings` / `put-secret-bindings` | `pools.secretBindings.*` | P4 | P2 |
+| `ListPoolConfigValues` … `DeletePoolConfigValue` | `/v1/teams/{teamId}/pools/{poolId}/config-values[/{name}]` | `pools:read` / `pools:write` | `pools list-config-values` … | `pools.config.*` | P4 | P2 |
+| `ListPoolExternalSystems` / `PutPoolExternalSystem` | `GET …/pools/{poolId}/external-systems`, `PUT …/{systemId}` `{enabled}` | `pools:read` / `pools:write` | `pools list-external-systems` / `put-external-system` | `pools.externalSystems.*` | P4 | P2 |
+| `ListPoolRoleLinks` … `VerifyPoolRoleLink` | `/v1/teams/{teamId}/pools/{poolId}/role-links[/{linkId}][:verify]` (one `roleName`, one link per account) | `pools:read` / `pools:write` | `pools list-role-links` / `create-role-link` / `delete-role-link` / `verify-role-link` | `pools.roleLinks.*` | P4 | P2 |
+
+Pool secrets are team secrets with `scope: pool` and `poolId` (managed path
+`<prefix>/<namespace>/<pool>/<name>`), created through `CreateSecret`. Pool usage, activity, traffic and
+audit records carry `poolId` and the worker pod name. Each handoff gets an SQS queue that the
+reconciler creates; both pools receive its URL as an environment variable
+(`AFS_HANDOFF_<TO_POOL>_QUEUE_URL` in the sender, `AFS_INBOX_QUEUE_URL` in the receiver) (D22).
 
 ### 4.5 Agent identity and AWS access
 
@@ -226,10 +270,18 @@ No response, error, log line or audit record contains it. The server sets `secre
 | `GetAgentReport` | `GET …/agents/{agentId}/reports/{kind}` *CSV* | `reports:read` | `reports get-agent-report` | `reports.agent()` | T12 | P0 |
 | `GetServiceReport` | `GET /v1/reports/{kind}` *CSV* | `admin:reports` *svc* | `reports get-service-report` | `reports.service()` | S8, S9 | P0 |
 | `ListReportSchedules` … `DeleteReportSchedule` | `GET`/`POST /v1/teams/{teamId}/report-schedules`, `PATCH`/`DELETE …/{scheduleId}` | `reports:schedule` | `reports list-report-schedules` … | `reports.schedules.*` | T11 | P1 |
+| `ListCostTagStatus` | `GET /v1/admin/cost-tag-status` (per key: seen in CUR, first and last seen, AWS activation status) | `admin:cost-tag-status` *svc* | `admin list-cost-tag-status` | `admin.costTagStatus.list()` | S9 | P2 |
+
+A report schedule has `name`, `report` (`usage` \| `costs` \| `activity` \| `traffic`), `query` (the
+report query parameters below, stored), `cadence` (`daily` \| `weekly` \| `monthly`), `channelId` (one of
+**the team's own** notification channels; a service-level channel → `ValidationError`), `format` (`csv`),
+`enabled`, and read-only `nextRunAt`, `lastRunAt`, `lastStatus`, `lastError`.
 
 Report query parameters: `from`, `to` (or `range=24h|7d|30d|90d|mtd`), `groupBy`
 (`team|agent|model|system|day|hour|tag:<key>`), filters `teamId`, `agentId`, `modelId`, `systemId`,
-`tag.<key>=<value>`. Response: `{"range": {...}, "groupBy": [...], "rows": [...], "totals": {...},
+`tag.<key>=<value>`, and in ephemeral teams `poolId` and `groupBy=pool`. Grouping by tag uses the tags in
+effect when each record happened (TAG-6); a record missing a currently required key reports
+`"(untagged)"` for that key. Traffic reports carry counts and bytes, never a cost. Response: `{"range": {...}, "groupBy": [...], "rows": [...], "totals": {...},
 "notes": ["Spend with providers other than Bedrock is not included"]}`.
 
 ### 4.10 Delivery, notifications, audit and history
@@ -241,6 +293,28 @@ Report query parameters: `from`, `to` (or `range=24h|7d|30d|90d|mtd`), `groupBy`
 | `ListAuditEvents` | `GET /v1/teams/{teamId}/audit-events` *CSV* | `audit:read` | `audit list-audit-events` | `audit.list()` | T1 | P0 |
 | `ListRevisions` / `GetRevision` | `GET /v1/teams/{teamId}/revisions[/{rev}]` | `revisions:read` | `teams list-revisions` / `describe-revision` | `revisions.list()` / `get()` | T1 | P0 |
 | `RestoreRevision` | `POST …/revisions/{rev}:restore` (`dryRun` supported) | `revisions:restore` | `teams restore-revision` | `revisions.restore()` | T1 | P1 |
+
+### 4.10a Work orders and swarm templates
+
+| Op | Method and path | Perm | CLI | SDK | Screen | P |
+|---|---|---|---|---|---|---|
+| `ListWorkOrders` | `GET /v1/work-orders?status&severity&slaState&teamId` *CSV* | `work-orders:read` (security operators and service admins: all; teams: assigned or own repos) | `work-orders list-work-orders` | `workOrders.list()` | P3 | P2 |
+| `CreateWorkOrder` | `POST /v1/work-orders` | `work-orders:write` | `work-orders create-work-order` | `workOrders.create()` | P3 | P2 |
+| `GetWorkOrder` | `GET /v1/work-orders/{workOrderId}` (with repositories, progress counts, `slaState` and notifications) | `work-orders:read` | `work-orders describe-work-order` | `workOrders.get()` | P6 | P2 |
+| `UpdateWorkOrder` | `PATCH /v1/work-orders/{workOrderId}` (title, SLA, cap, add repositories) | `work-orders:write` | `work-orders update-work-order` | `workOrders.update()` | P6 | P2 |
+| `CancelWorkOrder` | `POST /v1/work-orders/{workOrderId}:cancel` `{reason}` | `work-orders:write` | `work-orders cancel-work-order` | `workOrders.cancel()` | P6 | P2 |
+| `ListWorkOrderRepos` | `GET /v1/work-orders/{workOrderId}/repos` | `work-orders:read` | `work-orders list-repos` | `workOrders.repos.list()` | P6 | P2 |
+| `UpdateWorkOrderRepo` | `PATCH /v1/work-orders/{workOrderId}/repos/{host}/{owner}/{repo}` `{status, prUrl?, prNumber?, detail?}` | `work-orders:report` (assigned team) or `work-orders:write` | `work-orders update-repo` | `workOrders.repos.update()` | P6 | P2 |
+| `ListTeamWorkOrders` | `GET /v1/teams/{teamId}/work-orders` | `work-orders:read` | `work-orders list-team-work-orders` | `workOrders.listForTeam()` | T1 | P2 |
+| `ListSwarmTemplates` … `DeleteSwarmTemplate` | `/v1/admin/swarm-templates[/{templateId}]` (`:enable` / `:disable`) | `admin:swarm-templates` *svc* (security operators may list) | `swarm-templates list-swarm-templates` / `create-…` / `describe-…` / `update-…` / `delete-…` | `swarmTemplates.*` | P5 | P2 |
+
+`CreateWorkOrder` body: `cveId` (the `externalRef`, one open work order per CVE → `409 Conflict`),
+`severity` (`critical` \| `high` \| `medium` \| `low`), `title`, `slaDueAt`, `templateId`, optional
+`budgetUsd` (else the template's), and `repos[]` {`host`, `repo` (`owner/name`), `owningTeamId?`,
+`owningContact?` (email)}; each repository needs at least one owner. AFS creates the remediation team
+from the template and returns the work order with `teamId` once assigned. The same work order can
+arrive as an EventBridge event `afs.work_order.requested` with `source_event_id`; duplicates are
+ignored (D22).
 
 ### 4.11 Service administration
 
@@ -261,7 +335,6 @@ Report query parameters: `from`, `to` (or `range=24h|7d|30d|90d|mtd`), `groupBy`
 | `ListAdminAuditEvents` | `GET /v1/admin/audit-events` *CSV* | `admin:audit` | `audit list-service-audit-events` | `admin.audit.list()` | S5 | P0 |
 | `CreateExport` / `GetExport` | `POST /v1/exports`, `GET …/{exportId}` | `admin:export` | `admin create-export` / `describe-export` | `admin.exports.*` | export | P1 |
 | `CreateImport` | `POST /v1/imports` (`dryRun`, account map) | `admin:export` | `admin create-import` | `admin.imports.create()` | export | P1 |
-| `ListWorkOrders` … `UpdateWorkOrder` | `/v1/work-orders[/{id}]` | `work-orders:*` | `work-orders …` | `workOrders.*` | P3 | P2 |
 | `GetHealth` / `GetReadiness` | `GET /healthz`, `/readyz` | none | — | `health.get()` | — | P0 |
 
 ## 5. Resource shapes (wire, abbreviated)
@@ -272,7 +345,8 @@ Fields marked † are read-only. All resources also carry `id`†, `version`†,
 ```yaml
 Team:        {slug, displayName, description, kind: persistent|ephemeral, state†: active|suspended|deleting|deleted,
               namespace†, costCenter, ownerEmail, maxBudgetUsd, quotas{cpu,memory,pods,storage},
-              isolationTier, expiresAt?, identityProviderId?, allowedAwsAccounts[], mayManageAwsAccounts,
+              isolationTier: shared|dedicated, viewerKubectl, expiresAt?, teardownRule?: at_expiry|at_cap_or_expiry|at_work_complete,
+              tornDownAt†?, teardownReason†?, identityProviderId?, allowedAwsAccounts[], mayManageAwsAccounts,
               mayAddExternalSystems}
 TeamTags:    {tags: [{key, value?, source†: system|service|team|service_default|missing}]}       # PUT sends team-owned keys only
 Member:      {role: team_admin|team_viewer, subjectType: user|group, userId?, email†?, groupName?}
@@ -282,7 +356,20 @@ Agent:       {name, description, template, image, modelId, resources{cpu,memory}
               secretBindings[{secretId, delivery: env|file, target}], paused†}
 RoleLink:    {profileName, roleArn, accountId†, maxSessionSeconds, externalId†, status†: pending_trust|verified|failed|disabled,
               lastVerifiedAt†, trustPolicy†}
-Secret:      {scope: team|agent, agentId?, name, description, externalSystemId?, secretsManagerPath†, secretsManagerArn†,
+Stage:       {name, position, description}
+Pool:        {name, description, stageId?, template, image, persona?, modelId, workers (0..200), resources{cpu,memory},
+              scratchSizeGiB (1..500), sharedVolume: none|efs, state†: enabled|paused|deleting|deleted, handoffs†[poolId]}
+PoolRoleLink: {roleName, accountId, profileName, roleArn†, externalId†, maxSessionSeconds, status†, lastVerifiedAt†}
+SwarmTemplate: {name, description, kind: cve_remediation|general, spec{stages[], pools[], handoffs[], secrets[], configValues[]},
+              budgetUsd, ttlHours, teardownRule, enabled}
+WorkOrder:   {kind: cve_remediation|general, cveId?, severity, title, source†: api|eventbridge, templateId, budgetUsd, slaDueAt,
+              status†: open|assigned|in_progress|pr_opened|done|failed|cancelled, teamId†?, assignedAt†?, completedAt†?,
+              slaState†: on_track|due_soon|breached|met|missed, progress†{repos, prsOpen, prsMerged, notAffected, failedOrSkipped, remaining}}
+WorkOrderRepo: {host, repo, owningTeamId?, owningContact?, status: pending|in_progress|pr_opened|merged|not_affected|failed|skipped,
+              prUrl?, prNumber?, detail?, mergedAt†?, notifications†[{kind, recipient, sentAt}]}
+ReportSchedule: {name, report, query{}, cadence, channelId, format: csv, enabled, nextRunAt†, lastRunAt†, lastStatus†, lastError†}
+CostTagStatus: {key, seenInCur, firstSeenAt, lastSeenAt, awsStatus: active|inactive|unknown, checkedAt}
+Secret:      {scope: team|agent|pool, agentId?, poolId?, name, description, externalSystemId?, secretsManagerPath†, secretsManagerArn†,
               versionId†, lastChangedAt†, rotation{enabled, days}, boundTo†[agentId]}               # no value field, ever
 ConfigValue: {name, value?, source: literal|namespace, resolvedValue†, usedBy†[agentId]}
 ExternalSystem: {slug, name, category, description, docsUrl, endpoints[], enabled, builtin†, owner?, purpose?,
@@ -293,7 +380,7 @@ ServiceTag:  {key, mode: fixed|required, value?, defaultValue?, allowedValues?[]
 IdentityProvider: {kind: okta|entra_id, name, issuerUrl, clientId, clientSecretArn?, groupsClaim, isDefault, enabled}
 PriceProposal: {modelId, effectiveFrom, inputUsdPerMtok, outputUsdPerMtok, cacheReadUsdPerMtok, cacheWriteUsdPerMtok,
               status†: pending|approved|rejected|superseded, fetchedAt†, decidedBy†, decidedAt†, note}
-Me:          {principal{id, type: user|api_key, email?, name?}, serviceAdmin, teams[{teamId, slug, role, permissions[]}]}
+Me:          {principal{id, type: user|api_key, email?, name?}, serviceAdmin, securityOperator, teams[{teamId, slug, role, permissions[]}]}
 ```
 
 ## 6. Errors
@@ -333,9 +420,13 @@ Consumers must be idempotent on `id`.
 | `budget.threshold_crossed`, `budget.exhausted`, `budget.reset` | gateway, reconciler | Once per period per threshold |
 | `cost.variance_detected`, `pricing.proposal_created`, `pricing.proposal_decided` | billing, api | BUD-6, BUD-9 |
 | `drift.corrected` | reconciler | Manual change reverted |
-| `egress.denied_spike`, `agent.external_login` | reconciler collectors | RPT-6, OPS-4 |
+| `egress.denied_spike` | reconciler collectors | RPT-6. Agent sign-ins go to team log delivery only, never to events (D17) |
 | `role_link.verified`, `role_link.failed` | reconciler | AGT-10 |
-| `work_order.*` | api | Phase 3 |
+| `team.teardown_started`, `team.torn_down` | reconciler | TEAM-7; `data.reason` = `expired` \| `cap_reached` \| `work_complete` \| `manual` |
+| `pool.created`, `pool.updated`, `pool.scaled`, `pool.deleted`, `pool.status_changed` | api, reconciler | AGT-8 |
+| `report.delivered`, `report.failed` | billing | RPT-8 |
+| `work_order.created`, `work_order.assigned`, `work_order.repo_updated`, `work_order.pr_opened`, `work_order.merged`, `work_order.sla_warning`, `work_order.sla_breached`, `work_order.completed`, `work_order.failed`, `work_order.cancelled` | api, reconciler | WO-1 to WO-5; owners notified once per event |
+| `cost_tags.not_seen` | billing | TAG-7 |
 
 ## 8. Change process
 

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft for review |
+| **Status** | Draft for review, feature-complete scope (2026-11-21) |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Date** | 2026-11-20 |
 | **Repositories** | `enterprise-agent-factory-service` (this root), `-db`, `-restapi`, `-cli`, `-website` |
@@ -18,9 +18,11 @@ shared EKS platform that runs a team of containerized AI agents (the Agentic Tea
 team's people, agent identities, secrets, model access, budget and log delivery managed in one place.
 
 A central platform team runs the service. Teams manage their own factory inside guardrails the platform
-team sets. Phase 1 serves **long-running teams** that develop and maintain software. Later phases add
-**short-lived, budgeted workloads**: proof-of-concept efforts and "swarm rentals" with a hard cost cap and
-an expiry, and security-driven **CVE remediation** work orders.
+team sets. It serves **long-running teams** that develop and maintain software, **short-lived, budgeted
+workloads** (proof-of-concept efforts and "swarm rentals" with a hard cost cap and an expiry, built from
+pools of workers that share an identity), and security-driven **CVE remediation** work orders. All of
+these are in scope for the feature-complete release; the milestones in section 9 only set the build
+order (J, 2026-11-21).
 
 Everything is reachable three ways, all through one REST API that enforces role-based access: a web
 console that feels familiar to people who use the AWS Management Console, an `afs` CLI that follows
@@ -58,7 +60,9 @@ AWS CLI conventions, and a TypeScript SDK for automation.
 - Budgets for model providers other than Bedrock. OpenAI, OpenRouter and similar providers can be allowed
   as external systems (EXT-6), but their calls are not metered, counted in team budgets or stopped by hard
   caps (J, 2026-11-21).
-- Running ephemeral swarms and CVE work orders end to end (designed now, built in phases 2 and 3).
+- Dollar cost of external services (GitHub, Slack, Jira and the like). AFS cannot see what those services
+  bill, so it reports their **traffic and usage** (connections, requests, errors, bytes) per agent and
+  pool, never an estimated cost (J, 2026-11-21).
 
 ## 4. Users and roles
 
@@ -67,9 +71,11 @@ AWS CLI conventions, and a TypeScript SDK for automation.
 | **Service admin** | Central platform engineering team | Whole service | Create and retire teams, set budget ceilings and quotas, manage the model catalog and prices, watch fleet health and spend, review audit, export/import configuration |
 | **Team-admin** | Tech lead or engineering manager of a delivery team | One or more teams they are granted | Define agents, manage members and API keys, create and bind secrets, set the budget up to the ceiling, configure egress, log delivery and notifications |
 | **Team viewer** | Engineers, product owners, FinOps, SRE, auditors | One or more teams | See configuration, status, usage, costs and history. Never see secret values |
+| **Security operator** | The security team and its tooling (scanners, SOAR) | Whole service, work orders only | Create and track CVE work orders, see remediation progress and SLA state across teams. No access to teams' configuration, secrets or reports |
 
 Roles are granted to people or to IdP groups, per team. A person can be team-admin on one team and viewer
-on another. Only service admins grant service admin.
+on another. Only service admins grant service admin and security operator; both are service-level roles.
+Security tooling can use a service-level API key that holds the security operator role (ACC-4).
 
 ### Permission summary
 
@@ -97,7 +103,15 @@ on another. Only service admins grant service admin.
 | Reports: own team and its agents, CSV export, scheduled reports | ✓ | ✓ | ✓ |
 | Audit and config revisions (own team) | ✓ | ✓ | ✓ |
 | Model catalog, pricing, service settings, export / import | ✓ | | |
+| Isolation tier (dedicated nodes) and viewer `kubectl` for a team | ✓ | | |
+| Ephemeral teams and swarms: create with cap, expiry and teardown rule | ✓ | | |
+| Pools and stages in a swarm: create, scale, pause, delete | ✓ | ✓ | |
+| Swarm templates | ✓ | | |
+| Work orders: create, cancel, see all | ✓ | | |
+| Work orders: see those assigned to or affecting own team; report repository progress (assigned team) | ✓ | ✓ | ✓ (read) |
 
+Security operators hold only the work order rights: create, cancel and see every work order and its
+progress. They cannot open a team.
 The full matrix is in [solution design §5.3](docs/solution-design.md#53-permission-matrix) and is
 implemented once, in the REST API.
 
@@ -132,7 +146,8 @@ Service admin (global navigation)            Team context (team-admin / team vie
 ├─ Service                                    ├─ Team
 │  ├─ Dashboard                               │  ├─ Overview
 │  ├─ Teams                                   │  ├─ Agents
-│  └─ Work orders            (phase 3)        │  ├─ Members & access
+│  │                                          │  ├─ Pools & stages          (swarms)
+│  └─ Work orders                             │  ├─ Members & access
 ├─ Governance                                 │  └─ API keys                (team-admin)
 │  ├─ Budgets & ceilings                      ├─ Configuration
 │  ├─ Cost reconciliation                     │  ├─ Secrets
@@ -141,6 +156,7 @@ Service admin (global navigation)            Team context (team-admin / team vie
 └─ Platform                                   │  ├─ External systems
    ├─ Model catalog & pricing                 │  ├─ Models
    ├─ Agent templates                         │  ├─ Log delivery
+   ├─ Swarm templates                         │  │
    ├─ External systems                        │  └─ Notifications
    ├─ Service settings                        ├─ Cost
    └─ Export & import                         │  ├─ Budget & usage
@@ -151,7 +167,8 @@ Service admin (global navigation)            Team context (team-admin / team vie
                                                  └─ Config revisions
 ```
 
-Service admins can open any team and see the team context with full rights.
+Service admins can open any team and see the team context with full rights. *Pools & stages* appears
+only for ephemeral teams. Security operators see only *Work orders*.
 
 ### 5.3 Screens by role
 
@@ -347,13 +364,14 @@ are used, so they can troubleshoot, but cannot create, rotate or bind them, and 
 
 ![Secrets, team viewer](docs/ui/13-tv-secrets.png)
 
-#### Later phases: budgeted workloads, POCs and CVE remediation
+#### Budgeted workloads, swarms and CVE remediation
 
-**P2 · Ephemeral team budget (phase 2).** For a POC or swarm rental the budget step asks for a lifetime
-hard cap, an expiry and the teardown rule, and shows an estimate of daily cost and when the cap would be
-reached.
+**P2 · Ephemeral team budget.** For a POC or swarm rental the budget step asks for a lifetime hard cap, an
+expiry (at most the service's maximum, default 90 days) and the teardown rule: *at expiry*, *at cap or
+expiry* (the default for POCs) or *when its work order completes* (the default for remediation teams).
+It shows an estimate of daily cost and when the cap would be reached.
 
-**Swarms and pools (phase 2).** A swarm is an ephemeral team, and it still runs several agents with
+**Swarms and pools.** A swarm is an ephemeral team, and it still runs several agents with
 different identities that work together, for example a scanner, a PR writer and a reviewer. The
 difference is that each of those agents can be a **pool**: one definition with its own identity (one
 ServiceAccount, one IAM role, its own secrets and GitHub identity) and a worker count. Workers in a pool do
@@ -371,10 +389,38 @@ one profile per account. The accounts still have to be inside the team's allowed
 
 ![Ephemeral team budget](docs/ui/14-admin-ephemeral-team.png)
 
-**P3 · Work orders (phase 3).** CVE work orders from the security team with affected repos, PR progress,
-owning teams to notify, SLA due date and the remediation team assigned.
+**P4 · Pools and stages.** In an ephemeral team, *Pools & stages* lists the swarm's stages in order and,
+in each, its pools with template, model, desired and reporting workers (working, idle, impaired), the
+pools it hands work to, storage (scratch per worker, shared EFS or none), its shared named role and the
+accounts it is linked in, and spend to date. Team-admins create, scale (0 to 200 workers), pause and
+delete pools; *Create pool* has the same template, image, model, secrets and configuration sections as
+*Create agent*, plus worker count, stage, handoffs and storage. A pool's name shares the team's agent
+names and cannot change. Viewers see everything read-only (AGT-8).
+
+![Pools and stages](docs/ui/27-ta-swarm-pools.png)
+
+**P5 · Swarm templates.** Service admins keep the templates that work orders turn into remediation
+teams: stages, pools (template, image, model, workers, storage, shared role name), handoffs, the secrets
+each pool needs (created empty for the team to fill, or bound from a service-level source), configuration
+values, the default cap, time to live and teardown rule. A template can be disabled; its revisions are
+kept (WO-2).
+
+![Swarm templates](docs/ui/28-admin-swarm-templates.png)
+
+**P3 · Work orders.** CVE work orders from the security team with affected repos, PR progress, owning
+teams to notify, SLA due date and state (*on track*, *due soon*, *breached*, *met*, *missed*) and the
+remediation team assigned. Security operators and service admins see every work order; a team sees
+those assigned to it and those that touch a repository it owns, read-only.
 
 ![Work orders](docs/ui/15-admin-work-orders.png)
+
+**P6 · Work order detail.** The CVE, severity, source (API or EventBridge), SLA and its state, the swarm
+template and cap, the remediation team with its spend against the cap and its pools, and one row per
+affected repository: owner (an AFS team or an outside contact), status (*pending*, *in progress*, *PR
+opened*, *merged*, *not affected*, *failed*, *skipped*), the pull request link, and every notification
+sent with its time. *Cancel* stops the remediation team (its teardown rule then applies) (WO-1 to WO-6).
+
+![Work order detail](docs/ui/29-sec-work-order-detail.png)
 
 ### 5.4 Key flows
 
@@ -386,12 +432,14 @@ owning teams to notify, SLA due date and the remediation team assigned.
 | Hard cap reached | System → team-admin | Gateway blocks calls → agents receive `BudgetExceeded` → team shows `Blocked (cap)` → team-admin asks service admin for a higher ceiling or waits for reset |
 | Investigate | Team viewer | Overview → conditions → Activity & audit → Config revisions |
 | Recover environment | Service admin | Restore DB (PITR) or import bundle → reconciler converges → dashboard shows `Healthy` |
-| POC (phase 2) | Service admin / team-admin | Create team → Ephemeral → cap + expiry → run → automatic teardown; config and audit retained |
+| POC | Service admin / team-admin | Create team → Ephemeral → cap + expiry + teardown rule → run → automatic teardown; config and audit retained |
+| Swarm | Team-admin | Ephemeral team → Pools & stages → create stages → create pools (identity, secrets, workers, handoffs) → scale → teardown at cap, expiry or work complete |
+| CVE remediation | Security operator → system → owning teams | Create work order (console, CLI, API or EventBridge) → AFS creates the remediation team from the template within the cap → pools open PRs per repository → owners notified on PR, before the SLA and on completion → team torn down when the work order completes |
 
 ## 6. Functional requirements
 
-Priorities: **P0** required for the first production release (phase 1), **P1** phase 1 follow-up,
-**P2** later phase (designed now).
+Every requirement below is in scope for the feature-complete release (J, 2026-11-21). The priority only
+orders the build: **P0** first, then **P1**, then **P2** (see the milestones in section 9).
 
 ### 6.1 Teams and environments
 
@@ -402,8 +450,8 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | TEAM-3 | Default-deny NetworkPolicy for ingress and egress; allow DNS, the LLM gateway and, per agent, the endpoints of the external systems that agent may use (EXT-5) only | P0 |
 | TEAM-4 | Admission policy blocks teams from altering their own isolation (NetworkPolicies, LoadBalancer/NodePort Services, hostNetwork, privileged pods) | P0 |
 | TEAM-5 | Team status shows reconcile phase, observed generation and conditions | P0 |
-| TEAM-6 | Optional isolation tier assigns a dedicated node pool | P1 |
-| TEAM-7 | Ephemeral teams require an expiry and lifetime budget, and are torn down automatically | P2 |
+| TEAM-6 | Isolation tier per team: *shared* (the default) or *dedicated*, a node pool for that team only (tainted and labelled so only its pods run there). Only service admins set it, when creating or managing the team. Dedicated nodes carry the team's tags, so their cost reaches the team through CUR split cost allocation (D16) | P1 |
+| TEAM-7 | Ephemeral teams require an expiry (at most service setting `teams.ephemeral_max_days`, default 90), a lifetime budget that blocks at the cap, and a teardown rule: at expiry, at cap or expiry, or when the team's work order completes (or at expiry). The reconciler tears the team down when the rule fires: it stops agents and pools, revokes IAM, deletes the namespace and records when and why; the team record, configuration revisions, usage and audit are kept. A team's kind cannot change after creation. Teams expiring within 7 days show on S1 | P2 |
 | TEAM-8 | Each team has an allowed-accounts filter: the organization accounts its agents may assume roles in, as glob patterns (`*` and `?`) over AWS account ids and names, with `*` for all accounts. Empty (the default) means none. AFS mirrors the AWS Organizations account list hourly so names resolve to ids; suspended or closing accounts never match. The filter is enforced in the API, in the database, and in the team's IAM permissions boundary (`sts:AssumeRole` only on `arn:aws:iam::<matching-account>:role/*`). Narrowing it disables links outside it. Service admins decide per team whether the team manages its own filter: when it does, its team-admins set it; when it does not, service admins set it (D6). Team-admins choose link targets within it either way | P1 |
 
 ### 6.2 Agents and identity
@@ -416,8 +464,8 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | AGT-4 | Agents have no direct Bedrock permission; model calls go through the gateway | P0 |
 | AGT-5 | External identities (GitHub App installation, bot accounts) are modeled per agent with credentials as secret references | P1 |
 | AGT-6 | Each agent runs either with its team's shared IAM role (the default) or with a dedicated IAM role of its own (`afs/agents/<namespace>/<agent>`, mapped by Pod Identity, carrying the team's permissions boundary). Team-admins choose this when creating or editing the agent. A dedicated role is required for cross-account roles (AGT-10); an agent with links cannot switch back to the shared role until they are removed | P1 |
-| AGT-7 | One agent is one identity and one pod (a StatefulSet with one replica, so the name, ServiceAccount, IAM session and audit trail stay stable). There is no replica count. A team scales by adding agents. Phase 2 swarm pools are the exception (AGT-8) | P0 |
-| AGT-8 | Swarms (ephemeral teams) hold several pools that work together. Each pool has its own identity, secrets and a worker count; its workers share that identity. Pools can be grouped into stages. The swarm has one lifetime budget; usage and audit are attributed to the pool, with the worker pod recorded. A pool can optionally use a shared named role in one or many organization accounts (inside the team's allowed accounts) | P2 |
+| AGT-7 | One agent is one identity and one pod (a StatefulSet with one replica, so the name, ServiceAccount, IAM session and audit trail stay stable). There is no replica count. A team scales by adding agents. Swarm pools are the exception (AGT-8) | P0 |
+| AGT-8 | Swarms (ephemeral teams) hold several pools that work together, alongside any agents. Each pool has its own identity (ServiceAccount, IAM role, GitHub identity), secrets, configuration values, external-system opt-outs and a worker count (0 to 200); its workers share that identity and run as a Deployment. Pools can be grouped into ordered stages and hand work to named pools (the reconciler gives each handoff a queue the two pools share). Pools exist only in ephemeral teams, and pool and agent names share the team's namespace. Storage per pool: a scratch volume per worker (1 to 500 GiB, deleted with the worker), plus optionally one shared EFS volume for the pool; workers get no persistent volume. The swarm has one lifetime budget; usage, activity, traffic and audit are attributed to the pool, with the worker pod recorded. A pool can use one shared named role in one or many organization accounts (inside the team's allowed accounts): the same role name in every account, one profile per account in the workers' AWS config, verified like AGT-10 | P2 |
 | AGT-9 | Every agent has one persistent volume (encrypted EBS gp3 by default, through a StatefulSet volume claim) mounted at `/var/lib/agent` for memory, configuration and work in progress. It survives restarts, pauses, image upgrades and reschedules. Team-admins set size (1 to 1000 GiB, default 20, grow only), storage class (from the service admin's list, fixed after creation), on-delete rule (snapshot then delete by default, delete, or retain) and snapshot schedule (off, daily or weekly, keeping 1 to 90). Viewers see the settings and snapshot history read-only. Volume usage counts toward the team's storage quota, and EBS cost is attributed to the team by tag | P0 |
 | AGT-10 | An agent with a dedicated role can be linked to roles in other accounts of the organization, inside the team's allowed accounts (TEAM-8). Each link has the target role ARN, a profile name, a maximum session (15 minutes to 12 hours) and an external ID that AFS generates. AFS shows the trust policy for the target account's owner to add (principal: the agent's role; conditions: the external ID and the `afs-team-id` session tag). The reconciler grants the agent's role `sts:AssumeRole` on the target, writes an AWS config file into the pod with one profile per link (`role_arn`, `external_id`, `credential_source`), verifies each link by assuming it (on creation, daily and on demand) and records *Pending trust*, *Verified*, *Failed* or *Disabled*. A link's role ARN and external ID cannot change; replace the link instead. Team-admins add and remove links; viewers see them read-only. Assumed sessions keep the `afs-team-id` and `afs-agent-id` tags, so CloudTrail in the target account shows the agent | P1 |
 
@@ -443,7 +491,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | BUD-5 | Usage by agent, model and day in near real time | P0 |
 | BUD-6 | Daily CUR reconciliation of Bedrock (by inference-profile tag), EKS compute (split cost allocation by namespace) and agent volumes and snapshots (by `afs-team-id` tag), reported alongside the gateway's figures. A team-day whose gateway figure differs from the billed figure by more than the variance threshold (service setting, default 5%) is flagged and alerts service admins (D10) | P1 |
 | BUD-7 | Showback export by cost center and by any cost allocation tag (TAG-6) | P1 |
-| BUD-8 | Lifetime budgets with expiry for ephemeral teams | P2 |
+| BUD-8 | Lifetime budgets for ephemeral teams: one budget for the team's whole life, blocking at the cap, with the same thresholds and alerts as monthly budgets. Pools and agents in the team share it. The cap can be raised up to the ceiling; it cannot be removed while the team exists | P2 |
 | BUD-9 | Model prices stay current because token and model costs drive budgets: when price sync is on (service setting, default on), the billing job reads the AWS Price List daily and proposes each changed price as a pending change with its effective date. A service admin approves or rejects it; an approved price takes effect from its effective date or from the approval, whichever is later, and is never backdated. Manual prices remain possible. Every proposal and decision is audited (D10) | P1 |
 
 ### 6.5 People and access
@@ -451,10 +499,10 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | ID | Requirement | Pri |
 |---|---|---|
 | ACC-1 | SSO via OIDC: auth code + PKCE (web), device code (CLI). Okta (the default) and Microsoft Entra ID are both supported. Service admins configure the providers at service level (one is the default). When there is more than one, each team's provider is chosen when the team is created (service admins) or managed (team-admins), from the enabled service-level providers; a provider in use by a team cannot be disabled. A team's group role bindings use the team's provider; service-level group bindings name the provider their group comes from. Client secrets are Secrets Manager references (D1) | P0 |
-| ACC-2 | Roles service admin, team-admin, team viewer, bound to users or IdP groups, per team | P0 |
+| ACC-2 | Roles service admin, team-admin, team viewer, bound to users or IdP groups, per team; plus security operator, a service-level role limited to work orders (D18) | P0 |
 | ACC-3 | RBAC enforced in the REST API on every operation; `GET /v1/me` returns effective permissions for client UX | P0 |
-| ACC-4 | Team API keys (team-admin or viewer, max 90 days, hashed, shown once) | P1 |
-| ACC-5 | Optional read-only `kubectl` for team viewers via EKS access entries scoped to the namespace | P2 |
+| ACC-4 | API keys (max 90 days, hashed, shown once): team keys with the team-admin or viewer role, and service-level keys with the security operator role for security tooling (created by service admins) | P1 |
+| ACC-5 | Read-only `kubectl` for a team's viewers and team-admins, switched on per team by service admins (default off). AFS creates an EKS access entry for the identity provider's role mapped to a namespace-scoped role that can get, list and watch workloads, events and logs, and nothing else: no secrets, exec, attach, port-forward or changes. `afs teams get-kubeconfig` writes the kubeconfig (D19) | P2 |
 
 ### 6.6 Configuration, recovery and audit
 
@@ -475,20 +523,24 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | OPS-1 | Per-team log delivery to CloudWatch, S3, OTLP, Splunk HEC or Datadog | P1 |
 | OPS-2 | Events (team, agent, budget, drift, work order) published to EventBridge via a transactional outbox | P0 |
 | OPS-3 | Notification channels per team: Slack, email, webhook, Jira | P1 |
-| OPS-4 | Credential hygiene in logs: agent logs and external-traffic records pass through a redaction step before storage or delivery. Values that look like passwords, tokens or keys (and the values of the agent's own bound secrets) are replaced by a stable token (`[redacted:<hash prefix>]`), so repeats can be correlated without exposing the value. Agent sign-ins to external systems (connections to a system's sign-in endpoints) are logged as login events with the agent, system and time | P0 |
+| OPS-4 | Credential hygiene in logs: agent logs and external-traffic records pass through a redaction step before storage or delivery. Values that look like passwords, tokens or keys (and the values of the agent's own bound secrets) are replaced by a stable token (`[redacted:<hash prefix>]`), so repeats can be correlated without exposing the value. Agent sign-ins to external systems (connections to a system's sign-in endpoints) are written to the team's log delivery as sign-in events with the agent or pool worker, system and time. They are not stored in the AFS database or shown in the console (D17) | P0 |
 
-### 6.8 Work orders (phase 3)
+### 6.8 Work orders
 
 | ID | Requirement | Pri |
 |---|---|---|
-| WO-1 | Security creates CVE work orders (CVE id, affected repos, owning teams, SLA) by API or EventBridge | P2 |
-| WO-2 | AFS assigns a capped remediation team, tracks PRs and notifies owning teams against the SLA | P2 |
+| WO-1 | Security operators create CVE work orders (CVE id, severity, title, affected repositories with their owners, SLA due time, swarm template, optional cap) through the console, CLI, API, or an EventBridge event on the service bus. Events are deduplicated by event id; there is at most one open work order per CVE. Owners are AFS teams, outside contacts (email), or both | P2 |
+| WO-2 | For each work order, AFS creates an ephemeral remediation team from the swarm template, with the work order's cap (or the template's) as its lifetime budget, the template's time to live as expiry, and *when its work order completes* as teardown rule. Service admins maintain the templates (P5) | P2 |
+| WO-3 | Progress is tracked per repository: pending, in progress, PR opened (with link), merged, not affected, failed or skipped. The remediation team's agents and pools report progress through the API with the assigned team's identity; the reconciler also reads pull request state from GitHub | P2 |
+| WO-4 | Owners are notified once per event: assigned, PR opened, merged, SLA warning (service setting `work_orders.sla_warning_hours` before due, default 48) and SLA breached, and on completion. AFS teams are notified on their channels; outside contacts by email through the service-level channel named in service setting `work_orders.notification_channel_id` (D22) | P2 |
+| WO-5 | A work order is done when every repository is merged, not affected or skipped; failed when the team is torn down with work remaining; cancelled by a security operator or service admin. Each change publishes a `work_order.*` event | P2 |
+| WO-6 | Security operators and service admins see every work order; a team sees, read-only, those assigned to it and those touching a repository it owns | P2 |
 
 ### 6.9 Interfaces
 
 | ID | Requirement | Pri |
 |---|---|---|
-| IF-1 | REST API `/v1`, OpenAPI 3.1 contract, AWS-style `maxResults`/`nextToken` pagination, error `{code, message, requestId}` | P0 |
+| IF-1 | REST API `/v1`, OpenAPI 3.1 contract, AWS-style `maxResults`/`nextToken` pagination, error `{code, message, requestId}`. Creates accept an `Idempotency-Key`; a retry with the same key by the same caller within service setting `api.idempotency_key_ttl_seconds` (default 1 hour) returns the first response (D15) | P0 |
 | IF-2 | `afs` CLI: `afs <service> <operation>`, profiles, `--output json|table|text|yaml`, `--query`, pagination flags, `--cli-input-json`, `--generate-cli-skeleton`, AWS CLI exit codes | P0 |
 | IF-3 | `@afs/sdk` TypeScript SDK generated from the contract with ergonomic resource clients and async pagination | P0 |
 | IF-4 | Web console as specified in section 5, built on `@afs/sdk` with clean architecture | P0 |
@@ -514,9 +566,9 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | RPT-3 | **Usage:** model calls, input, output and cache tokens, rejected calls (budget, model), cost per call and latency, per team, agent, model and day | P0 |
 | RPT-4 | **Cost by Bedrock model** at service, team and agent level, with calls, tokens, cost and share, plus EKS compute as its own line | P0 |
 | RPT-5 | **Agent activity:** every five minutes each running agent is recorded as *working* (it made a model call, reported itself busy, or used CPU above the idle threshold) or *idle*, or as paused, stopped, unhealthy or blocked by its budget. Reports show each agent's current state and what it reports it is doing, utilization (working share of running time) over the range, an hourly heatmap, a day timeline, how long an idle agent has been idle, and the longest idle stretches. The idle threshold is a service setting | P0 |
-| RPT-6 | **External systems traffic:** connections, bytes each way, and (where an egress proxy sees HTTP) requests and errors from each agent to each external system over time, at service, team and agent level. Denied attempts are reported with the reason (system off at the service, team or agent level, or a host in no system); they are a security signal and can alert team-admins and service admins | P1 |
+| RPT-6 | **External systems traffic:** connections, bytes each way, and (where an egress proxy sees HTTP) requests and errors from each agent to each external system over time, at service, team and agent level. Denied attempts are reported with the reason (system off at the service, team or agent level, or a host in no system); they are a security signal and can alert team-admins and service admins. Traffic is reported as usage, never as cost: AFS does not know what external services bill (D14). Pool traffic is attributed to the pool and its worker pods | P1 |
 | RPT-7 | Model providers other than Bedrock are marked unmetered: their spend is not in any report, and their traffic shows under external systems | P0 |
-| RPT-8 | Scheduled reports: a saved report emailed or posted to a notification channel daily, weekly or monthly as CSV. Every report is also available through the API, CLI and SDK | P1 |
+| RPT-8 | Scheduled reports: team-admins save a team report (usage, costs, activity or traffic, with its range, grouping and filters) to be sent daily, weekly or monthly as CSV to one of **the team's own** notification channels; service-level channels cannot be chosen. Viewers run reports on demand. Every report is also available through the API, CLI and SDK (D13) | P1 |
 | RPT-9 | Every report can be grouped and filtered by cost allocation tag (TAG-6) | P1 |
 
 ### 6.12 Cost allocation tags
@@ -531,8 +583,8 @@ it in, so spend can be rolled up the way the organization reports it, in AFS and
 | TAG-3 | **Team tags.** Team-admins add optional tags of their own (any key that is not a service key or reserved), and set the team's values for required keys. A team can carry at most 45 tags including the service's, leaving room for the system tags under AWS's limit of 50. Viewers see all of a team's tags read-only | P1 |
 | TAG-4 | **Where tags go.** The reconciler applies a team's tags to its AWS resources (IAM roles, EBS volumes and snapshots, Bedrock application inference profiles, Secrets Manager secrets), and the team's tags plus `afs-agent-id` to each agent's resources. The gateway adds the agent's tags as request metadata to every Bedrock call. Each agent's pod gets them as `/etc/afs/tags.json` and the `AFS_TAGS` environment variable, so an agent may pass them to other services; AFS does not alter the agent's calls to external systems, whose traffic is attributed to the agent (RPT-6) and so to its tags | P1 |
 | TAG-5 | Tag keys and values follow AWS tag rules (keys up to 128 characters, values up to 256, letters, digits, spaces and `_ . : / = + @ -`). Keys that look like credentials are refused; tags are never secret. Every change is versioned and audited, and a tag change is applied to existing resources by the reconciler | P1 |
-| TAG-6 | **Rollups.** Cost, usage, agent activity and external traffic roll up by any tag key and value at service level (service admins) and within a team's own scope. Rollups attribute each team's figures to its current tags; untagged figures show as *(untagged)*. Showback exports group by tag (BUD-7) | P1 |
-| TAG-7 | Service admins are told, once, to activate the service and system keys as cost allocation tags in AWS Billing, and the cost allocation tags page shows which keys CUR has seen | P2 |
+| TAG-6 | **Rollups.** Cost, usage, agent activity and external traffic roll up by any tag key and value at service level (service admins) and within a team's own scope. Rollups attribute every figure to the tags **in effect when it happened**: each usage, cost, activity and traffic record carries a snapshot of the team's tags at the time, and CUR lines carry the tags AWS billed with. Changing a tag changes later figures only. A record missing a currently required key shows under *(untagged)* for that key. Showback exports group by tag (BUD-7) (D20) | P1 |
+| TAG-7 | Service admins are told, once, to activate the service and system keys as cost allocation tags in AWS Billing (a banner on S9 until acknowledged). The billing job records daily which keys CUR has seen and their activation status in AWS, shown per key on S9; a key not seen in 3 days of CUR after activation is flagged | P2 |
 
 ### 6.13 User stories and acceptance criteria
 
@@ -664,6 +716,9 @@ external traffic, so that I can manage cost and capacity. *(G7, RPT-1 to RPT-9, 
   then it shows as idle with *idle since* set to the end of its last working window.
 - Given a viewer of team A, then service-level reports and other teams' reports are not available
   (hidden in the console, `403` from the API).
+- When a team-admin schedules the weekly cost report to the team's Slack channel, then it arrives as CSV
+  every week; choosing another team's or a service-level channel is refused; a viewer cannot schedule.
+- Given external system traffic, then reports show connections, requests, errors and bytes, and no cost.
 
 **US-12 · Cost allocation tags.** As a service admin, I want every team to carry the tags our finance
 reporting needs, and every resource and Bedrock call tagged with team and agent ids automatically, so
@@ -676,6 +731,9 @@ that spend rolls up by business unit, product or any other dimension. *(TAG-1 to
   resources carry it, and reports can group spend by `project`.
 - Given a required key added after some teams exist, then those teams appear in *Teams missing a
   required tag* and their spend shows as *(untagged)* until they set a value.
+- Given a team tagged `business-unit = payments` until Tuesday noon and `platform` after, then Monday's
+  spend stays under *payments*, Wednesday's is under *platform*, and Tuesday's is split at the change.
+- Given CUR has not seen `business-unit` for 3 days after activation, then S9 flags the key.
 
 #### E7 Recovery and audit
 
@@ -698,19 +756,65 @@ to be attributable to a person or agent and team, so that investigations are fas
   in linked accounts.
 - Given an agent logs a string that looks like a password or the value of one of its bound secrets, then
   the delivered log shows `[redacted:<hash prefix>]` instead.
+- When an agent connects to a system's sign-in endpoint, then a sign-in event with agent, system and time
+  appears in the team's log delivery (not in the console).
 
-#### E8 Later phases
+#### E8 Budgeted workloads, swarms and CVE remediation
 
-**US-15 · Budgeted POC (phase 2).** As a service admin, I want an ephemeral team with a lifetime cap and
-expiry that tears itself down, so that experiments cannot outlive their budget. *(TEAM-7, BUD-8, P2)*
-- When the cap or the expiry is reached (per the team's teardown rule), then agents stop, IAM is revoked
-  and the namespace is deleted, while configuration and audit are kept.
+**US-15 · Budgeted POC.** As a service admin, I want an ephemeral team with a lifetime cap and expiry
+that tears itself down, so that experiments cannot outlive their budget. *(TEAM-7, BUD-8, P2)*
+- Given the create-team wizard with *Ephemeral* chosen, then I must give an expiry no more than 90 days
+  ahead (the service setting), a lifetime budget that blocks at the cap and a teardown rule; the wizard
+  cannot finish without them.
+- When the cap or the expiry is reached (per the team's teardown rule), then within 5 minutes agents and
+  pools stop, IAM is revoked and the namespace is deleted; the team shows *Deleted* with the time and
+  reason, and its configuration revisions, usage and audit remain readable.
+- Given an ephemeral team, when anyone tries to make it persistent or remove its lifetime budget, then
+  the API refuses with `ValidationError`.
+- Given a team expiring within 7 days, then S1 lists it under *Teams needing attention*.
 
-**US-16 · CVE remediation (phase 3).** As security, I want to create a CVE work order and have a capped
+**US-16 · CVE remediation.** As a security operator, I want to create a CVE work order and have a capped
 remediation team open PRs in affected repositories and notify owning teams against the SLA.
-*(WO-1, WO-2, P3)*
-- When a work order is created through the API or EventBridge, then a remediation team is assigned within
-  its cap, PRs are tracked per repository, and owning teams are notified before the SLA is due.
+*(WO-1 to WO-6, P3, P5, P6)*
+- When I create a work order through the console, CLI, API or an EventBridge event, then within 5
+  minutes a remediation team is created from the template with the cap as its lifetime budget and its
+  pools start.
+- Given an EventBridge event delivered twice, then one work order exists; given an open work order for
+  CVE-2026-1234, then a second one for the same CVE is refused with `Conflict`.
+- When a pool opens a PR in an affected repository, then the repository shows *PR opened* with its link,
+  and its owner is notified once.
+- Given an SLA due in less than 48 hours with repositories remaining, then each owner gets one SLA
+  warning; after the due time, one *breached* notice; the work order shows *due soon* then *breached*.
+- When every repository is merged, not affected or skipped, then the work order is done, owners get a
+  completion notice and the remediation team is torn down.
+- Given a viewer of a team that owns one affected repository, then they see the work order and their
+  repository's row only, read-only; a team with no link to it sees nothing (`404`).
+
+**US-17 · Swarm pools.** As a team-admin of an ephemeral team, I want pools of workers that share one
+identity and hand work to each other, so that a job spread over many repositories runs in parallel
+under one budget. *(AGT-8, P4)*
+- When I create a pool with 5 workers, then 5 pods run under one ServiceAccount and one IAM role, each
+  with its own scratch volume, and the pool shows 5 workers reporting.
+- When I scale it to 0, then no worker runs and the pool stays defined; when I scale above 200, then it
+  is refused.
+- Given a pool secret bound as `GH_TOKEN`, then every worker receives it as an environment variable with
+  no change to its code (SEC-6); another pool or an agent cannot be bound to it.
+- Given a pool with the shared named role `afs-cve-remediation` linked in two allowed accounts, then the
+  workers' AWS config has one profile per account; a link in an account outside the filter, or with a
+  different role name, is refused.
+- Given usage by a worker, then reports show it under the pool with the worker pod name, and the audit
+  log records the pool and pod for its actions.
+- Given a persistent team, then *Pools & stages* is not shown and creating a pool is refused.
+
+**US-18 · Dedicated nodes and viewer kubectl.** As a service admin, I want to give a regulated team
+dedicated nodes and let its people inspect their workloads with `kubectl`, so that they get isolation
+and visibility without extra access. *(TEAM-6, ACC-5)*
+- When I set a team's isolation tier to *dedicated*, then its pods run only on its own node pool, other
+  teams' pods never do, and the node cost appears in the team's CUR figures.
+- When a team-admin tries to change the tier or the kubectl switch, then it is refused with
+  `AccessDenied`.
+- Given kubectl is on for a team, when a viewer runs `kubectl get pods` in the namespace, then it works;
+  `kubectl get secret`, `exec`, `port-forward` or any change are denied, and other namespaces are denied.
 
 ## 7. Non-functional requirements
 
@@ -768,8 +872,10 @@ Story ids are traced across levels: product US-n → repository stories (`DB-US-
 | M2 Agents & secrets | AGT-1..4, AGT-7, AGT-9, SEC-1..3, SEC-5, SEC-6, CFG-7, EXT-1, EXT-2, EXT-4..6; console T2–T4, T7, T9, T10, S7, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
 | M3 Spend control | BUD-1..5, OPS-2, RPT-1..5, RPT-7, TAG-1; gateway; activity collector; console T5, S4, S8, T11, T12 | Load test proves the hard cap; alerts fire once per threshold |
 | M4 Production readiness | CFG-4, BUD-6/7/9, TAG-2..6, RPT-9, OPS-1/3, S9, T13, ACC-4, AGT-5/6/10, TEAM-8, EXT-3, EXT-7, RPT-6, RPT-8, CFG-5/6, S5, S6, T8 | DR rebuild drill passes; security review signed off |
-| Phase 2 | TEAM-7, BUD-8, AGT-8 (with the pool shared named role), P2 screen | First POC team runs and tears itself down |
-| Phase 3 | WO-1/2, P3 screen | One CVE remediated across repos within SLA |
+| M5 Budgeted workloads and swarms | TEAM-6, TEAM-7, BUD-8, AGT-8 (with the pool shared named role), ACC-5, TAG-7; P2, P4 screens | First POC team runs and tears itself down; a 20-worker pool runs under one identity |
+| M6 CVE remediation | WO-1..6, security operator role and keys; P3, P5, P6 screens | One CVE remediated across repos within SLA, from an EventBridge event |
+
+Feature complete is M0 to M6. The milestones order the build; nothing in them is deferred.
 
 ## 10. Decisions and risks
 
@@ -791,6 +897,16 @@ Open questions answered by J on 2026-11-21. Each is reflected in the requirement
 | D10 (R3) | Token and model costs affecting budgets | Prices drive budgets, so AFS keeps them current: daily AWS Price List sync proposes changes for service admins to approve, and daily CUR reconciliation alerts on variance above a threshold. AFS has no access to the organization's hierarchy; it comes in through cost allocation tags (D11). (Clarified by J, 2026-11-21; replaces the earlier reading that dropped price sync) | S1, S4, BUD-6, BUD-9 |
 | D11 | Cost allocation tags | System tags `afs-team-id` and `afs-agent-id` always, set by AFS with no configuration; required and fixed service tags; optional team tags; all passed on Bedrock calls and AWS resources and rolled up in reporting | §6.12, S9, T13; schema 000010 |
 | D12 | How agents receive secrets and configuration | Zero impact on the container: everything is injected as environment variables and files; the agent makes no calls. External Secrets Operator stays (J: either it or the CSI driver is fine if the container needs nothing). An on-demand endpoint is a possible later convenience | SEC-6 |
+| D13 | Who schedules reports, and where they go | Team-admins schedule their team's reports, delivered only to the team's own channels (J) | RPT-8; schema `report_schedules` (000011) |
+| D14 | What spend is tracked for external services | Traffic and usage only, attributed by agent or pool; no cost, since AFS cannot know what those services bill (J) | RPT-6, non-goals |
+| D15 | How long a create can be retried safely | 1 hour, stored in the database, as service setting `api.idempotency_key_ttl_seconds` (J chose 1 hour; the setting is Claude's addition so it can change without a migration) | IF-1; schema `idempotency_keys` (000011) |
+| D16 | How a team gets dedicated nodes | Service admins set the isolation tier per team; dedicated node cost goes to the team (J) | TEAM-6; schema `teams.isolation_tier` (000011) |
+| D17 | Where agent sign-ins are recorded | The team's log delivery only; no database table, not in the console (J; replaces the login events of D9) | OPS-4 |
+| D18 | Scope | Feature complete: swarms and pools, ephemeral teams, viewer kubectl, CUR tag status and CVE work orders are all built, with the pool tables in the schema now (J). Security operators are a new service-level role, and security tooling may use a service-level key with that role (Claude, for J's review) | §4, ACC-2, ACC-4, WO-1..6; schema 000012 |
+| D19 | Who switches on viewer kubectl | Service admins, per team, because it grants cluster access (Claude, for J's review) | ACC-5 |
+| D20 | Tag rollups over time | By the tags in effect when the spend happened, not current tags (J). Implemented as immutable per-team tag snapshots on each record | TAG-6; schema `tag_sets` (000011) |
+| D21 | Team-admins changing the team's sign-in provider | Yes, when managing the team (J confirmed) | ACC-1 |
+| D22 | Plumbing for swarms and work orders | Pool handoffs are SQS queues the reconciler creates and delivers to both pools as environment variables; EventBridge work order events are queued to SQS and drained by the reconciler; outside contacts are emailed through one service-level channel named in setting `work_orders.notification_channel_id` (Claude, for J's review) | AGT-8, WO-1, WO-4; schema 000012 |
 
 ### 10.2 Risks
 
@@ -809,7 +925,14 @@ Open questions answered by J on 2026-11-21. Each is reflected in the requirement
 |---|---|
 | Software factory / team | An isolated namespace environment with its agents, people, secrets and budget |
 | Persistent team | Long-running team with a monthly budget |
-| Ephemeral team | Time-boxed team (POC, swarm rental, CVE remediation) with a lifetime cap and expiry |
+| Ephemeral team | Time-boxed team (POC, swarm rental, CVE remediation) with a lifetime cap, expiry and teardown rule |
+| Swarm | An ephemeral team whose work is done by pools (and optionally agents) under one lifetime budget |
+| Pool | One definition with one identity and N worker pods that share it; grouped into stages, handing work to other pools |
+| Worker | One pod of a pool; recorded on its usage, activity, traffic and audit |
+| Swarm template | A service admin's recipe for a remediation team: stages, pools, secrets, cap, time to live |
+| Work order | A job for a remediation team, such as a CVE fix across repositories, with an SLA |
+| Security operator | Service-level role that creates and tracks work orders only |
+| Tag set | Immutable snapshot of a team's tags, stamped on each usage and cost record |
 | Gateway | `afs-gateway`, the metering proxy between agents and Bedrock |
 | Reconciler | `afs-reconciler`, which applies desired state from the database to EKS and AWS |
 | Ceiling | Maximum budget a service admin allows a team-admin to set |

@@ -22,13 +22,16 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 
 **Toolchain confirmed on 2026-11-20:** Go 1.27.4 (latest 1.27 patch on proxy.golang.org) and TypeScript 7.0.2 (npm `typescript@latest`, the native Go-based compiler).
 
-### 1.1 Phases
+### 1.1 Capabilities and build order
 
-| Phase | Capability | Design hooks we build now |
+All three capabilities are in scope for the feature-complete release (J, 2026-11-21). The order is the
+build order only (PRD §9, milestones M0 to M6).
+
+| Order | Capability | Built with |
 |---|---|---|
-| 1 | Long-running teams for development and maintenance | Full build |
-| 2 | Short-term "swarm rentals" for one job with a hard cost cap | `team.kind = ephemeral`, `expires_at`, budget `period = lifetime`, auto-teardown, `work_orders` |
-| 3 | CVE remediation teams | `work_orders` (kind `cve_remediation`, SLA due date), event outbox to EventBridge, notification channels |
+| 1 | Long-running teams for development and maintenance | M0 to M4 |
+| 2 | Short-term "swarm rentals" for one job with a hard cost cap | `teams.kind = ephemeral`, expiry, lifetime budget, teardown rule, pools and stages (§9); M5 |
+| 3 | CVE remediation teams | security operators, swarm templates, `work_orders` with per-repository tracking and notifications, EventBridge intake (§9); M6 |
 
 ## 2. Requirements analysis
 
@@ -49,7 +52,7 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 | F11 | Desired state stored in RDS PostgreSQL, versioned and audited. Exportable as a portable bundle and importable in another account or cluster | J |
 | F12 | Reconciler applies stored state on startup and continuously, recovering from failure and reverting manual drift | J |
 | F13 | Web console, CLI and SDK over one REST API | J |
-| F14 | (Phase 2/3) Ephemeral teams, work orders, event hooks and notifications | J |
+| F14 | Ephemeral teams, swarm pools, work orders, event hooks and notifications (feature complete) | J |
 
 ### 2.2 Non-functional requirements
 
@@ -145,7 +148,7 @@ At higher scale the spend counters move to ElastiCache (Redis/Valkey) with Postg
 
 **afs-billing-ingestor (Go).** Daily job. Reads CUR 2.0 (with EKS split cost allocation enabled) via Athena, attributes Bedrock cost by the `afs-team-id` cost allocation tag on inference profiles and EKS compute by namespace, writes `cost_daily` and `cost_reconciliations` (gateway estimate vs. billed actual, variance). Variance over a threshold (default 3%) raises an alert to service admins and can adjust the model price catalog.
 
-**Event outbox and notifications.** Every mutation writes an `outbox_events` row in the same transaction. A publisher (inside the reconciler process) sends them to an EventBridge bus `afs-events` with at-least-once delivery. Rules route to Slack, email (SES), Jira or team webhooks configured in `notification_channels`. This is the hook for phase 3 CVE workflows (e.g. `work_order.pr_opened` notifies the owning team).
+**Event outbox and notifications.** Every mutation writes an `outbox_events` row in the same transaction. A publisher (inside the reconciler process) sends them to an EventBridge bus `afs-events` with at-least-once delivery. Rules route to Slack, email (SES), Jira or team webhooks configured in `notification_channels`. Work order events (`work_order.created`, `work_order.pr_opened`, `work_order.overdue`, `work_order.closed`) use the same path to notify owning teams (§9.4).
 
 ## 4. Multi-tenancy and isolation
 
@@ -175,6 +178,7 @@ OIDC Authorization Code + PKCE for the web console; OIDC device authorization gr
 | `service_admin` | Global | Everything, including service settings, model catalog and pricing, creating/deleting teams, all teams' data, export/import, audit |
 | `team_admin` | One team | Manage that team's agents, members, budgets (within the limit a service admin set), identities, secrets, configuration, log delivery, notification channels |
 | `team_viewer` | One team | Read that team's configuration, status, usage and audit. Secrets show name, description and reference metadata, never values |
+| `security_operator` | Global, work orders only | Create, cancel and read every work order and its progress; no team access. Also held by service-level API keys for security tooling |
 
 Role bindings can be granted to a user or to an IdP group (`subject_type = group`, matched on the `groups` claim), so enterprises manage membership in the IdP. A person can hold different roles on different teams. Budget **ceilings** (`max_budget_usd`) are set by service admins; team admins set budgets up to that ceiling.
 
@@ -214,6 +218,14 @@ Role bindings can be granted to a user or to an IdP group (`subject_type = group
 | View audit log (team) | ✓ | ✓ | ✓ |
 | Service settings, model catalog, pricing | ✓ | | |
 | Export / import bundles | ✓ | | |
+| Set isolation tier, switch on viewer kubectl | ✓ | | |
+| Create / scale / pause / delete pools and stages (ephemeral teams) | ✓ | ✓ | |
+| View pools, stages, workers | ✓ | ✓ | ✓ |
+| Swarm templates | ✓ | | |
+| Create / cancel work orders, view all (also `security_operator`) | ✓ | | |
+| View work orders assigned to or touching own team | ✓ | ✓ | ✓ |
+| Report repository progress on an assigned work order | ✓ | ✓ | |
+| Issue service-level security operator API keys | ✓ | | |
 
 Each action is a named permission (e.g. `agents:write`, `secrets:read-metadata`). The API's route table declares the permission for each route; one authorization function `Authorize(principal, permission, teamID)` is the only place decisions are made. `GET /v1/me` returns the caller's bindings and effective permissions per team so the CLI and web can hide or disable actions. **The client-side check is UX only; the API is the enforcement point.**
 
@@ -235,7 +247,7 @@ Each agent gets a Kubernetes ServiceAccount `agent-<name>` in its team namespace
   ```
 
   Glob patterns, not regular expressions, because IAM policies match ARNs with wildcards only, so the same pattern can be checked in SQL and rendered into the boundary.
-- Phase 2 swarm pools can use a shared named role: one role name deployed to one or many organization accounts (typically by a CloudFormation StackSet) that trusts the pool's role, with one profile per account. The same filter applies.
+- Swarm pools (`agent_pools`) have their own ServiceAccount `pool-<name>`, a dedicated IAM role `afs/pools/<namespace>/<pool>` with the team's permissions boundary, and optional GitHub or external identities, all shared by the pool's workers (a Deployment). A pool can use a shared named role (`pool_role_links`): one role name deployed to one or many organization accounts (typically by a CloudFormation StackSet) that trusts the pool's role, with one profile per account. The same filter applies. Workers' sessions carry `afs-team-id`, `afs-pool-id` and the worker pod name as session tags.
 - `github_app` installation or other external identity (e.g. a bot account in Jira), credentials held as a referenced secret.
 
 Agent actions in AWS carry session tags `afs-team-id`, `afs-agent-id`, so CloudTrail attributes every call to an agent.
@@ -272,11 +284,11 @@ Reserve → invoke → settle, as in section 3.1. Thresholds emit `budget.thresh
 - Daily reconciled view: from CUR via the ingestor, including EKS compute (split cost allocation by namespace) and any non-gateway spend.
 - Showback/chargeback export by cost center or any tag (CSV via API).
 - Variance: `cost_reconciliations` flags a team-day `over_threshold` when gateway and billed figures differ by more than `billing.variance_alert_pct` (default 5); `afs-billing` emits `cost.variance_detected`.
-- **Credential hygiene.** Agent logs pass through a Fluent Bit redaction filter before delivery: values that look like passwords, tokens or keys, and the values of the agent's bound secrets (loaded as hashes, never as plaintext), are replaced with `[redacted:<8-char hash prefix>]`. Connections to a system's sign-in endpoints are logged as `agent.external_login` events.
+- **Credential hygiene.** Agent logs pass through a Fluent Bit redaction filter before delivery: values that look like passwords, tokens or keys, and the values of the agent's bound secrets (loaded as hashes, never as plaintext), are replaced with `[redacted:<8-char hash prefix>]`. Connections to a system's sign-in endpoints are written to the team's log delivery as `agent.external_login` events (agent or pool worker, system, time); they are not stored in the database (D17).
 - **Agent activity.** An activity collector in `afs-reconciler` writes one `agent_activity` row per running agent every five minutes. It combines the window's `usage_events` (model calls, tokens, cost), the agent's status endpoint (the Agentic Teammates runtime reports busy or idle and a short note of what it is doing), pod CPU and memory from the metrics API, and the pod's phase. *Working* = any model call, a busy report, or CPU above `reports.idle_cpu_millicores` (service setting, default 50). Paused, stopped, unhealthy and budget-blocked agents are recorded as such. `agent_activity_daily` gives time in state and utilization; `agent_activity_current` gives the current state and `idle_since`.
 - **External traffic.** A traffic collector reads Cilium Hubble flow logs (L3/L4 flows with the DNS name each connection was for, and the policy verdict) and writes `external_traffic` rows per agent, host and verdict every five minutes, matched to the agent's external systems. Where an egress proxy terminates HTTP for a system, it adds request and error counts. Denied flows record the reason (system off at service, team or agent level, or not in the catalog), and a spike in denials raises an `egress.denied_spike` event.
-- **Report API.** `GET /v1/reports/{usage|costs|activity|traffic}` (service admins, all teams) and `GET /v1/teams/{teamId}/reports/{…}` and `GET /v1/teams/{teamId}/agents/{agentId}/reports/{…}` take `from`, `to`, `groupBy` (team, agent, model, system, day, hour) and filters, and return JSON or CSV (`Accept: text/csv`). Queries read the daily views for ranges over two days and the five-minute tables otherwise. Scheduled reports are stored per team and delivered through notification channels.
-- **By tag.** `cost_daily_by_tag`, `agent_activity_daily_by_tag` and `external_traffic_daily_by_tag` roll each team's daily figures up to its current tags; the report API takes `groupBy=tag:<key>` and `tag.<key>=<value>` filters.
+- **Report API.** `GET /v1/reports/{usage|costs|activity|traffic}` (service admins, all teams) and `GET /v1/teams/{teamId}/reports/{…}` and `GET /v1/teams/{teamId}/agents/{agentId}/reports/{…}` take `from`, `to`, `groupBy` (team, agent, model, system, day, hour) and filters, and returns JSON or CSV (`Accept: text/csv`). Queries read the daily views for ranges over two days and the five-minute tables otherwise. Scheduled reports (`report_schedules`) are created by team-admins and delivered by `afs-billing` as CSV to one of the team's own notification channels (D13). External traffic is reported as counts and bytes; AFS attaches no cost to external services (D14).
+- **By tag, as it was.** Every `usage_events`, `cost_daily`, `agent_activity` and `external_traffic` row carries a `tag_set_id`: an immutable per-team snapshot of the team's service and team tags when the row was written (`afs.current_team_tag_set(team)`, cached by writers and refreshed on `team.tags_changed`). CUR lines map to tag sets built from the tags AWS billed with. `cost_daily_by_tag`, `agent_activity_daily_by_tag` and `external_traffic_daily_by_tag` roll figures up by those snapshots, so a tag change affects later figures only (D20); the report API takes `groupBy=tag:<key>` and `tag.<key>=<value>` filters.
 - Activity and traffic tables are partitioned by month (`afs.ensure_activity_partition`, `afs.ensure_traffic_partition`); five-minute rows are kept 13 months, daily rollups indefinitely.
 
 ### 7.4 Cost allocation tags
@@ -284,7 +296,7 @@ Reserve → invoke → settle, as in section 3.1. Thresholds emit `budget.thresh
 - **System tags** `afs-team-id` and `afs-agent-id`: set by AFS, never configurable, on every resource and Bedrock call.
 - **Service tags** (`service_tags`): *fixed* (one value for all teams) or *required* (each team supplies a value, optional allowed list and default). A new team must supply required keys without a default in the creating transaction (deferred constraint trigger).
 - **Team tags** (`team_tags`): required values plus optional keys of the team's own; at most 45 including service keys.
-- `team_effective_tags` / `agent_effective_tags` are what the reconciler applies (IAM roles, EBS volumes and snapshots, application inference profiles, Secrets Manager secrets, via `TagResource` on change) and what the gateway sends as Bedrock `requestMetadata` on each call (cached per agent, refreshed on `team.tags_changed`). Pods get `/etc/afs/tags.json` and `AFS_TAGS`. CUR sees the keys once service admins activate them as cost allocation tags.
+- `team_effective_tags` / `agent_effective_tags` are what the reconciler applies (IAM roles, EBS volumes and snapshots, application inference profiles, Secrets Manager secrets, via `TagResource` on change) and what the gateway sends as Bedrock `requestMetadata` on each call (cached per agent, refreshed on `team.tags_changed`). Pods get `/etc/afs/tags.json` and `AFS_TAGS`. CUR sees the keys once service admins activate them as cost allocation tags. `afs-billing` records daily which keys CUR has seen and their activation status (`cost_allocation_tag_status`), and S9 shows a one-time activation notice until a service admin acknowledges it (TAG-7).
 
 ## 8. Desired state, versioning and portability
 
@@ -296,11 +308,52 @@ Reserve → invoke → settle, as in section 3.1. Thresholds emit `budget.thresh
 - **Import:** `POST /v1/imports` with a mapping file (old account id → new, ARN rewrites, cluster id), dry-run by default, showing a plan (create/update/skip) before apply. Secrets must already exist (replicated via Secrets Manager multi-region replication or recreated) in the target account.
 - **Restart behavior:** the reconciler's startup full-reconcile re-applies everything. A brand-new cluster plus a restored DB converges to the full environment with no manual steps.
 
-## 9. Ephemeral teams and work orders (phase 2/3 hooks)
+## 9. Ephemeral teams, swarms and work orders
 
-- `teams.kind = ephemeral`, `expires_at`, lifetime budget. The reconciler tears down on expiry, on budget exhaustion (if configured), or when all work orders complete.
-- `work_orders`: `kind` (`general`, `cve_remediation`), `external_ref` (e.g. `CVE-2026-12345`), `target_repos`, `sla_due_at`, `status`, `results` (PR URLs). Created by the security team via API or an EventBridge integration.
-- A CVE flow: security system → `POST /v1/work-orders` → AFS creates or reuses an ephemeral remediation team with a cap → agents open PRs → `work_order.pr_opened` events → notification to the owning team's channel, tracked against the SLA.
+**Ephemeral teams.** `teams.kind = ephemeral` requires `expires_at` (at most `teams.ephemeral_max_days`
+ahead, default 90), a lifetime budget that blocks at the cap, and `teardown_rule`: `at_expiry`,
+`at_cap_or_expiry` or `at_work_complete`. The database checks these at commit. The reconciler reads
+`teams_due_for_teardown` every minute; for each team it scales agents and pools to zero, applies the IAM
+deny, deletes the namespace and the team's IAM roles, then sets `state = deleted`, `torn_down_at` and
+`teardown_reason` and publishes `team.torn_down`. Configuration revisions, usage and audit stay. A team's
+kind never changes.
+
+**Swarms and pools.** A swarm is an ephemeral team with pools (`agent_pools`), optionally grouped into
+ordered `swarm_stages`, and handoffs between pools (`pool_handoffs`). The reconciler renders each pool as
+a Deployment of `workers` replicas (0 to 200) with the pool's ServiceAccount, a generic ephemeral volume
+of `scratch_size_gib` per worker, and, when `shared_volume = efs`, one EFS access point mounted by every
+worker. Each handoff becomes an SQS queue (`afs-<namespace>-<from>-to-<to>`) that the sending pool may
+write and the receiving pool may read; its URL is delivered as `AFS_HANDOFF_<TO>_QUEUE_URL` and
+`AFS_INBOX_QUEUE_URLS` with no change to the container (SEC-6). Pool secrets (`secrets.pool_id`, path
+`<prefix>/<namespace>/<pool>/<name>`), bindings (`pool_secret_bindings`), configuration
+(`pool_config_values`) and opt-outs follow the agent rules. Pools get a namespace-scoped `NetworkPolicy`
+per pool from `pool_external_access`. Usage, activity and traffic rows carry `pool_id` and `worker_pod`;
+the gateway authenticates a worker by its ServiceAccount token and reads the pod name from the token's
+pod claim.
+
+**Isolation tier and viewer kubectl.** `teams.isolation_tier = dedicated` makes the reconciler create a
+Karpenter NodePool `afs-t-<slug>` with a taint and label for the team, and add the toleration and node
+selector to every pod in the namespace (enforced by admission policy). The NodePool's nodes carry the
+team's tags. `teams.viewer_kubectl` makes the reconciler create an EKS access entry for the identity
+provider's federated role with the access policy `AmazonEKSViewPolicy` scoped to the namespace, minus
+secrets (a namespace Role and RoleBinding for group `afs:<team>:viewers` instead of the managed policy
+where secrets must be excluded).
+
+**Work orders.** Security operators (`role_bindings.role = security_operator`, or a service-level API key
+with that role) call `POST /v1/work-orders`. EventBridge events of detail type `afs.work_order.requested`
+on the service bus go to an SQS queue the reconciler drains, inserting work orders with `source =
+eventbridge` and the event id (deduplicated by a unique constraint). For each open work order with a
+template, the reconciler creates the remediation team from `swarm_templates.spec` (teardown rule
+`at_work_complete`, lifetime budget from the work order or template, expiry from the template's TTL),
+sets `team_id` and `status = assigned`. Agents and pools of that team report progress through
+`PATCH /v1/work-orders/{id}/repos/{host}/{owner}/{repo}` with their team's identity, and the reconciler
+also polls GitHub for the state of recorded pull requests. Notifications (`work_order_notifications`,
+unique per work order, repository, kind and recipient) go to the owning team's channels or, for outside
+contacts, by email through the service-level channel named in setting
+`work_orders.notification_channel_id`. `work_order_progress` gives counts and the SLA state; the
+reconciler sends one SLA warning `work_orders.sla_warning_hours` before due and one breach notice after.
+When every repository is merged, not affected or skipped the work order is done and its team is due for
+teardown.
 
 ## 10. REST API design
 
@@ -310,7 +363,7 @@ Base path `/v1`. JSON. Resource-oriented. camelCase fields. All IDs are prefixed
 
 - Pagination: `?maxResults=50&nextToken=…` → `{ "items": [...], "nextToken": "…" }` (AWS style, maps directly onto CLI `--max-items`/`--starting-token`).
 - Concurrency: `ETag` on GET, `If-Match` required on PUT/PATCH/DELETE.
-- Idempotency: `Idempotency-Key` header on POST.
+- Idempotency: `Idempotency-Key` header on POST, stored per caller in `idempotency_keys` for `api.idempotency_key_ttl_seconds` (default 1 hour). A retry with the same key and body returns the first response; the same key with a different body is `Conflict`; a retry while the first is still running is `Conflict` with `retryAfter`.
 - Errors: `{ "code": "AccessDenied", "message": "...", "requestId": "..." }` with codes `ValidationError`, `NotFound`, `Conflict`, `PreconditionFailed`, `AccessDenied`, `Unauthenticated`, `BudgetExceeded`, `Throttled`, `InternalError`.
 - `X-Request-Id` on every response, stored in audit records.
 - Async status: mutating calls return `202`-style semantics in the body (`status.phase = Pending`) and the client polls or watches `status`.
@@ -344,7 +397,18 @@ GET    /v1/teams/{teamId}/notification-channels   POST, PATCH, DELETE
 GET    /v1/teams/{teamId}/api-keys     POST, DELETE
 GET    /v1/teams/{teamId}/audit-events
 GET    /v1/teams/{teamId}/revisions    POST /v1/teams/{teamId}/revisions/{rev}:restore
-GET    /v1/work-orders                 POST, GET/PATCH /{id}           (phase 2/3)
+GET    /v1/teams/{teamId}/stages      POST, GET/PATCH/DELETE /{stageId}        ephemeral teams
+GET    /v1/teams/{teamId}/pools       POST, GET/PATCH/DELETE /{poolId}         ephemeral teams
+POST   /v1/teams/{teamId}/pools/{poolId}:scale   :pause   :resume
+GET/PUT /v1/teams/{teamId}/pools/{poolId}/secret-bindings, …/config-values, …/handoffs
+GET    /v1/teams/{teamId}/pools/{poolId}/role-links   POST, DELETE /{linkId}, POST /{linkId}:verify
+GET    /v1/teams/{teamId}/pools/{poolId}/workers      current workers and state
+GET    /v1/teams/{teamId}/kubeconfig                  when viewer kubectl is on
+GET    /v1/work-orders                 POST, GET/PATCH /{id}, POST /{id}:cancel
+GET    /v1/work-orders/{id}/repos      POST, PATCH /{host}/{owner}/{repo}
+GET    /v1/work-orders/{id}/notifications
+GET/POST/PATCH/DELETE /v1/admin/swarm-templates   service_admin
+GET    /v1/admin/cost-allocation-tag-status   POST …:acknowledge   service_admin
 GET    /v1/models                      (all roles: enabled models)
 GET/PUT /v1/admin/settings             service_admin
 GET/POST/PATCH/DELETE /v1/admin/identity-providers   service_admin (all roles may GET the sign-in list)
