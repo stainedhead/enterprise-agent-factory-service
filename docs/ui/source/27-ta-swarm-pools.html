@@ -1,0 +1,182 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Agent Factory</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap">
+<style>
+:root{--nav:#0f141a;--nav2:#161d26;--text:#0f141a;--muted:#5f6b7a;--line:#d1d5db;--soft:#e9ebed;
+--bg:#ffffff;--page:#f9fafb;--link:#006ce0;--blue:#006ce0;--blue-d:#004a9e;--green:#00802f;--red:#db0000;
+--amber:#855900;--info-bg:#f0fbff;--info-line:#006ce0;--warn-bg:#fffef0;--warn-line:#855900;--err-bg:#fff5f5;
+--purple:#7300e5}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Open Sans","Helvetica Neue",Arial,sans-serif;font-size:14px;color:var(--text);background:var(--page)}
+a{color:var(--link);text-decoration:none}
+.top{height:40px;background:var(--nav);color:#fff;display:flex;align-items:center;padding:0 16px;gap:16px}
+.brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+.logo{width:22px;height:22px;border-radius:5px;background:linear-gradient(135deg,#3d8bff,#7a4dff);display:grid;place-items:center;font-size:11px}
+.search{flex:0 0 420px;height:28px;border-radius:14px;background:var(--nav2);border:1px solid #414d5c;color:#8c959f;padding:4px 14px;font-size:13px}
+.top .sp{flex:1}
+.top .item{color:#d1d5db;font-size:13px;display:flex;align-items:center;gap:6px}
+.pill{border:1px solid #414d5c;border-radius:12px;padding:2px 10px;font-size:12px;color:#fff}
+.pill.admin{border-color:#ff9900;color:#ffb84d}
+.pill.ta{border-color:#5fa8ff;color:#9ccaff}
+.pill.tv{border-color:#9aa5b1;color:#d1d5db}
+.pill.so{border-color:#ff5d64;color:#ffb3b6}
+.shell{display:flex;min-height:calc(100vh - 40px)}
+.side{width:232px;background:#fff;border-right:1px solid var(--soft);padding:16px 0;flex:0 0 232px}
+.side h4{margin:0 20px 10px;font-size:16px}
+.side .grp{margin:14px 20px 6px;font-size:12px;font-weight:700;color:var(--muted);text-transform:none}
+.side a{display:block;padding:5px 20px;color:var(--text);font-size:14px}
+.side a.on{color:var(--blue);font-weight:700;border-left:3px solid var(--blue);padding-left:17px;background:#f0f7ff}
+.side a.dim{color:#9aa5b1}
+.side hr{border:0;border-top:1px solid var(--soft);margin:12px 20px}
+.team-switch{margin:4px 16px 8px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px;display:flex;justify-content:space-between}
+.main{flex:1;padding:14px 28px 40px;min-width:0}
+.crumbs{font-size:13px;color:var(--muted);margin-bottom:10px}
+.crumbs a{color:var(--link)}
+.hdr{display:flex;align-items:flex-end;justify-content:space-between;margin:6px 0 16px}
+.hdr h1{font-size:24px;margin:0;font-weight:700;display:flex;align-items:center;gap:10px}
+.hdr .desc{color:var(--muted);font-size:14px;margin-top:4px}
+.info{font-size:13px;font-weight:700;color:var(--link)}
+.btns{display:flex;gap:8px}
+.btn{border:2px solid var(--blue);color:var(--blue);background:#fff;border-radius:20px;padding:4px 18px;font-weight:700;font-size:14px;white-space:nowrap}
+.btn.p{background:var(--blue);color:#fff}
+.btn.dis{border-color:#c6c6cd;color:#9aa5b1;background:#fff}
+.btn.p.dis{background:#e9ebed;border-color:#e9ebed;color:#9aa5b1}
+.btn.dd:after{content:" ▾"}
+.btn.sm{padding:2px 12px;font-size:13px}
+.card{background:#fff;border-radius:16px;box-shadow:0 1px 1px rgba(0,7,22,.12),0 0 1px rgba(0,7,22,.15);margin-bottom:20px;overflow:hidden}
+.card>.ch{padding:14px 20px 10px;display:flex;justify-content:space-between;align-items:center}
+.card>.ch h2{font-size:18px;margin:0;font-weight:700}
+.card>.ch h2 .cnt{color:var(--muted);font-weight:400}
+.card>.ch .sub{color:var(--muted);font-size:13px;margin-top:2px}
+.card>.cb{padding:4px 20px 18px}
+.grid{display:grid;gap:20px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+.kv .k{color:var(--muted);font-size:13px;margin-bottom:2px}
+.kv .v{font-size:14px;margin-bottom:14px}
+.big{font-size:30px;font-weight:300;color:var(--blue)}
+.big.g{color:var(--text)}
+.tools{display:flex;gap:10px;align-items:center;padding:0 20px 10px}
+.filter{flex:1;max-width:520px;border:1px solid var(--line);border-radius:8px;padding:5px 12px;color:#8c959f;font-size:13px}
+.sel{border:1px solid var(--line);border-radius:8px;padding:5px 12px;font-size:13px;color:var(--text)}
+.pager{margin-left:auto;display:flex;gap:10px;color:var(--muted);font-size:13px;align-items:center}
+.pager b{color:var(--blue);border:0}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:13px;font-weight:700;padding:8px 12px;border-bottom:1px solid var(--line);white-space:nowrap;background:#fff}
+td a{white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--soft);font-size:14px;vertical-align:middle}
+tr.sel td{background:#f0f7ff}
+tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
+.cb2{width:14px;height:14px;border:2px solid #8c959f;border-radius:3px;display:inline-block;vertical-align:middle}
+.cb2.on{background:var(--blue);border-color:var(--blue)}
+.radio{width:14px;height:14px;border:2px solid #8c959f;border-radius:50%;display:inline-block;vertical-align:middle}
+.radio.on{border:4px solid var(--blue)}
+.st{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.st:before{content:"";width:10px;height:10px;border-radius:50%;background:currentColor}
+.ok{color:var(--green)}.err{color:var(--red)}.warn{color:var(--amber)}.pend{color:var(--muted)}.inf{color:var(--blue)}
+.st.pend:before{background:none;border:2px solid currentColor;width:8px;height:8px}
+.badge{display:inline-block;border-radius:4px;padding:0 6px;font-size:12px;font-weight:700;border:1px solid}
+.b-eph{color:var(--purple);border-color:var(--purple)}
+.b-per{color:var(--muted);border-color:#9aa5b1}
+.b-blue{color:var(--blue);border-color:var(--blue)}
+.mono{font-family:"DejaVu Sans Mono",Menlo,monospace;font-size:12.5px}
+.bar{height:8px;background:var(--soft);border-radius:4px;overflow:hidden;min-width:110px}
+.bar>i{display:block;height:100%;background:var(--blue)}
+.bar.w>i{background:#b38200}.bar.r>i{background:var(--red)}
+.alert{border:2px solid var(--info-line);background:var(--info-bg);border-radius:12px;padding:10px 16px;margin-bottom:16px;display:flex;gap:10px}
+.alert.warn{border-color:var(--warn-line);background:var(--warn-bg);color:var(--text)}
+.alert.err{border-color:var(--red);background:var(--err-bg);color:var(--text)}
+.alert .ic{font-weight:700}
+.rbar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg span{padding:5px 12px;font-size:13px;border-right:1px solid var(--line)}.seg span:last-child{border-right:0}
+.seg span.on{background:var(--blue);color:#fff;font-weight:700}
+.sb{display:flex;align-items:flex-end;gap:5px;height:170px;border-bottom:1px solid var(--line);padding-top:8px}
+.sb .c{flex:1;display:flex;flex-direction:column-reverse}
+.sb .c i{display:block}
+.lg{display:flex;gap:16px;font-size:12.5px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
+.lg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.hm{display:grid;grid-template-columns:150px repeat(24,1fr);gap:2px;font-size:11.5px;align-items:center}
+.hm b{font-weight:400;color:var(--muted);text-align:center}
+.hm .n{font-size:12.5px;white-space:nowrap;overflow:hidden}
+.hm i{display:block;height:18px;border-radius:2px}
+.strip{display:flex;height:22px;border-radius:4px;overflow:hidden}
+.strip i{display:block;height:100%}
+.kpi .big{font-size:26px}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.tg{display:inline-block;width:34px;height:18px;border-radius:9px;background:#9aa5b1;position:relative;vertical-align:middle}
+.tg:after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff}
+.tg.on{background:var(--blue)}.tg.on:after{left:18px}.tg.dis{opacity:.45}
+.b-warn{color:var(--amber);border-color:var(--amber)}
+.alert.warn .ic{color:var(--amber)}.alert .ic{color:var(--blue)}.alert.err .ic{color:var(--red)}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin-bottom:18px}
+.tabs span{padding:8px 16px;font-weight:700;color:var(--muted)}
+.tabs span.on{color:var(--blue);border-bottom:3px solid var(--blue)}
+.field{margin-bottom:16px}
+.field label{display:block;font-weight:700;font-size:14px;margin-bottom:2px}
+.field .hint{color:var(--muted);font-size:13px;margin-bottom:6px}
+.input{border:1px solid #8c959f;border-radius:8px;padding:6px 12px;font-size:14px;background:#fff;min-height:32px}
+.input.ph{color:#8c959f}
+.input.ro{background:#f3f3f7;color:var(--muted);border-color:#c6c6cd}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tile{border:2px solid var(--line);border-radius:12px;padding:12px 14px}
+.tile.on{border-color:var(--blue);background:#f0f7ff}
+.tile b{display:block;margin-bottom:4px}
+.tile span{color:var(--muted);font-size:13px}
+.wiz{display:flex;gap:32px}
+.steps{width:200px;flex:0 0 200px;font-size:13px}
+.steps div{padding:0 0 18px}
+.steps .n{color:var(--muted);font-size:12px}
+.steps .on b{color:var(--text)}
+.steps b{color:var(--link)}
+.steps .todo b{color:#9aa5b1}
+.split{display:flex;gap:20px}
+.chart{height:170px;display:flex;align-items:flex-end;gap:6px;padding:8px 0 0;border-bottom:1px solid var(--line);position:relative}
+.chart .c{flex:1;display:flex;flex-direction:column-reverse;gap:1px}
+.chart .c i{display:block;background:#688ae8;border-radius:2px 2px 0 0}
+.chart .c i.b{background:#c33d69}
+.chart .cap{position:absolute;left:0;right:0;border-top:2px dashed var(--red)}
+.chart .cap span{position:absolute;right:0;top:-18px;font-size:11px;color:var(--red);font-weight:700}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.tip{position:relative;display:inline-block}
+.tipbox{position:absolute;bottom:40px;right:0;background:#0f141a;color:#fff;font-size:12px;padding:6px 10px;border-radius:6px;white-space:nowrap}
+.modalwrap{position:absolute;inset:40px 0 0 0;background:rgba(15,20,26,.55);display:grid;place-items:center}
+.modal{background:#fff;border-radius:16px;width:620px;box-shadow:0 4px 20px rgba(0,7,22,.3)}
+.modal .mh{padding:16px 20px;font-weight:700;font-size:18px;border-bottom:1px solid var(--soft);display:flex;justify-content:space-between}
+.modal .mb{padding:16px 20px}
+.modal .mf{padding:12px 20px;border-top:1px solid var(--soft);display:flex;justify-content:flex-end;gap:8px}
+.foot{position:fixed;bottom:0;left:0;right:0;height:28px;background:var(--nav);color:#9aa5b1;font-size:12px;display:flex;align-items:center;padding:0 16px;gap:20px}
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.tag{display:inline-block;background:#f3f3f7;border-radius:4px;padding:1px 6px;font-size:12px;margin-right:4px}
+.code{background:#0f141a;color:#d1d5db;border-radius:8px;padding:10px 14px;font-family:"DejaVu Sans Mono",monospace;font-size:12px;line-height:1.6}
+</style></head><body>
+<header class="top"><div class="brand"><div class="logo">AF</div>Agent Factory</div>
+<div class="search">Search teams, agents, secrets, work orders  [Alt+S]</div><div class="sp"></div>
+<span class="item">us-east-1 · prod</span><span class="item">🔔</span><span class="pill ta">Team-admin · cve-2026-41873-swarm</span>
+<span class="item">Marcus Chen ▾</span></header>
+<div class="shell"><nav class="side"><h4>Agent Factory</h4><div class="team-switch"><span><b>cve-2026-41873-swarm</b></span><span class="muted">▾</span></div><div class="grp">Team</div><a class="">Overview</a><a class="">Agents</a><a class="on">Pools & stages</a><a class="">Members & access</a><a class="">API keys</a><div class="grp">Configuration</div><a class="">Secrets</a><a class="">Configuration values</a><a class="">Agent identities</a><a class="">External systems</a><a class="">Models</a><a class="">Log delivery</a><a class="">Notifications</a><div class="grp">Cost</div><a class="">Budget & usage</a><a class="">Reports</a><a class="">Cost tags</a><div class="grp">History</div><a class="">Activity & audit</a><a class="">Config revisions</a><hr><a class="dim">Documentation ↗</a><a class="dim">CLI reference ↗</a></nav><main class="main">
+<div class="crumbs"><a>Agent Factory</a> › <a>cve-2026-41873-swarm</a> › Pools &amp; stages</div>
+<div class="hdr"><div><h1>Pools &amp; stages <span class="badge b-eph">Ephemeral</span> <span class="info">Info</span></h1>
+<div class="desc">Work order <a>CVE-2026-41873</a> · tears down when the work order completes, or at expiry Nov 27 00:00 UTC</div></div>
+<div class="btns"><span class="btn">Add stage</span><span class="btn dd">Actions</span><span class="btn p">Create pool</span></div></div>
+<div class="grid g4">
+<div class="card"><div class="cb"><div class="k small muted">Lifetime budget</div><div class="v"><b>$312.40</b> of $500.00</div><div class="bar "><i style="width:62%"></i></div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Workers</div><div class="v"><b>23</b> of 24 desired reporting</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Repositories</div><div class="v">14 · 11 PRs open · 3 merged</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">SLA</div><div class="v"><span class="st warn">Due soon</span> Nov 22 18:00 UTC</div></div></div></div>
+<div class="card"><div class="ch"><div><h2>Stage 1 · scan <span class="cnt">(1 pool)</span></h2><div class="sub">Finds affected modules and writes a fix plan per repository</div></div></div>
+<table><tr><th></th><th>Pool</th><th>Template</th><th>Model</th><th>Workers</th><th>Status</th><th>Hands work to</th><th>Storage</th><th>Shared role</th><th>Spend</th></tr>
+<tr><td><span class="radio"></span></td><td><a>dep-scanner</a></td><td>dependency-scanner</td><td>claude-haiku</td><td class="num">4</td><td>4 reporting · 1 working · 3 idle · 0 impaired</td><td>pr-writer</td><td>Scratch 20 GiB</td><td class="small">—</td><td class="num">$18.90</td></tr>
+</table></div>
+<div class="card"><div class="ch"><div><h2>Stage 2 · fix <span class="cnt">(2 pools)</span></h2><div class="sub">Edits, tests and opens pull requests</div></div></div>
+<table><tr><th></th><th>Pool</th><th>Template</th><th>Model</th><th>Workers</th><th>Status</th><th>Hands work to</th><th>Storage</th><th>Shared role</th><th>Spend</th></tr>
+<tr><td><span class="radio"></span></td><td><a>pr-writer</a></td><td>java-maintainer</td><td>claude-sonnet</td><td class="num">16</td><td>15 reporting · 12 working · 3 idle · <span class="warn">1 impaired</span></td><td>pr-reviewer</td><td>Scratch 40 GiB + shared EFS</td><td class="small">afs-cve-remediation · 3 accounts ✓</td><td class="num">$268.10</td></tr>
+<tr><td><span class="radio"></span></td><td><a>pr-reviewer</a></td><td>code-reviewer</td><td>claude-sonnet</td><td class="num">4</td><td>4 reporting · 2 working · 2 idle · 0 impaired</td><td>—</td><td>Scratch 20 GiB</td><td class="small">—</td><td class="num">$25.40</td></tr>
+</table></div>
+<div class="grid g2">
+<div class="card"><div class="ch"><h2>Handoffs</h2></div><div class="cb small">
+<div>dep-scanner → pr-writer · queue <span class="mono">afs-cve-2026-41873-swarm-pr-writer</span> · 3 waiting</div>
+<div>pr-writer → pr-reviewer · queue <span class="mono">afs-cve-2026-41873-swarm-pr-reviewer</span> · 1 waiting</div>
+<div class="muted" style="margin-top:6px">Workers get the queue URLs as <span class="mono">AFS_HANDOFF_*_QUEUE_URL</span> and <span class="mono">AFS_INBOX_QUEUE_URL</span>.</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Equivalent CLI</div><div class="code">afs pools scale-pool --team-id team_01JD3Z… --pool-id pool_01JD3Z… --workers 20</div></div></div></div>
+</main></div></body></html>

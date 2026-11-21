@@ -26,6 +26,7 @@ a{color:var(--link);text-decoration:none}
 .pill.admin{border-color:#ff9900;color:#ffb84d}
 .pill.ta{border-color:#5fa8ff;color:#9ccaff}
 .pill.tv{border-color:#9aa5b1;color:#d1d5db}
+.pill.so{border-color:#ff5d64;color:#ffb3b6}
 .shell{display:flex;min-height:calc(100vh - 40px)}
 .side{width:232px;background:#fff;border-right:1px solid var(--soft);padding:16px 0;flex:0 0 232px}
 .side h4{margin:0 20px 10px;font-size:16px}
@@ -162,8 +163,10 @@ ROLE_PILL = {
     "admin": '<span class="pill admin">Service admin</span>',
     "ta": '<span class="pill ta">Team-admin · payments-factory</span>',
     "tv": '<span class="pill tv">Team viewer · payments-factory</span>',
+    "so": '<span class="pill so">Security operator</span>',
+    "sw": '<span class="pill ta">Team-admin · cve-2026-41873-swarm</span>',
 }
-USER = {"admin": "Priya Raman", "ta": "Marcus Chen", "tv": "Dana Ortiz"}
+USER = {"admin": "Priya Raman", "ta": "Marcus Chen", "tv": "Dana Ortiz", "so": "Sam Okafor", "sw": "Marcus Chen"}
 
 
 def admin_nav(on):
@@ -171,13 +174,13 @@ def admin_nav(on):
         ("grp", "Service"), ("dash", "Dashboard"), ("teams", "Teams"), ("wo", "Work orders"),
         ("grp", "Governance"), ("budgets", "Budgets & ceilings"), ("reports", "Reports & analytics"), ("costs", "Cost reconciliation"), ("tags", "Cost allocation tags"),
         ("audit", "Audit log"),
-        ("grp", "Platform"), ("models", "Model catalog & pricing"), ("templates", "Agent templates"),
+        ("grp", "Platform"), ("models", "Model catalog & pricing"), ("templates", "Agent templates"), ("swarmt", "Swarm templates"),
         ("external", "External systems"), ("settings", "Service settings"), ("export", "Export & import"),
     ]
     return nav("Agent Factory", items, on)
 
 
-def team_nav(on, role):
+def team_nav(on, role, team="payments-factory", swarm=False):
     items = [
         ("grp", "Team"), ("overview", "Overview"), ("agents", "Agents"), ("members", "Members & access"),
         ("grp", "Configuration"), ("secrets", "Secrets"), ("config", "Configuration values"), ("identities", "Agent identities"),
@@ -186,9 +189,11 @@ def team_nav(on, role):
         ("grp", "Cost"), ("budget", "Budget & usage"), ("reports", "Reports"), ("tags", "Cost tags"),
         ("grp", "History"), ("activity", "Activity & audit"), ("revisions", "Config revisions"),
     ]
-    if role == "ta":
+    if role in ("ta", "sw"):
         items.insert(4, ("keys", "API keys"))
-    switch = '<div class="team-switch"><span><b>payments-factory</b></span><span class="muted">▾</span></div>'
+    if swarm:
+        items.insert(3, ("pools", "Pools & stages"))
+    switch = f'<div class="team-switch"><span><b>{team}</b></span><span class="muted">▾</span></div>'
     return nav("Agent Factory", items, on, switch)
 
 
@@ -970,7 +975,7 @@ page("14-admin-ephemeral-team", "admin", admin_nav("teams"), f"""
 
 page("15-admin-work-orders", "admin", admin_nav("wo"), f"""
 <div class="crumbs"><a>Agent Factory</a> › Work orders</div>
-<div class="alert"><span class="ic">ⓘ</span><div><b>Phase 3 preview.</b> Security creates CVE work orders through the API or EventBridge. Agent Factory assigns a capped remediation team, tracks PRs and notifies owning teams against the SLA.</div></div>
+<div class="hdr"><div><h1>Work orders <span class="info">Info</span></h1><div class="desc">Security creates CVE work orders through the console, CLI, API or EventBridge. Agent Factory assigns a capped remediation team from a swarm template, tracks a PR per repository and notifies owning teams against the SLA.</div></div></div>
 <div class="card"><div class="ch"><div><h2>Work orders <span class="cnt">(4 open)</span> <span class="info">Info</span></h2></div>
 <div class="btns"><span class="btn dd">Actions</span><span class="btn p">Create work order</span></div></div>
 <div class="tools"><div class="filter">🔍 Find by CVE, repo or owning team</div><span class="sel">Open ▾</span><div class="pager">‹ <b>1</b> › ⚙</div></div>
@@ -1053,6 +1058,92 @@ page("26-ta-team-tags", "ta", team_nav("tags", "ta"), f"""
 <div>• Each agent's pod, as <span class="mono">/etc/afs/tags.json</span> and <span class="mono">AFS_TAGS</span>, so an agent can pass them to other services if it wants</div></div></div>
 <div class="card"><div class="cb"><div class="k small muted">Equivalent CLI</div><div class="code">afs teams put-team-tags --team-id team_01JD3Z… --tags project=ledger-modernization initiative=FY27-reliability</div></div></div>
 </div>
+""")
+
+
+# ------------------------------------------------------------------------------------------------
+# Swarms, swarm templates and work order detail (000012)
+# ------------------------------------------------------------------------------------------------
+
+def pool_row(n, tmpl, model, desired, rep_, work, idle, imp, hand, store, role, spend):
+    impc = f'<span class="warn">{imp} impaired</span>' if imp else "0 impaired"
+    return (f'<tr><td><span class="radio"></span></td><td><a>{n}</a></td><td>{tmpl}</td><td>{model}</td>'
+            f'<td class="num">{desired}</td><td>{rep_} reporting · {work} working · {idle} idle · {impc}</td>'
+            f'<td>{hand}</td><td>{store}</td><td class="small">{role}</td><td class="num">{spend}</td></tr>')
+
+page("27-ta-swarm-pools", "sw", team_nav("pools", "sw", "cve-2026-41873-swarm", True), f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>cve-2026-41873-swarm</a> › Pools &amp; stages</div>
+<div class="hdr"><div><h1>Pools &amp; stages <span class="badge b-eph">Ephemeral</span> <span class="info">Info</span></h1>
+<div class="desc">Work order <a>CVE-2026-41873</a> · tears down when the work order completes, or at expiry Nov 27 00:00 UTC</div></div>
+<div class="btns"><span class="btn">Add stage</span><span class="btn dd">Actions</span><span class="btn p">Create pool</span></div></div>
+<div class="grid g4">
+<div class="card"><div class="cb"><div class="k small muted">Lifetime budget</div><div class="v"><b>$312.40</b> of $500.00</div>{bar(62)}</div></div>
+<div class="card"><div class="cb"><div class="k small muted">Workers</div><div class="v"><b>23</b> of 24 desired reporting</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Repositories</div><div class="v">14 · 11 PRs open · 3 merged</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">SLA</div><div class="v">{st('warn','Due soon')} Nov 22 18:00 UTC</div></div></div></div>
+<div class="card"><div class="ch"><div><h2>Stage 1 · scan <span class="cnt">(1 pool)</span></h2><div class="sub">Finds affected modules and writes a fix plan per repository</div></div></div>
+<table><tr><th></th><th>Pool</th><th>Template</th><th>Model</th><th>Workers</th><th>Status</th><th>Hands work to</th><th>Storage</th><th>Shared role</th><th>Spend</th></tr>
+{pool_row("dep-scanner", "dependency-scanner", "claude-haiku", 4, 4, 1, 3, 0, "pr-writer", "Scratch 20 GiB", "—", "$18.90")}
+</table></div>
+<div class="card"><div class="ch"><div><h2>Stage 2 · fix <span class="cnt">(2 pools)</span></h2><div class="sub">Edits, tests and opens pull requests</div></div></div>
+<table><tr><th></th><th>Pool</th><th>Template</th><th>Model</th><th>Workers</th><th>Status</th><th>Hands work to</th><th>Storage</th><th>Shared role</th><th>Spend</th></tr>
+{pool_row("pr-writer", "java-maintainer", "claude-sonnet", 16, 15, 12, 3, 1, "pr-reviewer", "Scratch 40 GiB + shared EFS", "afs-cve-remediation · 3 accounts ✓", "$268.10")}
+{pool_row("pr-reviewer", "code-reviewer", "claude-sonnet", 4, 4, 2, 2, 0, "—", "Scratch 20 GiB", "—", "$25.40")}
+</table></div>
+<div class="grid g2">
+<div class="card"><div class="ch"><h2>Handoffs</h2></div><div class="cb small">
+<div>dep-scanner → pr-writer · queue <span class="mono">afs-cve-2026-41873-swarm-pr-writer</span> · 3 waiting</div>
+<div>pr-writer → pr-reviewer · queue <span class="mono">afs-cve-2026-41873-swarm-pr-reviewer</span> · 1 waiting</div>
+<div class="muted" style="margin-top:6px">Workers get the queue URLs as <span class="mono">AFS_HANDOFF_*_QUEUE_URL</span> and <span class="mono">AFS_INBOX_QUEUE_URL</span>.</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Equivalent CLI</div><div class="code">afs pools scale-pool --team-id team_01JD3Z… --pool-id pool_01JD3Z… --workers 20</div></div></div></div>
+""")
+
+page("28-admin-swarm-templates", "admin", admin_nav("swarmt"), f"""
+<div class="crumbs"><a>Agent Factory</a> › Swarm templates</div>
+<div class="hdr"><div><h1>Swarm templates <span class="info">Info</span></h1><div class="desc">The shape of the remediation teams that work orders create: stages, pools, handoffs, secrets and the default cap.</div></div>
+<div class="btns"><span class="btn dd">Actions</span><span class="btn p">Create template</span></div></div>
+<div class="card"><div class="ch"><div><h2>Templates <span class="cnt">(3)</span></h2></div></div>
+<div class="tools"><div class="filter">🔍 Find templates</div><div class="pager">‹ <b>1</b> › ⚙</div></div>
+<table><tr><th></th><th>Name</th><th>Kind</th><th>Stages · pools</th><th>Default cap</th><th>Time to live</th><th>Teardown</th><th>Used by</th><th>State</th></tr>
+<tr><td><span class="radio on"></span></td><td><a>java-cve-remediation</a></td><td>CVE remediation</td><td>2 · 3</td><td class="num">$500</td><td>7 days</td><td>When the work order completes</td><td>2 open work orders</td><td>{st('ok','Enabled')}</td></tr>
+<tr><td><span class="radio"></span></td><td><a>base-image-rebuild</a></td><td>CVE remediation</td><td>1 · 2</td><td class="num">$1,200</td><td>14 days</td><td>When the work order completes</td><td>1 open work order</td><td>{st('ok','Enabled')}</td></tr>
+<tr><td><span class="radio"></span></td><td><a>config-sweep</a></td><td>General</td><td>1 · 1</td><td class="num">$150</td><td>3 days</td><td>At cap or expiry</td><td>—</td><td>{st('pend','Disabled')}</td></tr></table></div>
+<div class="card"><div class="ch"><div><h2>java-cve-remediation</h2><div class="sub">Revision 4 · changed Nov 12 by priya.raman</div></div><div class="btns"><span class="btn sm">Edit</span><span class="btn sm">Disable</span></div></div>
+<table><tr><th>Stage</th><th>Pool</th><th>Template · model</th><th>Workers</th><th>Storage</th><th>Shared role</th><th>Secrets the pool needs</th></tr>
+<tr><td>1 · scan</td><td class="mono">dep-scanner</td><td>dependency-scanner · claude-haiku</td><td>4</td><td>Scratch 20 GiB</td><td>—</td><td class="mono small">github-app-key (bound from service)</td></tr>
+<tr><td>2 · fix</td><td class="mono">pr-writer</td><td>java-maintainer · claude-sonnet</td><td>16</td><td>Scratch 40 GiB + EFS</td><td class="mono small">afs-cve-remediation</td><td class="mono small">github-app-key, maven-mirror-token (team fills)</td></tr>
+<tr><td>2 · fix</td><td class="mono">pr-reviewer</td><td>code-reviewer · claude-sonnet</td><td>4</td><td>Scratch 20 GiB</td><td>—</td><td class="mono small">github-app-key</td></tr></table>
+<div class="cb small muted">Handoffs: dep-scanner → pr-writer → pr-reviewer. Secrets the team fills are created empty; their values never pass through Agent Factory's database.</div></div>
+<div class="card"><div class="cb"><div class="k small muted">Equivalent CLI</div><div class="code">afs swarm-templates create-swarm-template --cli-input-json file://java-cve-remediation.json</div></div></div>
+""")
+
+def wo_repo(repo, owner, status, pr, notes):
+    return f'<tr><td class="mono">{repo}</td><td>{owner}</td><td>{status}</td><td>{pr}</td><td class="small muted">{notes}</td></tr>'
+
+page("29-sec-work-order-detail", "so", nav("Agent Factory", [("grp", "Security"), ("wo", "Work orders")], "wo"), f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>Work orders</a> › CVE-2026-41873</div>
+<div class="hdr"><div><h1>CVE-2026-41873 <span class="badge b-eph">Critical</span> <span class="info">Info</span></h1>
+<div class="desc">netty: HTTP/2 request smuggling · source EventBridge (security-scanner) · created Nov 18 09:12 UTC</div></div>
+<div class="btns"><span class="btn">Add repositories</span><span class="btn">Cancel work order</span></div></div>
+<div class="grid g4">
+<div class="card"><div class="cb"><div class="k small muted">Status</div><div class="v">{st('inf','PRs opened')}</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">SLA due</div><div class="v">Nov 22 18:00 UTC · {st('warn','Due soon')}</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Remediation team</div><div class="v"><a>cve-2026-41873-swarm</a> · java-cve-remediation</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Spend against cap</div><div class="v"><b>$312.40</b> of $500.00</div>{bar(62)}</div></div></div>
+<div class="card"><div class="ch"><div><h2>Repositories <span class="cnt">(14)</span></h2><div class="sub">11 PRs open · 3 merged · 0 not affected · 0 failed</div></div></div>
+<div class="tools"><div class="filter">🔍 Find by repository or owner</div><span class="sel">All statuses ▾</span><div class="pager">‹ <b>1</b> 2 › ⚙</div></div>
+<table><tr><th>Repository</th><th>Owner</th><th>Status</th><th>Pull request</th><th>Notifications sent</th></tr>
+{wo_repo("payments/ledger-core", "payments-factory", st('ok','Merged'), '<a>#4182</a>', "Assigned Nov 18 · PR opened Nov 19 · Merged Nov 20")}
+{wo_repo("payments/merchant-api", "payments-factory", st('inf','PR opened'), '<a>#977</a>', "Assigned Nov 18 · PR opened Nov 20")}
+{wo_repo("claims/intake-service", "claims-factory", st('inf','PR opened'), '<a>#311</a>', "Assigned Nov 18 · PR opened Nov 20 · SLA warning Nov 20")}
+{wo_repo("vendor/edi-gateway", "edi-support@example.com (outside AFS)", st('ok','In progress'), "—", "Emailed Nov 18 · SLA warning Nov 20")}
+{wo_repo("claims/fraud-rules", "claims-factory", st('pend','Pending'), "—", "Assigned Nov 18")}
+</table></div>
+<div class="grid g2">
+<div class="card"><div class="ch"><h2>Owning teams</h2></div><div class="cb small">
+<div>payments-factory · 6 repositories · channel #payments-alerts</div><div>claims-factory · 7 repositories · channel #claims-oncall</div>
+<div>Outside contacts · 1 repository · service email channel</div><div class="muted" style="margin-top:6px">Each owner is notified once per event: assigned, PR opened, merged, SLA warning (48 h before due), SLA breached and completion.</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Equivalent CLI</div><div class="code">afs work-orders describe-work-order --work-order-id wo_01JD3Z…</div></div></div></div>
 """)
 
 print("\n".join(sorted(p.name for p in OUT.glob("*.html"))))

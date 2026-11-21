@@ -1,10 +1,10 @@
 # Product details
 
-Feature-level description of AFS for product owners and adopters. Seeded from
+Feature-level description of AFS for product owners and adopters. Everything below is in scope for feature complete; the order is build order only (ADR-014). Seeded from
 [solution-design.md](solution-design.md) sections 1, 2 and 9; filled in as features are specified.
 
-## Phase 1: long-running development and maintenance teams
+## Long-running development and maintenance teams (built first)
 
-## Phase 2: swarm rentals with hard cost caps
+## Swarms, ephemeral teams and budgeted POCs with hard cost caps
 
-## Phase 3: CVE remediation teams
+## CVE remediation work orders

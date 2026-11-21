@@ -14,6 +14,7 @@ cross-repo specs. The code lives in four child repositories.
 | [INTENT.md](INTENT.md) | Why the product exists, goals and non-goals |
 | [enterprise-agent-factory-service-initial-PRD.md](enterprise-agent-factory-service-initial-PRD.md) | Requirements and the console UI by role |
 | [docs/solution-design.md](docs/solution-design.md) | Architecture: tenancy, identity, secrets, budgets, API and CLI |
+| [docs/contracts/](docs/contracts/README.md) | Shared contracts: [database](docs/contracts/database-contract.md), [API](docs/contracts/api-contract.md) and [gateway](docs/contracts/gateway-contract.md) |
 | [AGENTS.md](AGENTS.md) | Rules for agents and contributors |
 
 ## The repositories

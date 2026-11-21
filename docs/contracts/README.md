@@ -1,6 +1,6 @@
 # Contracts between layers
 
-AFS is built in four repositories that change independently. Two contracts keep them compatible. Each
+AFS is built in four repositories that change independently. Three contracts keep them compatible. Each
 repository PRD names the contracts it provides and consumes, and its acceptance criteria include
 conformance tests against them.
 
@@ -10,6 +10,7 @@ conformance tests against them.
             └──────── API contract ────┘          api-contract.md  (OpenAPI: -restapi/api/openapi.yaml)
                           │
                   -restapi (afs-api, afs-reconciler, afs-gateway, afs-billing)
+                          │      └──── Gateway contract ──── agents (Agentic Teammates runtime)   gateway-contract.md
                           │
                   Database contract                database-contract.md (dictionary: -db/docs/data-model.md)
                           │
@@ -20,6 +21,7 @@ conformance tests against them.
 |---|---|---|---|---|
 | [Database contract](database-contract.md) | `-db` | `-restapi` | Migrations at a `-db` tag; dictionary in `-db/docs/data-model.md` | `-db` integration tests; `-restapi` repository tests against the pinned tag |
 | [API contract](api-contract.md) | `-restapi` | `-cli`, `-website` | `-restapi/api/openapi.yaml`, built from this document | `-restapi` handler tests per operation and role; generated clients plus contract tests in `-cli` and `-website` |
+| [Gateway contract](gateway-contract.md) | `-restapi` (`afs-gateway`) | Agents, Agentic Teammates runtime | This document | `-restapi` conformance suite with the Bedrock and Anthropic SDKs against a fake Bedrock |
 
 Rules:
 

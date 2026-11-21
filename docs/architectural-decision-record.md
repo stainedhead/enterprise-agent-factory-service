@@ -10,7 +10,7 @@ Accepted, Proposed (needs review), Superseded.
   different toolchains, owners and release cadences.
 - Decision: docs-only root `enterprise-agent-factory-service` plus `-db`, `-restapi`, `-cli` and
   `-website`, cloned inside the root and git-ignored by it. No submodules. The TypeScript SDK lives in
-  `-website` as `packages/sdk` (a pnpm workspace package, publishable on its own). The reconciler, gateway
+  `-website` as `packages/sdk` (a Bun workspace package, publishable on its own; amended 2026-11-21, pnpm was replaced by Bun, website ADR-004). The reconciler, gateway
   and billing services live in `-restapi` with the API, because they share its domain, authorization and
   store packages.
 - Consequences: each child has its own AGENTS.md, CI and releases. `-restapi` imports `-db` as a Go module
@@ -50,11 +50,10 @@ Accepted, Proposed (needs review), Superseded.
   example a GitHub App installation) and audit trail. Replicas of one agent would share that identity,
   with no sensible way to split work between them.
 - Decision: no replica count. The reconciler renders each agent as a StatefulSet with exactly one
-  replica; pause scales it to zero. A team adds capacity by adding agents. The exception is the phase 2
+  replica; pause scales it to zero. A team adds capacity by adding agents. The exception is the
   swarm (AGT-8): a swarm holds several pools of different identities that work together; each pool has
   one identity and a worker count, and its workers share that identity because they do similar work
-  across many repositories. Swarm → pools (one identity, N workers) → worker pods. Its schema lands with
-  phase 2 as a new migration.
+  across many repositories. Swarm → pools (one identity, N workers) → worker pods. Its schema is db migration 000012.
 - Consequences: `agents.replicas` is dropped (db migration 000003); the console and CLI have no scale
   action. Every action in AWS, GitHub or the audit log maps to exactly one running agent.
 
@@ -79,7 +78,7 @@ Accepted, Proposed (needs review), Superseded.
   encrypted, gp3 by default) mounted at `/var/lib/agent`. Size, storage class, on-delete rule and
   snapshot schedule are part of the agent definition. PVC retention is `Retain`; the reconciler alone
   deletes volumes, after a final snapshot by default. Snapshots are recorded in the database and
-  referenced by export bundles. Phase 2 pool workers get ephemeral scratch volumes, with an optional
+  referenced by export bundles. Swarm pool workers get ephemeral scratch volumes, with an optional
   shared EFS volume per pool.
 - Consequences: volumes grow but never shrink, and the class is fixed after creation. An agent is tied
   to its volume's Availability Zone until restored from a snapshot elsewhere. Storage counts toward team
@@ -107,13 +106,13 @@ Accepted, Proposed (needs review), Superseded.
   the organization. J also asked for a team-level list of the accounts a team may reach, with `*` for
   all accounts or specific accounts named.
 - Decision: an agent runs with its team's shared role or with a dedicated role
-  `afs/agents/<namespace>/<agent>`. A dedicated agent can be linked to roles in other organization
+  `/afs/<namespace>/afs-<agent id>` (path `/afs/<namespace>/`, name by immutable id; amended 2026-11-21 per root D25). A dedicated agent can be linked to roles in other organization
   accounts; each link carries a target role ARN, a profile name and an AFS-generated external ID, and the
   target account owner adds a trust policy AFS shows. Each team has an allowed-accounts filter of glob
   patterns over account ids and names, recommended to be set by service admins. The filter is enforced
   in the API, in the database by trigger and in the team's IAM permissions boundary. The reconciler
   mirrors AWS Organizations, grants `sts:AssumeRole` per link, writes an AWS config file with one profile
-  per link, and verifies each link by assuming it. Phase 2 swarm pools can use one shared named role
+  per link, and verifies each link by assuming it. Swarm pools can use one shared named role
   across several accounts.
 - Consequences: globs rather than regular expressions, so the same filter works in SQL and IAM.
   Cross-account access needs one manual step in each target account (the trust policy), and links stay
@@ -191,3 +190,88 @@ Accepted, Proposed (needs review), Superseded.
   `model_price_proposals`, settings `pricing.price_list_sync` and `billing.variance_alert_pct`). PRD
   §6.12, SEC-6, BUD-9, RPT-9, screens S9 and T13; S1, S3 and S4 updated. The website moved to Bun
   (website ADR-004).
+
+## ADR-014 Feature-complete scope, as-of tag snapshots, swarms and work orders
+
+- Status: Accepted (J, 2026-11-21; items marked *Claude* are for J's review)
+- Context: J set the implementation target to feature complete: swarms and pools, ephemeral teams,
+  budgeted POCs and CVE work orders are in scope with full stories and acceptance criteria, and phases
+  are build order only. J also answered the five database gaps and asked that spend roll up by the tags
+  in effect when it happened.
+- Decision:
+  - **As-of tags.** Usage, activity, traffic and daily cost rows carry an immutable `tag_set_id`
+    snapshot (`afs.tag_sets`, content-addressed, system tags excluded). Rollups by tag read the snapshot,
+    not current tags. External systems are attributed by agent and reported as traffic, with no dollars
+    unless a cost is actually known.
+  - **Report schedules** are owned by team-admins and delivered only to the team's own channels.
+  - **Isolation tier** (`shared` | `dedicated`) is set per team by service admins; dedicated node cost
+    is charged to the team.
+  - **Idempotency keys** are stored in the database for 1 hour (service setting
+    `api.idempotency_key_ttl_seconds`, *Claude*: made a setting rather than a constant).
+  - **Agent sign-ins** to external systems go to logs only (team log delivery); no table, not in the
+    console.
+  - **Ephemeral teams and budgeted POCs.** Teams carry `kind` (`persistent` | `ephemeral`), `expires_at`,
+    `teardown_rule` (`at_expiry` | `at_cap_or_expiry` | `at_work_complete`) and a lifetime budget; the
+    reconciler tears them down when due. (Amended 2026-11-21 to the names in the schema and the API
+    contract.)
+  - **Swarms.** An ephemeral team holds ordered stages; each stage holds pools; each pool has one
+    identity and a worker count rendered as a Deployment. Pools hand work to other pools through SQS
+    queues delivered as environment variables (*Claude*).
+  - **Work orders.** A service-level `security_operator` role (*Claude*), which service-level API keys may
+    hold, creates CVE work orders by API or by EventBridge event (queued to SQS and drained by the
+    reconciler, *Claude*). Work orders are tracked per repository with SLA state; owning teams are
+    notified once per event, and contacts outside AFS through the service-level channel named in
+    `work_orders.notification_channel_id` (*Claude*).
+  - **Viewer kubectl** (read-only kubeconfig for team viewers) is enabled per team by service admins
+    only (*Claude*).
+- Consequences: db migrations 000011 and 000012. New permissions and operations in the API contract;
+  new CLI services (`pools`, `swarm-templates`, `work-orders`) and console screens 27–29.
+  `role_bindings` stays without RLS (read through the API's own checks; superseded by ADR-015, which adds
+  RLS and guards in `-db` 000013). Decisions D13 to D22 in the root PRD record the detail.
+
+## ADR-015 Answers to the PRD review: contracts, AWS limits, lifecycle and hardening
+
+- Status: Accepted (J, 2026-11-21); D38 revised by J: work order repositories without an explicit owner
+  are resolved from each team's `AFS_OWNED_REPOS` configuration value (`-db` 000014
+  `afs.resolve_repo_owners`)
+- Context: a `review-prd` pass over the root and the four repository PRDs found contradictions between
+  documents (permissions, status words, error codes, event and environment names), behaviours AWS cannot
+  deliver as written (IAM and SQS name limits, Pod Identity session tags, tag limits), no contract for
+  the agent-to-gateway interface, and gaps in the schema's guards. Under J's standing instruction to
+  work out answers, Claude decided D23 to D57 (root PRD §10.1) and opened OQ-1 to OQ-9 (§10.3).
+- Decision:
+  - **One source per fact.** The API contract is the only list of operations, CLI and SDK names,
+    permissions, enums and events; the solution design and repository PRDs point to it. Status words
+    are the contract's `phase` and `state`; budget exhaustion is the condition `BudgetExhausted` (D24).
+  - **Permissions.** Report schedules for team-admins and service admins only (D23); viewers do not see
+    API keys (D50); security operators also list templates and the team directory, and get `403` on every
+    team route (D37, D38, D56); agents and pools call `afs-api` as workload principals that only report
+    work order progress (D29).
+  - **AWS within its limits.** Roles and queues named by id (D25); team and agent attribution through
+    role tags, Pod Identity's own session tags and `role_session_name` (D26, D51); at most 40 tags per
+    resource and 16 Bedrock metadata pairs (D27).
+  - **Gateway contract.** A third shared contract: Bedrock Runtime and Anthropic Messages compatible
+    paths, projected-token authentication, environment delivered to pods, worst-case reservation with
+    held reservations that expire, `402 BudgetExceeded` (D28, D31).
+  - **Budgets.** Temporary ceiling overrides with an expiry (D34, root D5); notify-only exhaustion for
+    persistent teams by service admins only (D33).
+  - **Platform behaviour.** Change feed by `pg_notify` plus polling (D30); one SQS inbox per receiving
+    pool (D32); notification channels rendered as EventBridge rules (D46); 13-month retention for usage,
+    activity and traffic, audit kept (D36); team lifecycle table for suspend, delete and teardown (D53);
+    asynchronous export to S3 by the reconciler, import as a request body (D49).
+  - **Clients.** CSV output, safe updates, expired tokens (D39 to D41); console sign-in, hosting, CORS and
+    search (D42 to D44); contract version header and CLI client id (D47, D48); one-time secrets never
+    replayed (D52).
+  - **Schema.** `-db` 000013 (with tightened 000011 and 000012) guards ceilings, quotas, overrides,
+    catalogs, settings, users, role bindings and work orders, adds spend periods and reservations, the
+    change feed, retention, `models.max_output_tokens` and four settings (D35, D45, D55). `-db` 000014
+    adds the `agent_templates` table (D54) and the `export_bundles` changes for D49 (nullable `s3_uri`,
+    `download_url`, `download_expires_at`, `size_bytes`).
+  - **Gateway caller identity (D57).** The gateway identifies the calling pod by source pod IP through
+    the Kubernetes API and Cilium endpoint identity; Cilium allows only team pods to reach it and
+    WireGuard encrypts node-to-node traffic. SDK credentials (SigV4, `ANTHROPIC_API_KEY`) are ignored;
+    the projected token is optional and must match the source pod.
+- Consequences: root PRD §4, §5, §6 (TEAM-9, AGT-11, BUD-10, IF-5, §6.13 settings, OPS-5), §7,
+  §8.2, §9 and §10 updated (US-19 to US-26); API contract v1.1.0; database contract at 000013; new gateway contract;
+  solution design §3, §5, §7, §9 to §12 aligned. Repository PRDs follow in their own changes.
+
