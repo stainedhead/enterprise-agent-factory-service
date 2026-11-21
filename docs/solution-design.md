@@ -68,12 +68,14 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 
 Decided by J on 2026-11-21 (PRD §10.1):
 
-1. **IdP:** Okta (default) and Microsoft Entra ID, both OIDC with a groups claim, configured in `identity_providers` at service level and optionally per team. `users` are keyed by (issuer, subject), so one person can come from either.
+1. **IdP:** Okta (default) and Microsoft Entra ID, both OIDC with a groups claim, configured in `identity_providers` at service level only; when there is more than one, each team picks one (`teams.identity_provider_id`, NULL = the default) at creation or later. `users` are keyed by (issuer, subject), so one person can come from either.
 2. **Cluster topology:** one shared EKS cluster per environment (dev/stage/prod). The design allows a `cluster_id` per team later.
 3. **Network policy engine:** Cilium (FQDN egress, Hubble flow logs).
 4. **Agentic Teammates contract:** Kubernetes CRDs. The reconciler renders the Agentic Teammates custom resources for each agent.
-5. **TypeScript runtime:** Bun where available (installs, scripts, tests, dev server), Node.js 22 as the fallback. `tsc` 7 still type-checks; Biome still lints.
-5. **Currency:** USD only.
+5. **TypeScript runtime:** Bun 1.4 (installs, workspaces, scripts, tests, dev server; adopted in `-website`), Node.js 22 as the fallback. `tsc` 7 still type-checks; Biome still lints.
+6. **Prices and the organization's hierarchy:** token and model prices drive budgets, so AWS Price List changes are proposed daily for service admins to approve, and CUR variance alerts above a threshold. AFS cannot see the organization's hierarchy; cost allocation tags carry it in (§7.4).
+7. **Secrets and configuration in the pod:** zero impact on the container. Everything arrives as environment variables and files; the agent makes no calls (§6).
+8. **Currency:** USD only.
 
 ## 3. Architecture overview
 
@@ -164,7 +166,7 @@ Namespace isolation shares the kernel. That is acceptable for internal enterpris
 
 ### 5.1 Human identity
 
-OIDC Authorization Code + PKCE for the web console; OIDC device authorization grant for the CLI (`afs sso login`); short-lived API keys (hashed in DB, max 90 days, scoped to one team and role) for pipelines. The API validates JWTs against the IdP's JWKS and maps `sub` to a `users` row (just-in-time provisioning on first login).
+OIDC Authorization Code + PKCE for the web console; OIDC device authorization grant for the CLI (`afs sso login`); short-lived API keys (hashed in DB, max 90 days, scoped to one team and role) for pipelines. The API validates JWTs against the IdP's JWKS and maps `sub` to a `users` row (just-in-time provisioning on first login). A token is accepted from any enabled service-level provider; for a team-scoped request, a group binding counts only if the token came from that team's provider (`teams.identity_provider_id`, or the default when unset). Service-level group bindings (service admins) name the provider their group comes from.
 
 ### 5.2 Roles
 
@@ -194,7 +196,12 @@ Role bindings can be granted to a user or to an IdP group (`subject_type = group
 | Create / rotate / delete secrets, bind to agents | ✓ | ✓ | |
 | View secret metadata (never values) | ✓ | ✓ | ✓ |
 | Manage agent identities | ✓ | ✓ | |
-| Set a team's allowed AWS accounts | ✓ | | |
+| Set a team's allowed AWS accounts | ✓ | ✓ (when the team manages its own accounts) | |
+| Choose the team's sign-in provider (from the service's providers) | ✓ | ✓ | |
+| Identity providers, service tags (fixed and required keys) | ✓ | | |
+| Team tags: set required values, add own tags | ✓ | ✓ | |
+| View a team's tags; reports grouped by tag (own teams) | ✓ | ✓ | ✓ |
+| Approve or reject model price changes | ✓ | | |
 | Add / remove / verify agent cross-account role links | ✓ | ✓ | |
 | View allowed accounts, role links, trust policies | ✓ | ✓ | ✓ |
 | Set budget (≤ ceiling), thresholds | ✓ | ✓ | |
@@ -242,13 +249,15 @@ Agent actions in AWS carry session tags `afs-team-id`, `afs-agent-id`, so CloudT
 - Values are write-only. There is no read-value endpoint. The API returns `lastChangedAt`, `versionId` and rotation status.
 - Bindings (`agent_secret_bindings`) say which agent receives which secret as an env var or file. A team-shared secret can be bound to any agent of the team; an agent secret only to its own agent (enforced in the database). The reconciler renders ExternalSecret objects; External Secrets Operator syncs them using the team's IAM role, so a team's ESO access is limited by ABAC to its own secrets.
 - Rotation: Secrets Manager rotation Lambdas where applicable; ESO refresh interval 1h; a rotate action triggers a rolling restart of bound agents.
+- **Zero impact on the container (SEC-6).** The agent needs no code, SDK, sidecar or call to receive anything. Each binding's ExternalSecret produces a namespace Secret that the pod template references: `env[].valueFrom.secretKeyRef` for env-var bindings and a projected volume item at the chosen path for file bindings. Configuration values come from the agent's ConfigMap (`envFrom` plus `/etc/afs/config`), cross-account profiles from `/etc/afs/aws/config`, tags from `/etc/afs/tags.json` and `AFS_TAGS`. The pod template carries a hash of every referenced value's version, so any change rolls the agent and environment variables never go stale. The Secrets Store CSI Driver (reading with the agent's own Pod Identity, nothing stored in the cluster) is an accepted alternative that would not change the container's view; an in-namespace MCP endpoint for on-demand reads is a possible later convenience.
 
 ## 7. Budgets and cost
 
 ### 7.1 Model
 
 - `budgets`: per team; `period` = `monthly` | `lifetime` (ephemeral teams); `amount_usd`; `thresholds` (default 50/80/100); `on_exhaust` = `block` | `notify`; optional `expires_at`.
-- `model_prices`: price per 1M input/output tokens per Bedrock model, effective-dated, maintained by service admins (seeded from the AWS price list).
+- `model_prices`: price per 1M input/output tokens per Bedrock model, effective-dated, maintained by service admins.
+- `model_price_proposals`: `afs-billing` reads the AWS Price List daily (setting `pricing.price_list_sync`) and proposes each changed price; a service admin approves (a `model_prices` row is written, effective from its date or the approval, whichever is later) or rejects. One pending proposal per model.
 - `spend_counters`: one row per budget period: `spent_usd`, `reserved_usd`. Hot path for the gateway.
 - `usage_events`: append-only ledger, partitioned by month.
 - `cost_daily`: daily rollup by team/agent/model and source (`gateway` estimate, `cur` billed, `eks_compute`).
@@ -261,12 +270,21 @@ Reserve → invoke → settle, as in section 3.1. Thresholds emit `budget.thresh
 
 - Real-time view: from `spend_counters` and `usage_events` (seconds).
 - Daily reconciled view: from CUR via the ingestor, including EKS compute (split cost allocation by namespace) and any non-gateway spend.
-- Showback/chargeback export by cost center (CSV via API).
+- Showback/chargeback export by cost center or any tag (CSV via API).
+- Variance: `cost_reconciliations` flags a team-day `over_threshold` when gateway and billed figures differ by more than `billing.variance_alert_pct` (default 5); `afs-billing` emits `cost.variance_detected`.
 - **Credential hygiene.** Agent logs pass through a Fluent Bit redaction filter before delivery: values that look like passwords, tokens or keys, and the values of the agent's bound secrets (loaded as hashes, never as plaintext), are replaced with `[redacted:<8-char hash prefix>]`. Connections to a system's sign-in endpoints are logged as `agent.external_login` events.
 - **Agent activity.** An activity collector in `afs-reconciler` writes one `agent_activity` row per running agent every five minutes. It combines the window's `usage_events` (model calls, tokens, cost), the agent's status endpoint (the Agentic Teammates runtime reports busy or idle and a short note of what it is doing), pod CPU and memory from the metrics API, and the pod's phase. *Working* = any model call, a busy report, or CPU above `reports.idle_cpu_millicores` (service setting, default 50). Paused, stopped, unhealthy and budget-blocked agents are recorded as such. `agent_activity_daily` gives time in state and utilization; `agent_activity_current` gives the current state and `idle_since`.
 - **External traffic.** A traffic collector reads Cilium Hubble flow logs (L3/L4 flows with the DNS name each connection was for, and the policy verdict) and writes `external_traffic` rows per agent, host and verdict every five minutes, matched to the agent's external systems. Where an egress proxy terminates HTTP for a system, it adds request and error counts. Denied flows record the reason (system off at service, team or agent level, or not in the catalog), and a spike in denials raises an `egress.denied_spike` event.
 - **Report API.** `GET /v1/reports/{usage|costs|activity|traffic}` (service admins, all teams) and `GET /v1/teams/{teamId}/reports/{…}` and `GET /v1/teams/{teamId}/agents/{agentId}/reports/{…}` take `from`, `to`, `groupBy` (team, agent, model, system, day, hour) and filters, and return JSON or CSV (`Accept: text/csv`). Queries read the daily views for ranges over two days and the five-minute tables otherwise. Scheduled reports are stored per team and delivered through notification channels.
+- **By tag.** `cost_daily_by_tag`, `agent_activity_daily_by_tag` and `external_traffic_daily_by_tag` roll each team's daily figures up to its current tags; the report API takes `groupBy=tag:<key>` and `tag.<key>=<value>` filters.
 - Activity and traffic tables are partitioned by month (`afs.ensure_activity_partition`, `afs.ensure_traffic_partition`); five-minute rows are kept 13 months, daily rollups indefinitely.
+
+### 7.4 Cost allocation tags
+
+- **System tags** `afs-team-id` and `afs-agent-id`: set by AFS, never configurable, on every resource and Bedrock call.
+- **Service tags** (`service_tags`): *fixed* (one value for all teams) or *required* (each team supplies a value, optional allowed list and default). A new team must supply required keys without a default in the creating transaction (deferred constraint trigger).
+- **Team tags** (`team_tags`): required values plus optional keys of the team's own; at most 45 including service keys.
+- `team_effective_tags` / `agent_effective_tags` are what the reconciler applies (IAM roles, EBS volumes and snapshots, application inference profiles, Secrets Manager secrets, via `TagResource` on change) and what the gateway sends as Bedrock `requestMetadata` on each call (cached per agent, refreshed on `team.tags_changed`). Pods get `/etc/afs/tags.json` and `AFS_TAGS`. CUR sees the keys once service admins activate them as cost allocation tags.
 
 ## 8. Desired state, versioning and portability
 
@@ -329,6 +347,10 @@ GET    /v1/teams/{teamId}/revisions    POST /v1/teams/{teamId}/revisions/{rev}:r
 GET    /v1/work-orders                 POST, GET/PATCH /{id}           (phase 2/3)
 GET    /v1/models                      (all roles: enabled models)
 GET/PUT /v1/admin/settings             service_admin
+GET/POST/PATCH/DELETE /v1/admin/identity-providers   service_admin (all roles may GET the sign-in list)
+GET/PUT/DELETE /v1/admin/service-tags/{key}          service_admin
+GET    /v1/teams/{teamId}/tags         PUT (replace team tags), effective tags with source
+GET    /v1/admin/model-price-proposals POST …/{id}:approve  …/{id}:reject   service_admin
 GET/POST/PATCH /v1/admin/models, /v1/admin/model-prices    service_admin
 GET    /v1/admin/audit-events          service_admin
 POST   /v1/exports   GET /v1/exports/{id}   POST /v1/imports (dryRun)   service_admin

@@ -153,7 +153,7 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <div class="search">Search teams, agents, secrets, work orders  [Alt+S]</div><div class="sp"></div>
 <span class="item">us-east-1 · prod</span><span class="item">🔔</span><span class="pill admin">Service admin</span>
 <span class="item">Priya Raman ▾</span></header>
-<div class="shell"><nav class="side"><h4>Agent Factory</h4><div class="grp">Service</div><a class="">Dashboard</a><a class="">Teams</a><a class="">Work orders</a><div class="grp">Governance</div><a class="">Budgets & ceilings</a><a class="">Reports & analytics</a><a class="">Cost reconciliation</a><a class="">Audit log</a><div class="grp">Platform</div><a class="on">Model catalog & pricing</a><a class="">Agent templates</a><a class="">External systems</a><a class="">Service settings</a><a class="">Export & import</a><hr><a class="dim">Documentation ↗</a><a class="dim">CLI reference ↗</a></nav><main class="main">
+<div class="shell"><nav class="side"><h4>Agent Factory</h4><div class="grp">Service</div><a class="">Dashboard</a><a class="">Teams</a><a class="">Work orders</a><div class="grp">Governance</div><a class="">Budgets & ceilings</a><a class="">Reports & analytics</a><a class="">Cost reconciliation</a><a class="">Cost allocation tags</a><a class="">Audit log</a><div class="grp">Platform</div><a class="on">Model catalog & pricing</a><a class="">Agent templates</a><a class="">External systems</a><a class="">Service settings</a><a class="">Export & import</a><hr><a class="dim">Documentation ↗</a><a class="dim">CLI reference ↗</a></nav><main class="main">
 <div class="crumbs"><a>Agent Factory</a> › Model catalog & pricing</div>
 <div class="card"><div class="ch"><div><h2>Models <span class="cnt">(6)</span> <span class="info">Info</span></h2>
 <div class="sub">Bedrock models teams may enable. Prices drive real-time spend reservation in the gateway; CUR reconciles daily.</div></div>
@@ -167,8 +167,11 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <tr><td><span class="cb2"></span></td><td class="mono">amazon.titan-embed-…</td><td>Amazon</td><td><span class="st ok">Enabled</span></td><td>0.02</td><td>—</td><td>11</td><td>2026-09-15</td></tr>
 <tr><td><span class="cb2"></span></td><td class="mono">meta.llama-…</td><td>Meta</td><td><span class="st pend">Disabled</span></td><td>0.72</td><td>0.72</td><td>0</td><td>2026-08-01</td></tr>
 </table></div>
+<div class="card"><div class="ch"><div><h2>Price changes waiting for approval <span class="cnt">(1)</span></h2><div class="sub">Read daily from the AWS Price List. An approved price applies from its effective date, or from approval if that is later. Budgets reserve spend at the approved price.</div></div></div>
+<table><tr><th>Model</th><th>Effective from</th><th>Input $/MTok</th><th>Output $/MTok</th><th>Cache read / write</th><th>Fetched</th><th>Decision</th></tr>
+<tr><td class="mono">anthropic.claude-haiku-…</td><td>2026-12-01 00:00 UTC</td><td>1.00 → <b>0.80</b></td><td>5.00 → <b>4.00</b></td><td>0.08 / 1.00</td><td>Nov 21, 02:00</td><td><span class="btn sm">Reject</span> <span class="btn sm p">Approve</span></td></tr></table></div>
 <div class="card"><div class="ch"><h2>anthropic.claude-sonnet-… · price history</h2><span class="btn sm">Add price</span></div>
 <table><tr><th>Effective from</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Source</th><th>Changed by</th></tr>
-<tr><td>2026-10-01 00:00 UTC</td><td>3.00</td><td>15.00</td><td>0.30</td><td>3.75</td><td>aws_price_list</td><td>system:pricing-sync</td></tr>
+<tr><td>2026-10-01 00:00 UTC</td><td>3.00</td><td>15.00</td><td>0.30</td><td>3.75</td><td>aws_price_list</td><td>priya.raman (approved)</td></tr>
 <tr><td>2026-06-01 00:00 UTC</td><td>3.00</td><td>15.00</td><td>0.30</td><td>3.75</td><td>manual</td><td>priya.raman</td></tr></table></div>
 </main></div></body></html>

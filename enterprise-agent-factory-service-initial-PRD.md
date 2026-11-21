@@ -136,13 +136,16 @@ Service admin (global navigation)            Team context (team-admin / team vie
 ├─ Governance                                 │  └─ API keys                (team-admin)
 │  ├─ Budgets & ceilings                      ├─ Configuration
 │  ├─ Cost reconciliation                     │  ├─ Secrets
-│  └─ Audit log                               │  ├─ Agent identities
+│  ├─ Cost allocation tags                    │  ├─ Agent identities
+│  └─ Audit log                               │  │
 └─ Platform                                   │  ├─ External systems
    ├─ Model catalog & pricing                 │  ├─ Models
    ├─ Agent templates                         │  ├─ Log delivery
    ├─ External systems                        │  └─ Notifications
    ├─ Service settings                        ├─ Cost
-   └─ Export & import                         │  └─ Budget & usage
+   └─ Export & import                         │  ├─ Budget & usage
+                                              │  ├─ Reports
+                                              │  └─ Cost tags
                                               └─ History
                                                  ├─ Activity & audit
                                                  └─ Config revisions
@@ -159,7 +162,9 @@ The mockups below are high-fidelity wireframes for review. Data is illustrative.
 
 **S1 · Service dashboard.** Fleet at a glance: team and agent counts, month-to-date spend against total
 budget, reconciler health, teams needing attention (budget pressure, expiring ephemeral teams, degraded
-agents, hard-cap blocks, reverted drift) and top spenders.
+agents, hard-cap blocks, reverted drift) and top spenders. A banner flags any team whose gateway figure
+differs from billed cost by more than the variance threshold, and model price changes waiting for
+approval (BUD-6, BUD-9).
 
 ![Service admin dashboard](docs/ui/01-admin-dashboard.png)
 
@@ -172,13 +177,15 @@ cost center and expiry. Filter by kind and state; select a team for *View detail
 **S3 · Create team, step 1.** Wizard: details → models & network → budget → members → review. Step 1
 chooses the lifecycle (persistent, or ephemeral for budgeted workloads and POCs), names the team (which
 fixes its namespace), and sets the guardrails only service admins control: budget ceiling, compute quota
-and isolation tier.
+and isolation tier. It also picks the team's sign-in provider from the service's providers (ACC-1) and
+asks for every required cost allocation tag (TAG-2); the team cannot be created without them.
 
 ![Create team wizard](docs/ui/03-admin-create-team.png)
 
 **S4 · Model catalog and pricing.** Bedrock models teams may enable, with effective-dated prices that the
-gateway uses for real-time spend reservation. Service admins maintain the prices the organization has
-agreed; there is no automatic price sync (decision D10).
+gateway uses for real-time spend reservation. Price changes read daily from the AWS Price List wait in
+*Price changes waiting for approval* until a service admin approves or rejects each; the price history
+shows who approved what (BUD-9, decision D10).
 
 ![Model catalog](docs/ui/04-admin-models.png)
 
@@ -214,6 +221,12 @@ model, and traffic to external systems with denied attempts. A notice says that 
 providers other than Bedrock is not included (RPT-1 to RPT-8).
 
 ![Reports and analytics](docs/ui/22-admin-reports.png)
+
+**S9 · Cost allocation tags.** The system tags (`afs-team-id`, `afs-agent-id`) that AFS always sets, the
+service tags service admins define (fixed for every team, or required with an optional list of values
+and a default), spend grouped by any tag, and the teams missing a required value (TAG-1 to TAG-7).
+
+![Cost allocation tags](docs/ui/25-admin-cost-tags.png)
 
 #### Team-admin
 
@@ -315,6 +328,12 @@ and traffic to external systems, including denied attempts and why they were den
 
 ![Agent usage](docs/ui/24-ta-agent-report.png)
 
+**T13 · Cost tags.** The tags the team carries and where each comes from (system, service fixed, service
+required), the team's own optional tags, and where the tags are applied. Team-admins set required values
+and their own tags; viewers see the page read-only (TAG-2 to TAG-5).
+
+![Team cost tags](docs/ui/26-ta-team-tags.png)
+
 #### Team viewer
 
 **V1 · Team overview, read-only.** The same page as T1 with an information banner. *Edit*, *Actions* and
@@ -411,6 +430,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | SEC-3 | Bind secrets to agents as env vars or files; delivered by External Secrets Operator. A team-shared secret can be bound to any agent in the team; an agent secret only to its own agent | P0 |
 | SEC-4 | Rotate: new value, rolling restart of bound agents | P1 |
 | SEC-5 | AFS alone sets the Secrets Manager name: `<service>/<namespace>/<agent-name>/<secret-name>`, or `<service>/<namespace>/_shared/<secret-name>`. `<service>` is the installation's prefix (service setting, default `afs`). Users cannot set or change the path; team slug, agent name and secret name are immutable once created. IAM policies are prefix rules on this path: `afs-api` writes under `<service>/*`, a team's secret store reads `<service>/<namespace>/*`, and a per-agent role reads only `<service>/<namespace>/<agent-name>/*` plus `_shared/*`. The `afs-team-id` tag stays as a second check | P0 |
+| SEC-6 | **Zero impact on the agent's container.** Secrets and configuration values reach the agent without code, SDKs, sidecars the agent talks to, or calls from the agent: each secret binding becomes an environment variable or a file at the path the team-admin chose (delivered by External Secrets Operator into a namespace Secret the pod mounts), configuration values become environment variables and files under `/etc/afs/config` (CFG-7), cross-account profiles a file under `/etc/afs/aws` (AGT-10) and tags `/etc/afs/tags.json` plus `AFS_TAGS` (TAG-4). A rotated secret or changed value rolls the agents that use it, so environment variables are always current. An optional in-namespace endpoint (for example an MCP server) for listing configuration and fetching secrets on demand may be added later as a convenience, never as a requirement (D12) | P0 |
 
 ### 6.4 Budgets, usage and cost
 
@@ -421,15 +441,16 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | BUD-3 | IAM explicit deny on the team's Bedrock role when the cap is reached (backstop), removed on reset or increase | P0 |
 | BUD-4 | Alerts at configurable thresholds (default 50/80/100%), once per period per threshold | P0 |
 | BUD-5 | Usage by agent, model and day in near real time | P0 |
-| BUD-6 | Daily CUR reconciliation of Bedrock (by inference-profile tag), EKS compute (split cost allocation by namespace) and agent volumes and snapshots (by `afs-team-id` tag), reported alongside the gateway's figures. No variance alerting or price-drift management: the organization and teams manage model pricing outside AFS (D10) | P1 |
-| BUD-7 | Showback export by cost center | P1 |
+| BUD-6 | Daily CUR reconciliation of Bedrock (by inference-profile tag), EKS compute (split cost allocation by namespace) and agent volumes and snapshots (by `afs-team-id` tag), reported alongside the gateway's figures. A team-day whose gateway figure differs from the billed figure by more than the variance threshold (service setting, default 5%) is flagged and alerts service admins (D10) | P1 |
+| BUD-7 | Showback export by cost center and by any cost allocation tag (TAG-6) | P1 |
 | BUD-8 | Lifetime budgets with expiry for ephemeral teams | P2 |
+| BUD-9 | Model prices stay current because token and model costs drive budgets: when price sync is on (service setting, default on), the billing job reads the AWS Price List daily and proposes each changed price as a pending change with its effective date. A service admin approves or rejects it; an approved price takes effect from its effective date or from the approval, whichever is later, and is never backdated. Manual prices remain possible. Every proposal and decision is audited (D10) | P1 |
 
 ### 6.5 People and access
 
 | ID | Requirement | Pri |
 |---|---|---|
-| ACC-1 | SSO via OIDC: auth code + PKCE (web), device code (CLI). Okta (the default) and Microsoft Entra ID are both supported. Service admins configure the service's providers (one is the default) and can add a provider for one team, whose people then sign in to that team through it; group role bindings name the provider the group comes from. Client secrets are Secrets Manager references | P0 |
+| ACC-1 | SSO via OIDC: auth code + PKCE (web), device code (CLI). Okta (the default) and Microsoft Entra ID are both supported. Service admins configure the providers at service level (one is the default). When there is more than one, each team's provider is chosen when the team is created (service admins) or managed (team-admins), from the enabled service-level providers; a provider in use by a team cannot be disabled. A team's group role bindings use the team's provider; service-level group bindings name the provider their group comes from. Client secrets are Secrets Manager references (D1) | P0 |
 | ACC-2 | Roles service admin, team-admin, team viewer, bound to users or IdP groups, per team | P0 |
 | ACC-3 | RBAC enforced in the REST API on every operation; `GET /v1/me` returns effective permissions for client UX | P0 |
 | ACC-4 | Team API keys (team-admin or viewer, max 90 days, hashed, shown once) | P1 |
@@ -496,6 +517,22 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | RPT-6 | **External systems traffic:** connections, bytes each way, and (where an egress proxy sees HTTP) requests and errors from each agent to each external system over time, at service, team and agent level. Denied attempts are reported with the reason (system off at the service, team or agent level, or a host in no system); they are a security signal and can alert team-admins and service admins | P1 |
 | RPT-7 | Model providers other than Bedrock are marked unmetered: their spend is not in any report, and their traffic shows under external systems | P0 |
 | RPT-8 | Scheduled reports: a saved report emailed or posted to a notification channel daily, weekly or monthly as CSV. Every report is also available through the API, CLI and SDK | P1 |
+| RPT-9 | Every report can be grouped and filtered by cost allocation tag (TAG-6) | P1 |
+
+### 6.12 Cost allocation tags
+
+AFS has no access to the organization's hierarchy (business units, cost centers, products). Tags carry
+it in, so spend can be rolled up the way the organization reports it, in AFS and in AWS billing.
+
+| ID | Requirement | Pri |
+|---|---|---|
+| TAG-1 | **System tags.** `afs-team-id` and `afs-agent-id` are set by AFS on every resource and every Bedrock call it can attribute to a team or agent. Nobody configures, changes or removes them, and no other tag can use the `afs-` or `aws:` prefixes | P0 |
+| TAG-2 | **Service tags.** Service admins define tag keys that are either *fixed* (one value applied to every team, for example `environment = prod`) or *required* (every team gives its own value, optionally from an allowed list, for example `business-unit`). A required key can have a default for teams that existed before it. A new team cannot be created without a value for every required key that has no default, and a team cannot remove one. Teams missing a value are listed for service admins and shown as untagged in reports | P1 |
+| TAG-3 | **Team tags.** Team-admins add optional tags of their own (any key that is not a service key or reserved), and set the team's values for required keys. A team can carry at most 45 tags including the service's, leaving room for the system tags under AWS's limit of 50. Viewers see all of a team's tags read-only | P1 |
+| TAG-4 | **Where tags go.** The reconciler applies a team's tags to its AWS resources (IAM roles, EBS volumes and snapshots, Bedrock application inference profiles, Secrets Manager secrets), and the team's tags plus `afs-agent-id` to each agent's resources. The gateway adds the agent's tags as request metadata to every Bedrock call. Each agent's pod gets them as `/etc/afs/tags.json` and the `AFS_TAGS` environment variable, so an agent may pass them to other services; AFS does not alter the agent's calls to external systems, whose traffic is attributed to the agent (RPT-6) and so to its tags | P1 |
+| TAG-5 | Tag keys and values follow AWS tag rules (keys up to 128 characters, values up to 256, letters, digits, spaces and `_ . : / = + @ -`). Keys that look like credentials are refused; tags are never secret. Every change is versioned and audited, and a tag change is applied to existing resources by the reconciler | P1 |
+| TAG-6 | **Rollups.** Cost, usage, agent activity and external traffic roll up by any tag key and value at service level (service admins) and within a team's own scope. Rollups attribute each team's figures to its current tags; untagged figures show as *(untagged)*. Showback exports group by tag (BUD-7) | P1 |
+| TAG-7 | Service admins are told, once, to activate the service and system keys as cost allocation tags in AWS Billing, and the cost allocation tags page shows which keys CUR has seen | P2 |
 
 ## 7. Non-functional requirements
 
@@ -532,9 +569,9 @@ the REST API contract in `-restapi/api/openapi.yaml`.
 |---|---|---|
 | M0 Foundations | Repos, CI, schema v1, OpenAPI skeleton, auth middleware, `/v1/me` | All gates green; isolation and RLS tests pass |
 | M1 Teams & access | TEAM-1..5, ACC-1..3, CFG-1..3, reconciler for namespace/network/IAM; console S1–S3, T1, T6, V1; CLI `teams`, `members` | A service admin onboards a team end to end in dev |
-| M2 Agents & secrets | AGT-1..4, AGT-7, AGT-9, SEC-1..3, SEC-5, CFG-7, EXT-1, EXT-2, EXT-4..6; console T2–T4, T7, T9, T10, S7, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
-| M3 Spend control | BUD-1..5, OPS-2, RPT-1..5, RPT-7; gateway; activity collector; console T5, S4, S8, T11, T12 | Load test proves the hard cap; alerts fire once per threshold |
-| M4 Production readiness | CFG-4, BUD-6/7, OPS-1/3, ACC-4, AGT-5/6/10, TEAM-8, EXT-3, EXT-7, RPT-6, RPT-8, CFG-5/6, S5, S6, T8 | DR rebuild drill passes; security review signed off |
+| M2 Agents & secrets | AGT-1..4, AGT-7, AGT-9, SEC-1..3, SEC-5, SEC-6, CFG-7, EXT-1, EXT-2, EXT-4..6; console T2–T4, T7, T9, T10, S7, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
+| M3 Spend control | BUD-1..5, OPS-2, RPT-1..5, RPT-7, TAG-1; gateway; activity collector; console T5, S4, S8, T11, T12 | Load test proves the hard cap; alerts fire once per threshold |
+| M4 Production readiness | CFG-4, BUD-6/7/9, TAG-2..6, RPT-9, OPS-1/3, S9, T13, ACC-4, AGT-5/6/10, TEAM-8, EXT-3, EXT-7, RPT-6, RPT-8, CFG-5/6, S5, S6, T8 | DR rebuild drill passes; security review signed off |
 | Phase 2 | TEAM-7, BUD-8, AGT-8 (with the pool shared named role), P2 screen | First POC team runs and tears itself down |
 | Phase 3 | WO-1/2, P3 screen | One CVE remediated across repos within SLA |
 
@@ -546,7 +583,7 @@ Open questions answered by J on 2026-11-21. Each is reflected in the requirement
 
 | # | Question | Decision | Where |
 |---|---|---|---|
-| D1 (Q1) | Which IdP? | Both Okta and Microsoft Entra ID, configurable at service level and per team. Okta is the default | ACC-1; schema `identity_providers` (000009) |
+| D1 (Q1) | Which IdP? | Both Okta and Microsoft Entra ID. Service admins configure providers at service level; Okta is the default. When more than one is configured, each team's provider is chosen when the team is created or managed (revised by J, 2026-11-21) | ACC-1, S3; schema `identity_providers` (000009), `teams.identity_provider_id` (000010) |
 | D2 (Q2) | Network policy engine? | Cilium, for FQDN egress rules | TEAM-3, EXT-5 |
 | D3 (Q3) | Agentic Teammates interface? | Kubernetes CRD. The reconciler renders the Agentic Teammates custom resources | Solution design §3.1 |
 | D4 (Q4) | Cluster topology? | One shared EKS cluster per environment (dev, stage, prod); `cluster_id` on teams allows a split later | Solution design §2.3 |
@@ -555,7 +592,9 @@ Open questions answered by J on 2026-11-21. Each is reflected in the requirement
 | D7 (Q7) | Ship OpenAI and OpenRouter switched off? | Yes | EXT-6 |
 | D8 | TypeScript runtime | Use Bun as the runtime (install, scripts, tests, dev server) where it is available, with Node.js 22 as the fallback | Solution design §12 |
 | D9 (R5) | Credentials for external systems | Credentials are per agent through Secrets, not a separate per-system enablement. Log agents' sign-ins to external systems, and redact (tokenize) passwords and other credentials wherever they appear in logs | OPS-4, SEC-3 |
-| D10 (R3) | Model price drift | The organization and teams manage model pricing outside AFS. No automatic price sync, variance alerting or price-drift management; CUR figures are shown beside gateway figures for reference | S4, BUD-6 |
+| D10 (R3) | Token and model costs affecting budgets | Prices drive budgets, so AFS keeps them current: daily AWS Price List sync proposes changes for service admins to approve, and daily CUR reconciliation alerts on variance above a threshold. AFS has no access to the organization's hierarchy; it comes in through cost allocation tags (D11). (Clarified by J, 2026-11-21; replaces the earlier reading that dropped price sync) | S1, S4, BUD-6, BUD-9 |
+| D11 | Cost allocation tags | System tags `afs-team-id` and `afs-agent-id` always, set by AFS with no configuration; required and fixed service tags; optional team tags; all passed on Bedrock calls and AWS resources and rolled up in reporting | §6.12, S9, T13; schema 000010 |
+| D12 | How agents receive secrets and configuration | Zero impact on the container: everything is injected as environment variables and files; the agent makes no calls. External Secrets Operator stays (J: either it or the CSI driver is fine if the container needs nothing). An on-demand endpoint is a possible later convenience | SEC-6 |
 
 ### 10.2 Risks
 
@@ -563,7 +602,7 @@ Open questions answered by J on 2026-11-21. Each is reflected in the requirement
 |---|---|---|---|
 | R1 | Namespace isolation shares the kernel | Security | **Accepted** (J). Isolation tier with dedicated nodes for regulated work; gVisor/Kata later |
 | R2 | Gateway is on the critical path for every model call | Platform | **Accepted** (J). Multi-AZ, fail closed, latency SLO, load tested in M3 |
-| R3 | Model price changes make estimates drift | FinOps | **Closed** by D10: pricing is managed outside AFS |
+| R3 | Token and model price changes make budgets and estimates drift | FinOps | **Mitigated** by D10: daily price sync with approval (BUD-9) and variance alerts against CUR (BUD-6) |
 | R4 | TypeScript 7 tooling maturity (no ESLint type-aware rules yet) | Web | **Accepted** (J). Biome for lint, `tsc` 7 for types; revisit when typescript-eslint supports TS 7 |
 | R5 | Every allowed external system is a path for data to leave (for example posting to Slack) | Security | Narrow per agent (EXT-4); credentials per agent through Secrets (D9); log sign-ins and egress per pod; redact credentials in logs (OPS-4); review team-declared systems in the audit log |
 | R6 | "Working" is inferred, so a busy agent that makes no model calls and uses little CPU can look idle | Platform | Open. Agents report busy or idle on their status endpoint (Agentic Teammates contract); the CPU threshold is tunable; the definition is shown on every report |

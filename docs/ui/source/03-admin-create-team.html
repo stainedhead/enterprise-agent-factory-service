@@ -153,7 +153,7 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <div class="search">Search teams, agents, secrets, work orders  [Alt+S]</div><div class="sp"></div>
 <span class="item">us-east-1 · prod</span><span class="item">🔔</span><span class="pill admin">Service admin</span>
 <span class="item">Priya Raman ▾</span></header>
-<div class="shell"><nav class="side"><h4>Agent Factory</h4><div class="grp">Service</div><a class="">Dashboard</a><a class="on">Teams</a><a class="">Work orders</a><div class="grp">Governance</div><a class="">Budgets & ceilings</a><a class="">Reports & analytics</a><a class="">Cost reconciliation</a><a class="">Audit log</a><div class="grp">Platform</div><a class="">Model catalog & pricing</a><a class="">Agent templates</a><a class="">External systems</a><a class="">Service settings</a><a class="">Export & import</a><hr><a class="dim">Documentation ↗</a><a class="dim">CLI reference ↗</a></nav><main class="main">
+<div class="shell"><nav class="side"><h4>Agent Factory</h4><div class="grp">Service</div><a class="">Dashboard</a><a class="on">Teams</a><a class="">Work orders</a><div class="grp">Governance</div><a class="">Budgets & ceilings</a><a class="">Reports & analytics</a><a class="">Cost reconciliation</a><a class="">Cost allocation tags</a><a class="">Audit log</a><div class="grp">Platform</div><a class="">Model catalog & pricing</a><a class="">Agent templates</a><a class="">External systems</a><a class="">Service settings</a><a class="">Export & import</a><hr><a class="dim">Documentation ↗</a><a class="dim">CLI reference ↗</a></nav><main class="main">
 <div class="crumbs"><a>Agent Factory</a> › <a>Teams</a> › Create team</div>
 <div class="wiz"><div class="steps">
 <div class="on"><div class="n">Step 1</div><b>Team details</b></div>
@@ -174,6 +174,13 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <div class="field"><label>Description <span class="muted" style="font-weight:400">- optional</span></label><div class="input ph" style="height:56px">Agents maintaining the payments ledger services and their dependencies</div></div>
 <div class="grid g2"><div class="field"><label>Cost center</label><div class="input">CC-4410</div></div>
 <div class="field"><label>Owner email</label><div class="input">payments-eng-leads@corp.example</div></div></div>
+<div class="field"><label>Sign-in provider</label><div class="hint">The service's providers. The team's people sign in through this one; team-admins can change it later.</div><div class="input" style="width:420px">Okta · corp.okta.example (service default) ▾</div></div>
+</div></div>
+<div class="card"><div class="ch"><div><h2>Cost allocation tags</h2><div class="sub">Required by the service. Every AWS resource and Bedrock call of this team carries these, plus <span class="mono">afs-team-id</span> and <span class="mono">afs-agent-id</span>.</div></div></div><div class="cb">
+<div class="grid g3"><div class="field"><label>business-unit</label><div class="input">Payments ▾</div></div>
+<div class="field"><label>product-line</label><div class="input">merchant-ledger</div></div>
+<div class="field"><label>data-classification</label><div class="input">confidential ▾</div></div></div>
+<div class="small muted">Fixed for every team: <span class="mono">environment = prod</span>, <span class="mono">managed-by = agent-factory</span>. The team can add its own tags after creation.</div>
 </div></div>
 <div class="card"><div class="ch"><h2>Guardrails <span class="muted small" style="font-weight:400">set by service admins</span></h2></div><div class="cb">
 <div class="grid g3"><div class="field"><label>Budget ceiling (USD / month)</label><div class="hint">Team-admins can budget up to this.</div><div class="input">40,000</div></div>

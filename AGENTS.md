@@ -23,7 +23,7 @@ Sub-directory names match the repository names. Clone each one next to this file
 | `enterprise-agent-factory-service-db/` | SQL, Go 1.27 | PostgreSQL schema and migrations, roles and row-level security, `afs-migrate`, Go module embedding the migrations | Scaffolded; schema v1 and 15 integration tests |
 | `enterprise-agent-factory-service-restapi/` | Go 1.27 | `afs-api` (REST, RBAC, audit), `afs-reconciler`, `afs-gateway`, `afs-billing`; owns `api/openapi.yaml` | Scaffolded |
 | `enterprise-agent-factory-service-cli/` | Go 1.27 | `afs` CLI, AWS CLI conventions | Scaffolded |
-| `enterprise-agent-factory-service-website/` | TypeScript 7 (pnpm workspace) | `@afs/sdk` accelerator SDK (`packages/sdk`) and the web console (`apps/console`) | Scaffolded |
+| `enterprise-agent-factory-service-website/` | TypeScript 7 (Bun workspace) | `@afs/sdk` accelerator SDK (`packages/sdk`) and the web console (`apps/console`) | Scaffolded |
 
 All remotes are `github.com/stainedhead/<name>`. When a repository is added or changes status, update
 this table and the README table in the same change.

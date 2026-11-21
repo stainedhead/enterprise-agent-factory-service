@@ -169,7 +169,7 @@ USER = {"admin": "Priya Raman", "ta": "Marcus Chen", "tv": "Dana Ortiz"}
 def admin_nav(on):
     items = [
         ("grp", "Service"), ("dash", "Dashboard"), ("teams", "Teams"), ("wo", "Work orders"),
-        ("grp", "Governance"), ("budgets", "Budgets & ceilings"), ("reports", "Reports & analytics"), ("costs", "Cost reconciliation"),
+        ("grp", "Governance"), ("budgets", "Budgets & ceilings"), ("reports", "Reports & analytics"), ("costs", "Cost reconciliation"), ("tags", "Cost allocation tags"),
         ("audit", "Audit log"),
         ("grp", "Platform"), ("models", "Model catalog & pricing"), ("templates", "Agent templates"),
         ("external", "External systems"), ("settings", "Service settings"), ("export", "Export & import"),
@@ -183,7 +183,7 @@ def team_nav(on, role):
         ("grp", "Configuration"), ("secrets", "Secrets"), ("config", "Configuration values"), ("identities", "Agent identities"),
         ("network", "External systems"), ("models", "Models"), ("logs", "Log delivery"),
         ("notify", "Notifications"),
-        ("grp", "Cost"), ("budget", "Budget & usage"), ("reports", "Reports"),
+        ("grp", "Cost"), ("budget", "Budget & usage"), ("reports", "Reports"), ("tags", "Cost tags"),
         ("grp", "History"), ("activity", "Activity & audit"), ("revisions", "Config revisions"),
     ]
     if role == "ta":
@@ -236,6 +236,7 @@ page("01-admin-dashboard", "admin", admin_nav("dash"), f"""
 <div class="hdr"><div><h1>Service dashboard <span class="info">Info</span></h1>
 <div class="desc">Fleet health, spend and reconciliation across all teams in prod.</div></div>
 <div class="btns"><span class="btn">Export showback CSV</span><span class="btn p">Create team</span></div></div>
+<div class="alert warn"><span class="ic">⚠</span><div><b>Cost reconciliation variance on 1 team.</b> search-relevance: gateway estimate is 6.1% below billed Bedrock cost for 2026-11-18 (alert above 5%). <a>Review reconciliation</a> · 1 model price change from the AWS Price List is waiting for approval. <a>Review prices</a></div></div>
 <div class="grid g4">
  <div class="card"><div class="ch"><h2>Teams</h2></div><div class="cb"><div class="big">42</div><div class="small muted">38 persistent · 4 ephemeral</div></div></div>
  <div class="card"><div class="ch"><h2>Agents running</h2></div><div class="cb"><div class="big">318</div><div class="small muted">of 341 desired · 6 paused</div></div></div>
@@ -315,6 +316,13 @@ page("03-admin-create-team", "admin", admin_nav("teams"), f"""
 <div class="field"><label>Description <span class="muted" style="font-weight:400">- optional</span></label><div class="input ph" style="height:56px">Agents maintaining the payments ledger services and their dependencies</div></div>
 <div class="grid g2"><div class="field"><label>Cost center</label><div class="input">CC-4410</div></div>
 <div class="field"><label>Owner email</label><div class="input">payments-eng-leads@corp.example</div></div></div>
+<div class="field"><label>Sign-in provider</label><div class="hint">The service's providers. The team's people sign in through this one; team-admins can change it later.</div><div class="input" style="width:420px">Okta · corp.okta.example (service default) ▾</div></div>
+</div></div>
+<div class="card"><div class="ch"><div><h2>Cost allocation tags</h2><div class="sub">Required by the service. Every AWS resource and Bedrock call of this team carries these, plus <span class="mono">afs-team-id</span> and <span class="mono">afs-agent-id</span>.</div></div></div><div class="cb">
+<div class="grid g3"><div class="field"><label>business-unit</label><div class="input">Payments ▾</div></div>
+<div class="field"><label>product-line</label><div class="input">merchant-ledger</div></div>
+<div class="field"><label>data-classification</label><div class="input">confidential ▾</div></div></div>
+<div class="small muted">Fixed for every team: <span class="mono">environment = prod</span>, <span class="mono">managed-by = agent-factory</span>. The team can add its own tags after creation.</div>
 </div></div>
 <div class="card"><div class="ch"><h2>Guardrails <span class="muted small" style="font-weight:400">set by service admins</span></h2></div><div class="cb">
 <div class="grid g3"><div class="field"><label>Budget ceiling (USD / month)</label><div class="hint">Team-admins can budget up to this.</div><div class="input">40,000</div></div>
@@ -339,9 +347,12 @@ page("04-admin-models", "admin", admin_nav("models"), f"""
 <tr><td><span class="cb2"></span></td><td class="mono">amazon.titan-embed-…</td><td>Amazon</td><td>{st('ok','Enabled')}</td><td>0.02</td><td>—</td><td>11</td><td>2026-09-15</td></tr>
 <tr><td><span class="cb2"></span></td><td class="mono">meta.llama-…</td><td>Meta</td><td>{st('pend','Disabled')}</td><td>0.72</td><td>0.72</td><td>0</td><td>2026-08-01</td></tr>
 </table></div>
+<div class="card"><div class="ch"><div><h2>Price changes waiting for approval <span class="cnt">(1)</span></h2><div class="sub">Read daily from the AWS Price List. An approved price applies from its effective date, or from approval if that is later. Budgets reserve spend at the approved price.</div></div></div>
+<table><tr><th>Model</th><th>Effective from</th><th>Input $/MTok</th><th>Output $/MTok</th><th>Cache read / write</th><th>Fetched</th><th>Decision</th></tr>
+<tr><td class="mono">anthropic.claude-haiku-…</td><td>2026-12-01 00:00 UTC</td><td>1.00 → <b>0.80</b></td><td>5.00 → <b>4.00</b></td><td>0.08 / 1.00</td><td>Nov 21, 02:00</td><td><span class="btn sm">Reject</span> <span class="btn sm p">Approve</span></td></tr></table></div>
 <div class="card"><div class="ch"><h2>anthropic.claude-sonnet-… · price history</h2><span class="btn sm">Add price</span></div>
 <table><tr><th>Effective from</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th>Source</th><th>Changed by</th></tr>
-<tr><td>2026-10-01 00:00 UTC</td><td>3.00</td><td>15.00</td><td>0.30</td><td>3.75</td><td>aws_price_list</td><td>system:pricing-sync</td></tr>
+<tr><td>2026-10-01 00:00 UTC</td><td>3.00</td><td>15.00</td><td>0.30</td><td>3.75</td><td>aws_price_list</td><td>priya.raman (approved)</td></tr>
 <tr><td>2026-06-01 00:00 UTC</td><td>3.00</td><td>15.00</td><td>0.30</td><td>3.75</td><td>manual</td><td>priya.raman</td></tr></table></div>
 """)
 
@@ -969,6 +980,79 @@ page("15-admin-work-orders", "admin", admin_nav("wo"), f"""
 <tr><td><span class="radio"></span></td><td><a>CVE-2026-39555</a> <span class="muted small">openssl base image</span></td><td>CVE remediation</td><td>{st('pend','Open')}</td><td>31</td><td>—</td><td>8 teams</td><td>Dec 04 (14d)</td><td>—</td></tr>
 <tr><td><span class="radio"></span></td><td><a>WO-0192</a> <span class="muted small">Log4j config sweep</span></td><td>General</td><td>{st('ok','In progress')}</td><td>9</td><td>4 open · 5 merged</td><td>platform</td><td>—</td><td>platform-hygiene</td></tr>
 </table></div>
+""")
+
+
+# ------------------------------------------------------------------------------------------------
+# Cost allocation tags (000010)
+# ------------------------------------------------------------------------------------------------
+
+STAGS = [("environment", "Fixed", "prod", "—", "All 42"), ("managed-by", "Fixed", "agent-factory", "—", "All 42"),
+         ("business-unit", "Required", "Payments, Claims, Search, Platform, Identity, Unassigned", "Unassigned", "42 (3 on default)"),
+         ("product-line", "Required", "Any value", "—", "40 · 2 missing"),
+         ("data-classification", "Required", "public, internal, confidential, restricted", "internal", "42")]
+
+def stag_rows():
+    out = []
+    for k, m, v, d, n in STAGS:
+        badge = st('inf', m) if m == "Fixed" else st('ok', m)
+        warn = ' class="warn"' if "missing" in n else ""
+        out.append(f'<tr><td><span class="radio"></span></td><td class="mono">{k}</td><td>{badge}</td><td>{v}</td><td>{d}</td><td{warn}>{n}</td></tr>')
+    return "".join(out)
+
+page("25-admin-cost-tags", "admin", admin_nav("tags"), f"""
+<div class="crumbs"><a>Agent Factory</a> › Cost allocation tags</div>
+<div class="hdr"><div><h1>Cost allocation tags <span class="info">Info</span></h1><div class="desc">Tags on every AWS resource Agent Factory creates and on every Bedrock call, so spend rolls up the way the organization reports it. Activate the keys as cost allocation tags in AWS Billing to see them in CUR.</div></div>
+<div class="btns"><span class="btn dd">Actions</span><span class="btn p">Add tag key</span></div></div>
+<div class="card"><div class="ch"><div><h2>System tags</h2><div class="sub">Always set by Agent Factory. Nobody configures, changes or removes them.</div></div></div>
+<table><tr><th>Key</th><th>Value</th><th>On</th></tr>
+<tr><td class="mono">afs-team-id</td><td>The team's id, for example <span class="mono">team_01JD3Z…</span></td><td>Every team resource, every agent resource, every Bedrock call</td></tr>
+<tr><td class="mono">afs-agent-id</td><td>The agent's id, for example <span class="mono">agt_01JD41…</span></td><td>Every agent resource and every Bedrock call the agent makes</td></tr></table></div>
+<div class="card"><div class="ch"><div><h2>Service tags <span class="cnt">(5)</span></h2><div class="sub"><b>Fixed</b>: one value for every team. <b>Required</b>: each team gives its value when it is created, optionally from a list; a default covers teams that existed before the key.</div></div>
+<div class="btns"><span class="btn sm">Edit</span><span class="btn sm">Remove</span></div></div>
+<table><tr><th></th><th>Key</th><th>Kind</th><th>Value or allowed values</th><th>Default</th><th>Teams with a value</th></tr>{stag_rows()}</table></div>
+<div class="grid g2">
+<div class="card"><div class="ch"><h2>Spend by business-unit, Nov MTD</h2><span class="sel">Group by: business-unit ▾</span></div>
+<table><tr><th>Value</th><th class="num">Teams</th><th class="num">Calls</th><th class="num">Cost</th></tr>
+<tr><td>Payments</td><td class="num">9</td><td class="num">1.9 M</td><td class="num">$71,420</td></tr>
+<tr><td>Claims</td><td class="num">7</td><td class="num">1.1 M</td><td class="num">$40,210</td></tr>
+<tr><td>Search</td><td class="num">6</td><td class="num">820 K</td><td class="num">$31,900</td></tr>
+<tr><td>Platform</td><td class="num">12</td><td class="num">610 K</td><td class="num">$24,880</td></tr>
+<tr><td class="muted">Unassigned (default)</td><td class="num">3</td><td class="num">90 K</td><td class="num">$4,110</td></tr></table></div>
+<div class="card"><div class="ch"><h2>Teams missing a required tag</h2></div>
+<table><tr><th>Team</th><th>Missing</th><th>Since</th></tr>
+<tr><td><a>legacy-batch-retire</a></td><td class="mono">product-line</td><td>Nov 14 (key added)</td></tr>
+<tr><td><a>poc-contract-summarizer</a></td><td class="mono">product-line</td><td>Nov 14 (key added)</td></tr></table>
+<div class="cb small muted">New teams cannot be created without required tags. Untagged spend shows as "(untagged)" in reports.</div></div>
+</div>
+<div class="card"><div class="cb"><div class="k small muted">Equivalent CLI</div><div class="code">afs admin put-service-tag --key business-unit --mode required --allowed-values Payments Claims Search Platform Identity Unassigned --default-value Unassigned</div></div></div>
+""")
+
+page("26-ta-team-tags", "ta", team_nav("tags", "ta"), f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › Cost tags</div>
+<div class="hdr"><div><h1>Cost tags <span class="info">Info</span></h1><div class="desc">Every AWS resource and Bedrock call of this team carries these tags. Reports roll spend, activity and traffic up by them.</div></div>
+<div class="btns"><span class="btn p">Add tag</span></div></div>
+<div class="card"><div class="ch"><div><h2>Set by Agent Factory and the service</h2><div class="sub">Read-only here. Required values are yours to set; fixed ones come from service admins.</div></div><div class="btns"><span class="btn sm">Edit required values</span></div></div>
+<table><tr><th>Key</th><th>Value</th><th>Source</th></tr>
+<tr><td class="mono">afs-team-id</td><td class="mono">team_01JD3Z5Y8K2M4N6P8Q0R2S4T6V</td><td>{st('inf','System')}</td></tr>
+<tr><td class="mono">afs-agent-id</td><td class="muted">Each agent's own id</td><td>{st('inf','System')}</td></tr>
+<tr><td class="mono">environment</td><td>prod</td><td>Service · fixed</td></tr>
+<tr><td class="mono">managed-by</td><td>agent-factory</td><td>Service · fixed</td></tr>
+<tr><td class="mono">business-unit</td><td>Payments</td><td>Service · required</td></tr>
+<tr><td class="mono">product-line</td><td>merchant-ledger</td><td>Service · required</td></tr>
+<tr><td class="mono">data-classification</td><td>confidential</td><td>Service · required</td></tr></table></div>
+<div class="card"><div class="ch"><div><h2>Team tags <span class="cnt">(3)</span></h2><div class="sub">Optional. Any key except the service's and the reserved <span class="mono">aws:</span> and <span class="mono">afs-</span> prefixes. Up to 45 tags in total.</div></div><div class="btns"><span class="btn sm">Edit</span><span class="btn sm">Remove</span></div></div>
+<table><tr><th></th><th>Key</th><th>Value</th><th>Last changed</th></tr>
+<tr><td><span class="radio"></span></td><td class="mono">project</td><td>ledger-modernization</td><td>Nov 03 · marcus.chen</td></tr>
+<tr><td><span class="radio"></span></td><td class="mono">initiative</td><td>FY27-reliability</td><td>Oct 21 · marcus.chen</td></tr>
+<tr><td><span class="radio"></span></td><td class="mono">owner-team</td><td>payments-eng</td><td>Sep 02 · marcus.chen</td></tr></table></div>
+<div class="grid g2">
+<div class="card"><div class="ch"><h2>Where the tags go</h2></div><div class="cb small">
+<div>• IAM roles, EBS volumes and snapshots, Bedrock inference profiles and Secrets Manager secrets, as AWS tags</div>
+<div>• Each Bedrock call, as request metadata the gateway adds</div>
+<div>• Each agent's pod, as <span class="mono">/etc/afs/tags.json</span> and <span class="mono">AFS_TAGS</span>, so an agent can pass them to other services if it wants</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Equivalent CLI</div><div class="code">afs teams put-team-tags --team-id team_01JD3Z… --tags project=ledger-modernization initiative=FY27-reliability</div></div></div>
+</div>
 """)
 
 print("\n".join(sorted(p.name for p in OUT.glob("*.html"))))
