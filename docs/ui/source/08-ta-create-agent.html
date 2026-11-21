@@ -132,7 +132,7 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <div class="search">Search teams, agents, secrets, work orders  [Alt+S]</div><div class="sp"></div>
 <span class="item">us-east-1 · prod</span><span class="item">🔔</span><span class="pill ta">Team-admin · payments-factory</span>
 <span class="item">Marcus Chen ▾</span></header>
-<div class="shell"><nav class="side"><h4>Agent Factory</h4><div class="team-switch"><span><b>payments-factory</b></span><span class="muted">▾</span></div><div class="grp">Team</div><a class="">Overview</a><a class="on">Agents</a><a class="">Members & access</a><a class="">API keys</a><div class="grp">Configuration</div><a class="">Secrets</a><a class="">Agent identities</a><a class="">Network egress</a><a class="">Models</a><a class="">Log delivery</a><a class="">Notifications</a><div class="grp">Cost</div><a class="">Budget & usage</a><div class="grp">History</div><a class="">Activity & audit</a><a class="">Config revisions</a><hr><a class="dim">Documentation ↗</a><a class="dim">CLI reference ↗</a></nav><main class="main">
+<div class="shell"><nav class="side"><h4>Agent Factory</h4><div class="team-switch"><span><b>payments-factory</b></span><span class="muted">▾</span></div><div class="grp">Team</div><a class="">Overview</a><a class="on">Agents</a><a class="">Members & access</a><a class="">API keys</a><div class="grp">Configuration</div><a class="">Secrets</a><a class="">Configuration values</a><a class="">Agent identities</a><a class="">Network egress</a><a class="">Models</a><a class="">Log delivery</a><a class="">Notifications</a><div class="grp">Cost</div><a class="">Budget & usage</a><div class="grp">History</div><a class="">Activity & audit</a><a class="">Config revisions</a><hr><a class="dim">Documentation ↗</a><a class="dim">CLI reference ↗</a></nav><main class="main">
 <div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › <a>Agents</a> › Create agent</div>
 <div class="hdr"><div><h1>Create agent</h1><div class="desc">Defines desired state. The reconciler creates the service account, Pod Identity association, secrets and workload.</div></div></div>
 <div class="split"><div style="flex:1;max-width:860px">
@@ -150,6 +150,11 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <div class="field"><label>Storage class</label><div class="hint">Offered by your service admins. Fixed after creation.</div><div class="input">gp3 · general purpose SSD, encrypted ▾</div></div>
 <div class="field"><label>When the agent is deleted</label><div class="input">Take a final snapshot, then delete the volume ▾</div></div>
 <div class="field"><label>Snapshot backups</label><div class="input">Daily, keep 7 ▾</div></div></div></div></div>
+<div class="card"><div class="ch"><div><h2>Configuration values</h2><div class="sub">Non-secret settings, delivered as environment variables and as files under <span class="mono">/etc/afs/config</span>. Use the namespace value to share one setting across the team's agents. Secrets belong under Secrets.</div></div><span class="btn sm">Add value</span></div>
+<table><tr><th>Name</th><th>Source</th><th>Value</th><th></th></tr>
+<tr><td class="mono">LOG_LEVEL</td><td><div class="input" style="margin:0">Use namespace value ▾</div></td><td><span class="mono">info</span> <span class="muted small">from namespace</span></td><td><a>Remove</a></td></tr>
+<tr><td class="mono">GITHUB_ORG</td><td><div class="input" style="margin:0">Use namespace value ▾</div></td><td><span class="mono">acme-payments</span> <span class="muted small">from namespace</span></td><td><a>Remove</a></td></tr>
+<tr><td class="mono">MAX_OPEN_PRS</td><td><div class="input" style="margin:0">Agent value ▾</div></td><td><div class="input mono" style="margin:0">3</div></td><td><a>Remove</a></td></tr></table></div>
 <div class="card"><div class="ch"><div><h2>Secrets</h2><div class="sub">Team-shared secrets can be bound now. Secrets only this agent can read are added after it is created, under Secrets.</div></div><span class="btn sm">Add secret binding</span></div>
 <table><tr><th>Secret</th><th>Scope</th><th>Delivery</th><th>Target</th><th></th></tr>
 <tr><td>github-bot-key</td><td><span class="badge b-per" style="white-space:nowrap">Team shared</span></td><td>Environment variable</td><td class="mono">GITHUB_APP_KEY</td><td><a>Remove</a></td></tr>
@@ -157,7 +162,7 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <div style="display:flex;justify-content:flex-end;gap:8px"><span class="btn" style="border:0">Cancel</span><span class="btn">Preview CLI command</span><span class="btn p">Create agent</span></div>
 </div>
 <div style="width:360px"><div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb">
-<div class="code">afs agents create-agent \<br>&nbsp; --team-id team_01JD3Z… \<br>&nbsp; --name security-patcher \<br>&nbsp; --template hermes-dev \<br>&nbsp; --model-id claude-sonnet \<br>&nbsp; --storage SizeGiB=20,StorageClass=gp3,\<br>&nbsp;&nbsp;&nbsp; OnDelete=snapshot_then_delete,\<br>&nbsp;&nbsp;&nbsp; Snapshots=daily,Keep=7 \<br>&nbsp; --secret-bindings file://bindings.json</div>
+<div class="code">afs agents create-agent \<br>&nbsp; --team-id team_01JD3Z… \<br>&nbsp; --name security-patcher \<br>&nbsp; --template hermes-dev \<br>&nbsp; --model-id claude-sonnet \<br>&nbsp; --storage SizeGiB=20,StorageClass=gp3,\<br>&nbsp;&nbsp;&nbsp; OnDelete=snapshot_then_delete,\<br>&nbsp;&nbsp;&nbsp; Snapshots=daily,Keep=7 \<br>&nbsp; --config-values file://config.json \<br>&nbsp; --secret-bindings file://bindings.json</div>
 <div class="small muted" style="margin-top:8px">Every console action maps to one CLI operation and one REST call.</div></div></div></div>
 </div>
 </main></div></body></html>

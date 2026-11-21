@@ -84,3 +84,18 @@ Accepted, Proposed (needs review), Superseded.
 - Consequences: volumes grow but never shrink, and the class is fixed after creation. An agent is tied
   to its volume's Availability Zone until restored from a snapshot elsewhere. Storage counts toward team
   quotas and costs are attributed by tag.
+
+## ADR-008 Namespace and agent configuration values
+
+- Status: Proposed (from J's PRD review, 2026-11-21)
+- Context: agents need non-secret settings. Some are shared by every agent in a team, some are
+  specific to one agent. J clarified that the shared level is the team's namespace (the cluster of
+  agents), not the service or the EKS cluster.
+- Decision: two levels. Team-admins keep namespace values per team. Each agent value is either a
+  literal or a link to the namespace value of the same name. The database resolves them
+  (`agent_config_resolved`) and blocks links to missing values, removal of linked values, credential-like
+  names and clashes with secret environment variables. The reconciler delivers the resolved set as a
+  ConfigMap (env vars and files) and rolls agents when a value changes. The old free-form `agents.env`
+  is folded into agent values.
+- Consequences: one mechanism for non-secret settings, kept apart from secrets. A service-wide level
+  can be added later in the same shape if needed.

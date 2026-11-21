@@ -159,7 +159,7 @@ def admin_nav(on):
 def team_nav(on, role):
     items = [
         ("grp", "Team"), ("overview", "Overview"), ("agents", "Agents"), ("members", "Members & access"),
-        ("grp", "Configuration"), ("secrets", "Secrets"), ("identities", "Agent identities"),
+        ("grp", "Configuration"), ("secrets", "Secrets"), ("config", "Configuration values"), ("identities", "Agent identities"),
         ("network", "Network egress"), ("models", "Models"), ("logs", "Log delivery"),
         ("notify", "Notifications"),
         ("grp", "Cost"), ("budget", "Budget & usage"),
@@ -417,7 +417,7 @@ page("07-ta-agents", "ta", team_nav("agents", "ta"), f"""
 <table><tr><th></th><th>Name</th><th>Status</th><th>Pod</th><th>Model</th><th>Template</th><th>Secrets</th><th>Cost, Nov MTD</th></tr>
 {agent_rows("reviewer-bot")}</table></div>
 <div class="card" style="position:relative"><div class="ch"><h2>reviewer-bot</h2><div class="btns"><span class="btn sm">Restart</span><span class="btn sm">Pause</span><span class="btn sm">Take snapshot</span><span class="btn sm">Edit</span></div></div>
-<div class="tabs" style="margin:0 20px 14px"><span class="on">Details</span><span>Secrets & identity</span><span>Usage</span><span>Logs</span><span>Revisions</span></div>
+<div class="tabs" style="margin:0 20px 14px"><span class="on">Details</span><span>Configuration</span><span>Secrets & identity</span><span>Usage</span><span>Logs</span><span>Revisions</span></div>
 <div class="cb"><div class="grid g4">
 <div class="kv"><div class="k">Image</div><div class="v mono small">ghcr.io/…/omp-review@sha256:9f2c…e1</div></div>
 <div class="kv"><div class="k">Service account</div><div class="v mono">agent-reviewer-bot</div></div>
@@ -448,6 +448,11 @@ page("08-ta-create-agent", "ta", team_nav("agents", "ta"), f"""
 <div class="field"><label>Storage class</label><div class="hint">Offered by your service admins. Fixed after creation.</div><div class="input">gp3 · general purpose SSD, encrypted ▾</div></div>
 <div class="field"><label>When the agent is deleted</label><div class="input">Take a final snapshot, then delete the volume ▾</div></div>
 <div class="field"><label>Snapshot backups</label><div class="input">Daily, keep 7 ▾</div></div></div></div></div>
+<div class="card"><div class="ch"><div><h2>Configuration values</h2><div class="sub">Non-secret settings, delivered as environment variables and as files under <span class="mono">/etc/afs/config</span>. Use the namespace value to share one setting across the team's agents. Secrets belong under Secrets.</div></div><span class="btn sm">Add value</span></div>
+<table><tr><th>Name</th><th>Source</th><th>Value</th><th></th></tr>
+<tr><td class="mono">LOG_LEVEL</td><td><div class="input" style="margin:0">Use namespace value ▾</div></td><td><span class="mono">info</span> <span class="muted small">from namespace</span></td><td><a>Remove</a></td></tr>
+<tr><td class="mono">GITHUB_ORG</td><td><div class="input" style="margin:0">Use namespace value ▾</div></td><td><span class="mono">acme-payments</span> <span class="muted small">from namespace</span></td><td><a>Remove</a></td></tr>
+<tr><td class="mono">MAX_OPEN_PRS</td><td><div class="input" style="margin:0">Agent value ▾</div></td><td><div class="input mono" style="margin:0">3</div></td><td><a>Remove</a></td></tr></table></div>
 <div class="card"><div class="ch"><div><h2>Secrets</h2><div class="sub">Team-shared secrets can be bound now. Secrets only this agent can read are added after it is created, under Secrets.</div></div><span class="btn sm">Add secret binding</span></div>
 <table><tr><th>Secret</th><th>Scope</th><th>Delivery</th><th>Target</th><th></th></tr>
 <tr><td>github-bot-key</td><td><span class="badge b-per" style="white-space:nowrap">Team shared</span></td><td>Environment variable</td><td class="mono">GITHUB_APP_KEY</td><td><a>Remove</a></td></tr>
@@ -455,7 +460,7 @@ page("08-ta-create-agent", "ta", team_nav("agents", "ta"), f"""
 <div style="display:flex;justify-content:flex-end;gap:8px"><span class="btn" style="border:0">Cancel</span><span class="btn">Preview CLI command</span><span class="btn p">Create agent</span></div>
 </div>
 <div style="width:360px"><div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb">
-<div class="code">afs agents create-agent \\<br>&nbsp; --team-id team_01JD3Z… \\<br>&nbsp; --name security-patcher \\<br>&nbsp; --template hermes-dev \\<br>&nbsp; --model-id claude-sonnet \\<br>&nbsp; --storage SizeGiB=20,StorageClass=gp3,\\<br>&nbsp;&nbsp;&nbsp; OnDelete=snapshot_then_delete,\\<br>&nbsp;&nbsp;&nbsp; Snapshots=daily,Keep=7 \\<br>&nbsp; --secret-bindings file://bindings.json</div>
+<div class="code">afs agents create-agent \\<br>&nbsp; --team-id team_01JD3Z… \\<br>&nbsp; --name security-patcher \\<br>&nbsp; --template hermes-dev \\<br>&nbsp; --model-id claude-sonnet \\<br>&nbsp; --storage SizeGiB=20,StorageClass=gp3,\\<br>&nbsp;&nbsp;&nbsp; OnDelete=snapshot_then_delete,\\<br>&nbsp;&nbsp;&nbsp; Snapshots=daily,Keep=7 \\<br>&nbsp; --config-values file://config.json \\<br>&nbsp; --secret-bindings file://bindings.json</div>
 <div class="small muted" style="margin-top:8px">Every console action maps to one CLI operation and one REST call.</div></div></div></div>
 </div>
 """)
@@ -559,6 +564,34 @@ page("11-ta-members", "ta", team_nav("members", "ta"), f"""
 # ------------------------------------------------------------------------------------------------
 # Team viewer
 # ------------------------------------------------------------------------------------------------
+
+NSCONF = [
+    ("LOG_LEVEL", "info", "Default log level for agents", "5 agents", "Nov 02"),
+    ("GITHUB_ORG", "acme-payments", "GitHub organization the team's repos live in", "6 agents", "Sep 02"),
+    ("JIRA_PROJECT", "PAY", "Jira project for agent-created tickets", "3 agents", "Sep 14"),
+    ("MAX_OPEN_PRS", "5", "Cap on open PRs per agent", "2 agents", "Nov 18"),
+]
+
+page("16-ta-config-values", "ta", team_nav("config", "ta"), f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › Configuration values</div>
+<div class="card"><div class="ch"><div><h2>Namespace values <span class="cnt">(4)</span> <span class="info">Info</span></h2>
+<div class="sub">Non-secret settings shared by agents in namespace afs-t-payments-factory. An agent uses one by choosing <i>Use namespace value</i> for the same name. Changing a value restarts the agents that use it.</div></div>
+<div class="btns"><span class="btn dd">Actions</span><span class="btn p">Add value</span></div></div>
+<div class="tools"><div class="filter">🔍 Find values</div><div class="pager">‹ <b>1</b> › ⚙</div></div>
+<table><tr><th></th><th>Name</th><th>Value</th><th>Description</th><th>Used by</th><th>Last changed</th></tr>
+{"".join(f'<tr><td><span class="cb2"></span></td><td class="mono">{n}</td><td class="mono">{v}</td><td>{d}</td><td><a>{u}</a></td><td>{c}</td></tr>' for n, v, d, u, c in NSCONF)}
+</table></div>
+<div class="card"><div class="ch"><div><h2>Agent values <span class="cnt">(6)</span></h2>
+<div class="sub">What each agent receives and where it comes from. Edit an agent to change its values.</div></div></div>
+<table><tr><th>Agent</th><th>Name</th><th>Source</th><th>Effective value</th></tr>
+<tr><td><a>reviewer-bot</a></td><td class="mono">LOG_LEVEL</td><td><span class="badge b-per" style="white-space:nowrap">Namespace</span></td><td class="mono">info</td></tr>
+<tr><td><a>reviewer-bot</a></td><td class="mono">GITHUB_ORG</td><td><span class="badge b-per" style="white-space:nowrap">Namespace</span></td><td class="mono">acme-payments</td></tr>
+<tr><td><a>dependency-updater</a></td><td class="mono">LOG_LEVEL</td><td><span class="badge b-blue" style="white-space:nowrap">Agent value</span></td><td class="mono">debug</td></tr>
+<tr><td><a>dependency-updater</a></td><td class="mono">MAX_OPEN_PRS</td><td><span class="badge b-per" style="white-space:nowrap">Namespace</span></td><td class="mono">5</td></tr>
+<tr><td><a>incident-scribe</a></td><td class="mono">JIRA_PROJECT</td><td><span class="badge b-per" style="white-space:nowrap">Namespace</span></td><td class="mono">PAY</td></tr>
+<tr><td><a>incident-scribe</a></td><td class="mono">PAGER_SERVICE</td><td><span class="badge b-blue" style="white-space:nowrap">Agent value</span></td><td class="mono">payments-core</td></tr>
+</table></div>
+""")
 
 page("12-tv-team-overview", "tv", team_nav("overview", "tv"), team_overview("tv"))
 

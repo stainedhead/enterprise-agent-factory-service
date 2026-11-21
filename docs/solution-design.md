@@ -44,7 +44,7 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 | F6 | Budgets per team with alert thresholds and a hard cap enforced in near real time | J |
 | F7 | Budget and usage reporting: real time from the gateway, reconciled daily against CUR, including EKS compute | J |
 | F8 | Log delivery configuration per team (CloudWatch, S3, OTLP, Splunk/Datadog via HEC/API) | J |
-| F9 | Team configuration (allowed models, egress allow-list, resource quotas, environment variables) | J |
+| F9 | Team configuration (allowed models, egress allow-list, resource quotas) and non-secret configuration values at namespace and agent level | J |
 | F10 | Three roles: service admin, team-admin, team viewer. Enforced in API, respected by CLI and web | J |
 | F11 | Desired state stored in RDS PostgreSQL, versioned and audited. Exportable as a portable bundle and importable in another account or cluster | J |
 | F12 | Reconciler applies stored state on startup and continuously, recovering from failure and reverting manual drift | J |
@@ -112,6 +112,7 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 - `NetworkPolicy` default deny all ingress/egress, then allow DNS, allow egress to `afs-llm-gateway`, allow egress to the team's egress allow-list (FQDN rules with Cilium, or via an egress proxy).
 - ServiceAccounts per agent, EKS Pod Identity associations to the team's IAM role.
 - One StatefulSet with exactly one replica per agent (stable name, ServiceAccount and IAM session). There is no replica count: a team scales by adding agents.
+- One ConfigMap per agent (`agent-<name>-config`) holding its resolved configuration values (`afs.agent_config_resolved`), loaded with `envFrom` and mounted read-only at `/etc/afs/config` (one file per name). A change to a namespace value re-renders every ConfigMap that links to it and rolls those agents (a pod-template hash annotation), because environment variables only change on restart. A ConfigMap edited by hand is restored.
 - One persistent volume per agent from the StatefulSet's `volumeClaimTemplate` (EBS CSI, encrypted, `WaitForFirstConsumer`, tagged `afs-team-id` and `afs-agent-id`), mounted at `/var/lib/agent`. The StatefulSet's PVC retention policy is `Retain` for both scale-down and delete, so pausing or re-creating the StatefulSet never loses data; the reconciler alone deletes a volume, following the agent's on-delete rule. Snapshots are EBS snapshots through CSI `VolumeSnapshot`, taken on the agent's schedule, pruned to its retention count, and recorded in `agent_volume_snapshots`. The team's `ResourceQuota` includes `requests.storage`.
 - IAM role `afs-team-<id>` with an ABAC policy scoped by `aws:PrincipalTag/afs-team-id`.
 - Bedrock application inference profile per (team, model) with cost allocation tags.
@@ -242,7 +243,7 @@ Reserve → invoke → settle, as in section 3.1. Thresholds emit `budget.thresh
 - `config_revisions`: a trigger snapshots every change to versioned tables (who, when, full JSON), giving history and rollback ("restore revision N").
 - `audit_log`: append-only (UPDATE/DELETE revoked from the app role and blocked by trigger).
 - **Backups:** RDS automated backups with PITR, daily snapshot copied cross-region and cross-account (AWS Backup vault with vault lock).
-- **Export bundle:** `POST /v1/exports` produces a versioned, SHA-256-checksummed JSON (or YAML) document with `schemaVersion`, all teams, agents (including volume settings), members, bindings, budgets, configuration, secret *references* and each agent's latest volume *snapshot reference*. Import can restore volumes from those snapshots once they are shared with or copied to the target account and region. Stored in S3 and downloadable.
+- **Export bundle:** `POST /v1/exports` produces a versioned, SHA-256-checksummed JSON (or YAML) document with `schemaVersion`, all teams, agents (including volume settings and configuration values), namespace configuration values, members, bindings, budgets, configuration, secret *references* and each agent's latest volume *snapshot reference*. Import can restore volumes from those snapshots once they are shared with or copied to the target account and region. Stored in S3 and downloadable.
 - **Import:** `POST /v1/imports` with a mapping file (old account id → new, ARN rewrites, cluster id), dry-run by default, showing a plan (create/update/skip) before apply. Secrets must already exist (replicated via Secrets Manager multi-region replication or recreated) in the target account.
 - **Restart behavior:** the reconciler's startup full-reconcile re-applies everything. A brand-new cluster plus a restored DB converges to the full environment with no manual steps.
 
