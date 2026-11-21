@@ -46,6 +46,9 @@ this table and the README table in the same change.
   An API change lands there first; `@afs/sdk` and the CLI follow in their own PRs.
 - **The schema has one home.** Only `-db` changes tables. `-restapi` depends on a tagged `-db` release
   and runs its migrations through the `migrate` package.
+- **Shared contracts** between layers live in `docs/contracts/`: the database contract (`-db` → `-restapi`)
+  and the API contract (`-restapi` → `-cli`, `-website`). Each child has its own PRD
+  (`<repo-name>-PRD.md`) with user stories and acceptance criteria that refine the root PRD's stories.
 - **Cross-repo design decisions** are recorded in this root (`docs/solution-design.md`,
   `docs/architectural-decision-record.md`). Single-repo decisions go in that repository's `docs/`.
 
