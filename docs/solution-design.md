@@ -37,7 +37,7 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 | ID | Requirement | Source |
 |---|---|---|
 | F1 | Create, update, suspend, resume and delete teams. Each team maps to one isolated EKS namespace | J |
-| F2 | Define the agents in a team (template/image, persona, model, replicas, resources, secrets, schedule) | J |
+| F2 | Define the agents in a team (template/image, persona, model, resources, secrets, schedule). One agent is one pod | J |
 | F3 | Manage human teammates and their role on the team | J |
 | F4 | Manage agent identities (Kubernetes service account, AWS IAM role via Pod Identity, external identities such as a GitHub App installation) | J |
 | F5 | Manage secrets as references to AWS Secrets Manager. Values are write-only through the API and never stored in or returned by AFS | J |
@@ -111,6 +111,7 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 - `ResourceQuota`, `LimitRange`.
 - `NetworkPolicy` default deny all ingress/egress, then allow DNS, allow egress to `afs-llm-gateway`, allow egress to the team's egress allow-list (FQDN rules with Cilium, or via an egress proxy).
 - ServiceAccounts per agent, EKS Pod Identity associations to the team's IAM role.
+- One StatefulSet with exactly one replica per agent (stable name, ServiceAccount and IAM session). There is no replica count: a team scales by adding agents.
 - IAM role `afs-team-<id>` with an ABAC policy scoped by `aws:PrincipalTag/afs-team-id`.
 - Bedrock application inference profile per (team, model) with cost allocation tags.
 - ExternalSecret (External Secrets Operator) objects that project referenced Secrets Manager entries into the namespace.
@@ -143,7 +144,7 @@ At higher scale the spend counters move to ElastiCache (Redis/Valkey) with Postg
 | Compute | Pod Security Admission `restricted`. ResourceQuota/LimitRange. Optional dedicated Karpenter NodePool per sensitivity tier (taints + tolerations) for teams needing node-level isolation |
 | Kubernetes API | Agents' service accounts get no Kubernetes RBAC by default (`automountServiceAccountToken: false` except the projected gateway token). Humans have no kubectl access by default; team viewers can optionally get read-only via EKS access entries scoped to their namespace |
 | AWS IAM | One IAM role per team, ABAC by `afs-team-id` tag. Secrets, S3 prefixes, log groups and inference profiles are all tagged with the team id, and the policy only matches its own tag |
-| Secrets | Secrets Manager path `/afs/<env>/teams/<team-id>/<name>`, tag `afs-team-id`. KMS key per environment with an encryption context of team id |
+| Secrets | Secrets Manager name set by AFS, never by users: `<service>/<namespace>/<agent-name>/<secret-name>` or `<service>/<namespace>/_shared/<secret-name>` (§6). IAM uses prefix rules on that path, with tag `afs-team-id` as a second check. KMS key per environment with an encryption context of team id |
 | Data (AFS DB) | Every team-scoped table has `team_id`. API authorization filters on it. PostgreSQL row-level security as defense in depth (`app.allowed_team_ids` session setting) |
 | Spend | Separate inference profile, budget, counters and IAM deny per team |
 | Logs | Separate log group / S3 prefix / destination per team |
@@ -205,9 +206,11 @@ Agent actions in AWS carry session tags `afs-team-id`, `afs-agent-id`, so CloudT
 ## 6. Secrets management
 
 - AFS stores **references only**: ARN, version stage, rotation settings, description. Never the value.
-- Two creation modes: *register* an existing secret ARN (must carry the team's tag, validated by the reconciler), or *create* through the API, which streams the value straight to Secrets Manager (`PutSecretValue`) and discards it.
+- **One creation mode.** The API takes a scope (team-shared or one agent), a name, a description and the value. It creates the secret in Secrets Manager under the managed path, writes the value (`CreateSecret` / `PutSecretValue`), discards it, and stores the ARN. Registering an arbitrary existing ARN is not supported, because it would bypass the hierarchy.
+- **Managed hierarchy.** The Secrets Manager name is always `<service>/<namespace>/<agent-name>/<secret-name>`, or `<service>/<namespace>/_shared/<secret-name>` for team-shared secrets. `<service>` is the installation prefix (service setting `secrets.path_prefix`, default `afs`), and `<namespace>` is `afs-t-<slug>`. The database computes the path (`afs.secret_path`) and rejects an ARN that does not match it. Team slug, agent name and secret name are immutable, so a path never changes. `_shared` cannot collide with an agent name, because agent names start with a letter.
+- **Access by prefix.** `afs-api` may create and write values only under `<service>/*`. The team's External Secrets store reads `<service>/<namespace>/*`. A per-agent IAM role (AGT-6) reads `<service>/<namespace>/<agent-name>/*` and `<service>/<namespace>/_shared/*`. No human role reads values.
 - Values are write-only. There is no read-value endpoint. The API returns `lastChangedAt`, `versionId` and rotation status.
-- Bindings (`agent_secret_bindings`) say which agent receives which secret as an env var or file. The reconciler renders ExternalSecret objects; External Secrets Operator syncs them using the team's IAM role, so a team's ESO access is limited by ABAC to its own secrets.
+- Bindings (`agent_secret_bindings`) say which agent receives which secret as an env var or file. A team-shared secret can be bound to any agent of the team; an agent secret only to its own agent (enforced in the database). The reconciler renders ExternalSecret objects; External Secrets Operator syncs them using the team's IAM role, so a team's ESO access is limited by ABAC to its own secrets.
 - Rotation: Secrets Manager rotation Lambdas where applicable; ESO refresh interval 1h; a rotate action triggers a rolling restart of bound agents.
 
 ## 7. Budgets and cost
@@ -273,7 +276,7 @@ GET    /v1/teams/{teamId}/agents       POST
 GET/PATCH/DELETE /v1/teams/{teamId}/agents/{agentId}
 POST   /v1/teams/{teamId}/agents/{agentId}:restart    POST …:scale
 GET    /v1/teams/{teamId}/identities   POST, GET/DELETE /{identityId}
-GET    /v1/teams/{teamId}/secrets      POST (register or create)
+GET    /v1/teams/{teamId}/secrets      POST create {scope, agentId?, name, description, value}; path is server-set
 GET/PATCH/DELETE /v1/teams/{teamId}/secrets/{secretId}
 PUT    /v1/teams/{teamId}/secrets/{secretId}/value    write-only, 204
 POST   /v1/teams/{teamId}/secrets/{secretId}:rotate

@@ -42,3 +42,30 @@ Accepted, Proposed (needs review), Superseded.
   TypeScript JavaScript API, which 7.0 does not provide in the same form.
 - Decision: Biome for lint and format; `tsc` 7 for type-checking only (`--noEmit` or library builds).
 - Consequences: no dependency on the TypeScript JS API. Revisit when typescript-eslint supports TS 7.
+
+## ADR-005 One agent is one pod
+
+- Status: Proposed (from J's PRD review, 2026-11-21)
+- Context: each agent has its own name, ServiceAccount, IAM session tags, external identities (for
+  example a GitHub App installation) and audit trail. Replicas of one agent would share that identity,
+  with no sensible way to split work between them.
+- Decision: no replica count. The reconciler renders each agent as a StatefulSet with exactly one
+  replica; pause scales it to zero. A team adds capacity by adding agents. The exception is the phase 2
+  swarm (AGT-8): a swarm holds several pools of different identities that work together; each pool has
+  one identity and a worker count, and its workers share that identity because they do similar work
+  across many repositories. Swarm → pools (one identity, N workers) → worker pods. Its schema lands with
+  phase 2 as a new migration.
+- Consequences: `agents.replicas` is dropped (db migration 000003); the console and CLI have no scale
+  action. Every action in AWS, GitHub or the audit log maps to exactly one running agent.
+
+## ADR-006 AFS-managed Secrets Manager hierarchy
+
+- Status: Proposed (from J's PRD review, 2026-11-21)
+- Context: secrets need simple, predictable access rules and must not depend on users choosing names.
+- Decision: AFS alone names every secret `<service>/<namespace>/<agent-name>/<secret-name>`, or
+  `<service>/<namespace>/_shared/<secret-name>` for team-shared secrets. Users choose only scope, name and
+  value. The database computes the path and rejects an ARN that does not match. Registering arbitrary
+  existing ARNs is dropped. IAM policies are prefix rules at the service, team and agent level, with the
+  `afs-team-id` tag as a second check.
+- Consequences: team slug, agent name and secret name are immutable. An agent secret can be bound only
+  to its own agent. Moving a secret between scopes means creating a new one.

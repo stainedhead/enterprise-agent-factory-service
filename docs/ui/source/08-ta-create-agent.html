@@ -142,18 +142,17 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <div class="field"><label>Image</label><div class="hint">Pinned by digest. Tags are not accepted.</div><div class="input mono">ghcr.io/stainedhead/hermes-dev@sha256:4b1e…77</div></div>
 <div class="field"><label>Persona and instructions</label><div class="input" style="height:60px">Keeps payments services free of known-vulnerable dependencies; opens PRs, never merges.</div></div>
 </div></div>
-<div class="card"><div class="ch"><h2>Model and capacity</h2></div><div class="cb"><div class="grid g3">
+<div class="card"><div class="ch"><h2>Model and resources</h2></div><div class="cb"><div class="grid g2">
 <div class="field"><label>Model</label><div class="hint">Enabled for this team</div><div class="input">claude-sonnet ▾</div></div>
-<div class="field"><label>Replicas</label><div class="input">2</div></div>
-<div class="field"><label>Resources per replica</label><div class="input">2 vCPU · 8 GiB ▾</div></div></div></div></div>
-<div class="card"><div class="ch"><h2>Secrets</h2><span class="btn sm">Add secret binding</span></div>
-<table><tr><th>Secret</th><th>Delivery</th><th>Target</th><th></th></tr>
-<tr><td>github-bot-key</td><td>Environment variable</td><td class="mono">GITHUB_APP_KEY</td><td><a>Remove</a></td></tr>
-<tr><td>snyk-token</td><td>File</td><td class="mono">/var/run/secrets/snyk/token</td><td><a>Remove</a></td></tr></table></div>
+<div class="field"><label>Resources</label><div class="hint">One pod per agent. Add agents to add capacity.</div><div class="input">2 vCPU · 8 GiB ▾</div></div></div></div></div>
+<div class="card"><div class="ch"><div><h2>Secrets</h2><div class="sub">Team-shared secrets can be bound now. Secrets only this agent can read are added after it is created, under Secrets.</div></div><span class="btn sm">Add secret binding</span></div>
+<table><tr><th>Secret</th><th>Scope</th><th>Delivery</th><th>Target</th><th></th></tr>
+<tr><td>github-bot-key</td><td><span class="badge b-per" style="white-space:nowrap">Team shared</span></td><td>Environment variable</td><td class="mono">GITHUB_APP_KEY</td><td><a>Remove</a></td></tr>
+<tr><td>artifactory-reader</td><td><span class="badge b-per" style="white-space:nowrap">Team shared</span></td><td>File</td><td class="mono">/var/run/secrets/artifactory/token</td><td><a>Remove</a></td></tr></table></div>
 <div style="display:flex;justify-content:flex-end;gap:8px"><span class="btn" style="border:0">Cancel</span><span class="btn">Preview CLI command</span><span class="btn p">Create agent</span></div>
 </div>
 <div style="width:360px"><div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb">
-<div class="code">afs agents create-agent \<br>&nbsp; --team-id team_01JD3Z… \<br>&nbsp; --name security-patcher \<br>&nbsp; --template hermes-dev \<br>&nbsp; --model-id claude-sonnet \<br>&nbsp; --replicas 2 \<br>&nbsp; --secret-bindings file://bindings.json</div>
+<div class="code">afs agents create-agent \<br>&nbsp; --team-id team_01JD3Z… \<br>&nbsp; --name security-patcher \<br>&nbsp; --template hermes-dev \<br>&nbsp; --model-id claude-sonnet \<br>&nbsp; --secret-bindings file://bindings.json</div>
 <div class="small muted" style="margin-top:8px">Every console action maps to one CLI operation and one REST call.</div></div></div></div>
 </div>
 </main></div></body></html>
