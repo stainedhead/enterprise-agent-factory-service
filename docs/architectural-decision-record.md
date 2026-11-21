@@ -51,8 +51,10 @@ Accepted, Proposed (needs review), Superseded.
   with no sensible way to split work between them.
 - Decision: no replica count. The reconciler renders each agent as a StatefulSet with exactly one
   replica; pause scales it to zero. A team adds capacity by adding agents. The exception is the phase 2
-  swarm pool (AGT-8): its workers do similar work across many repositories, need no separate identities,
-  and share one swarm-level identity, secret set and budget, so a pool has a worker count.
+  swarm (AGT-8): a swarm holds several pools of different identities that work together; each pool has
+  one identity and a worker count, and its workers share that identity because they do similar work
+  across many repositories. Swarm → pools (one identity, N workers) → worker pods. Its schema lands with
+  phase 2 as a new migration.
 - Consequences: `agents.replicas` is dropped (db migration 000003); the console and CLI have no scale
   action. Every action in AWS, GitHub or the audit log maps to exactly one running agent.
 

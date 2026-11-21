@@ -233,12 +233,15 @@ are used, so they can troubleshoot, but cannot create, rotate or bind them, and 
 hard cap, an expiry and the teardown rule, and shows an estimate of daily cost and when the cap would be
 reached.
 
-**Swarm pools (phase 2).** A swarm is the exception to one-agent-one-pod. Its workers do similar work
-across many repositories (for example the same dependency or CVE fix), so they do not need separate
-identities. A swarm pool is one definition with a worker count: every worker runs the same image and
-shares one swarm-level identity (one ServiceAccount, one IAM role, one set of secrets, one GitHub
-identity) and one lifetime budget. Audit and usage are attributed to the swarm, with the worker's pod
-name recorded for troubleshooting. Long-running team agents keep their own identities (AGT-7).
+**Swarms and pools (phase 2).** A swarm is an ephemeral team, and it still runs several agents with
+different identities that work together, for example a scanner, a PR writer and a reviewer. The
+difference is that each of those agents can be a **pool**: one definition with its own identity (one
+ServiceAccount, one IAM role, its own secrets and GitHub identity) and a worker count. Workers in a pool do
+similar work across many repositories, so they share the pool's identity instead of having one each. The
+model is swarm (ephemeral team, one lifetime budget and expiry) → pools (one identity each, N workers) →
+workers (pods). Pools in a swarm can be grouped (for example "scan" and "fix" stages) and hand work to
+each other. Audit and usage are attributed to the pool, with the worker's pod name recorded for
+troubleshooting. Long-running team agents stay one identity, one pod (AGT-7).
 
 ![Ephemeral team budget](docs/ui/14-admin-ephemeral-team.png)
 
@@ -287,7 +290,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | AGT-5 | External identities (GitHub App installation, bot accounts) are modeled per agent with credentials as secret references | P1 |
 | AGT-6 | Optional per-agent IAM role for least privilege | P1 |
 | AGT-7 | One agent is one identity and one pod (a StatefulSet with one replica, so the name, ServiceAccount, IAM session and audit trail stay stable). There is no replica count. A team scales by adding agents. Phase 2 swarm pools are the exception (AGT-8) | P0 |
-| AGT-8 | Swarm pools (ephemeral teams only): one definition with a worker count; all workers share one swarm-level identity, secrets and lifetime budget; usage and audit attributed to the swarm, with the worker pod recorded | P2 |
+| AGT-8 | Swarms (ephemeral teams) hold several pools that work together. Each pool has its own identity, secrets and a worker count; its workers share that identity. Pools can be grouped into stages. The swarm has one lifetime budget; usage and audit are attributed to the pool, with the worker pod recorded | P2 |
 
 ### 6.3 Secrets
 
