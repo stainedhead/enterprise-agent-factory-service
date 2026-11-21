@@ -66,10 +66,13 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 
 ### 2.3 Assumptions and open questions
 
-1. **IdP:** OIDC-compliant enterprise IdP (Entra ID or Okta). Groups claim available for role mapping. *Confirm which.*
-2. **Cluster topology:** one shared EKS cluster per environment (dev/stage/prod) to start. The design allows a `cluster_id` per team later.
-3. **Network policy engine:** VPC CNI native network policy, or Cilium if FQDN egress rules are wanted. *Recommend Cilium for FQDN egress (GitHub, Jira, package registries).*
-4. **Agentic Teammates contract:** assumed to expose a Kubernetes CRD (e.g. `AgentTeam`/`Agent`) or Helm chart. The reconciler renders whichever it exposes. *Confirm the interface.*
+Decided by J on 2026-11-21 (PRD §10.1):
+
+1. **IdP:** Okta (default) and Microsoft Entra ID, both OIDC with a groups claim, configured in `identity_providers` at service level and optionally per team. `users` are keyed by (issuer, subject), so one person can come from either.
+2. **Cluster topology:** one shared EKS cluster per environment (dev/stage/prod). The design allows a `cluster_id` per team later.
+3. **Network policy engine:** Cilium (FQDN egress, Hubble flow logs).
+4. **Agentic Teammates contract:** Kubernetes CRDs. The reconciler renders the Agentic Teammates custom resources for each agent.
+5. **TypeScript runtime:** Bun where available (installs, scripts, tests, dev server), Node.js 22 as the fallback. `tsc` 7 still type-checks; Biome still lints.
 5. **Currency:** USD only.
 
 ## 3. Architecture overview
@@ -119,7 +122,7 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 - The AWS Organizations account list, mirrored hourly into `org_aws_accounts` (id, name, status). Each link is verified by assuming its role with the agent's identity on creation, daily and on demand; the result (`pending_trust`, `verified`, `failed`) is written to `agent_role_links`. Links whose account falls outside the filter or is suspended are set to `disabled` and removed from the agent's grants and profile file.
 - Bedrock application inference profile per (team, model) with cost allocation tags.
 - ExternalSecret (External Secrets Operator) objects that project referenced Secrets Manager entries into the namespace.
-- Agent workloads rendered from the Agentic Teammates CRD/Helm chart.
+- Agent workloads rendered as Agentic Teammates custom resources (CRD).
 - Log delivery (Fluent Bit output per team or CloudWatch subscription filters).
 
 It records `observed_generation`, phase and conditions per resource in `resource_status`, which the API and UI display. Drift (live state differs from desired) is corrected and logged as an audit event with actor `system:reconciler`. Deletes use an ordered finalizer flow: scale agents to zero, apply each agent's on-delete rule to its volume (final snapshot, then delete or retain), revoke IAM, delete inference profiles, delete namespace, mark row `deleted`.
@@ -259,6 +262,7 @@ Reserve → invoke → settle, as in section 3.1. Thresholds emit `budget.thresh
 - Real-time view: from `spend_counters` and `usage_events` (seconds).
 - Daily reconciled view: from CUR via the ingestor, including EKS compute (split cost allocation by namespace) and any non-gateway spend.
 - Showback/chargeback export by cost center (CSV via API).
+- **Credential hygiene.** Agent logs pass through a Fluent Bit redaction filter before delivery: values that look like passwords, tokens or keys, and the values of the agent's bound secrets (loaded as hashes, never as plaintext), are replaced with `[redacted:<8-char hash prefix>]`. Connections to a system's sign-in endpoints are logged as `agent.external_login` events.
 - **Agent activity.** An activity collector in `afs-reconciler` writes one `agent_activity` row per running agent every five minutes. It combines the window's `usage_events` (model calls, tokens, cost), the agent's status endpoint (the Agentic Teammates runtime reports busy or idle and a short note of what it is doing), pod CPU and memory from the metrics API, and the pod's phase. *Working* = any model call, a busy report, or CPU above `reports.idle_cpu_millicores` (service setting, default 50). Paused, stopped, unhealthy and budget-blocked agents are recorded as such. `agent_activity_daily` gives time in state and utilization; `agent_activity_current` gives the current state and `idle_since`.
 - **External traffic.** A traffic collector reads Cilium Hubble flow logs (L3/L4 flows with the DNS name each connection was for, and the policy verdict) and writes `external_traffic` rows per agent, host and verdict every five minutes, matched to the agent's external systems. Where an egress proxy terminates HTTP for a system, it adds request and error counts. Denied flows record the reason (system off at service, team or agent level, or not in the catalog), and a spike in denials raises an `egress.denied_spike` event.
 - **Report API.** `GET /v1/reports/{usage|costs|activity|traffic}` (service admins, all teams) and `GET /v1/teams/{teamId}/reports/{…}` and `GET /v1/teams/{teamId}/agents/{agentId}/reports/{…}` take `from`, `to`, `groupBy` (team, agent, model, system, day, hour) and filters, and return JSON or CSV (`Accept: text/csv`). Queries read the daily views for ranges over two days and the five-minute tables otherwise. Scheduled reports are stored per team and delivered through notification channels.
@@ -382,6 +386,7 @@ web/src/
   main/            composition root: wires adapters into use cases, provides via context
 ```
 
+- Runtime: Bun where available for install, scripts, tests and the dev server; Node.js 22 with pnpm as the fallback (D8).
 - Stack: React 19, React Router, TanStack Query (caching in presentation, not in domain), Vite for bundling, `tsc` 7 for type-checking (`--noEmit`), Vitest for unit tests of domain and use cases, Playwright for e2e.
 - Permission checks live in `domain/permission.ts` (`can(principal, "agents:write", teamId)`) and are used by view models to hide or disable controls. The API remains authoritative; a 403 surfaces as an "access denied" banner.
 - No secret value is ever held in client state beyond the input field during a create/rotate submit.
@@ -404,7 +409,7 @@ enterprise-agent-factory-service/              docs-only root: PRD, this design,
     deploy/helm/  deploy/terraform/
   enterprise-agent-factory-service-cli/        Go 1.27
     cmd/afs  internal/cli  (client generated from the OpenAPI contract)
-  enterprise-agent-factory-service-website/    TypeScript 7 pnpm workspace
+  enterprise-agent-factory-service-website/    TypeScript 7 workspace (Bun where available, pnpm/Node fallback)
     packages/sdk/      @afs/sdk
     apps/console/      web management console (clean architecture)
 ```
@@ -424,6 +429,6 @@ enterprise-agent-factory-service/              docs-only root: PRD, this design,
 | Agent → Bedrock auth | Projected SA token to gateway; gateway assumes team role | Agents call Bedrock directly | Direct calls cannot be metered or capped in real time |
 | Secrets | Secrets Manager refs + ESO | Store encrypted values in DB | Keeps AFS out of the secret blast radius |
 | CLI language | Go | Python (like AWS CLI) | Single static binary, shares API types |
-| Network policy | Cilium (recommended) | VPC CNI network policy | FQDN egress rules for SaaS endpoints |
+| Network policy | Cilium (decided) | VPC CNI network policy | FQDN egress rules for SaaS endpoints |
 | Egress control | External systems catalog with service → team → agent opt-outs, rendered as per-agent FQDN policy | Free-form host allow-list per team | Named, documented, centrally governed services; per-agent least privilege; one place to see who can reach what |
 | Cross-account access | Dedicated agent role + role links with external IDs, inside a per-team glob filter | Shared team role trusted by every target account | Least privilege per agent, CloudTrail attribution in the target account, and a guardrail central teams control |

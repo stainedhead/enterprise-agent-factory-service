@@ -158,8 +158,9 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <div class="hdr"><div><h1>payments-factory</h1><div class="desc"><span class="st ok">Active</span> · namespace afs-t-payments-factory</div></div><div class="btns"><span class="btn">Suspend</span><span class="btn p">Edit</span></div></div>
 <div class="tabs"><span>Details</span><span>Members</span><span>Budget</span><span class="on">AWS account access</span><span>Audit</span></div>
 <div class="card"><div class="ch"><div><h2>Allowed accounts <span class="info">Info</span></h2>
-<div class="sub">Organization accounts this team's agents may assume roles in. Patterns match account ids or names; <span class="mono">*</span> and <span class="mono">?</span> are wildcards, and <span class="mono">*</span> alone means every account. Team-admins see this list but cannot change it.</div></div>
+<div class="sub">Organization accounts this team's agents may assume roles in. Patterns match account ids or names; <span class="mono">*</span> and <span class="mono">?</span> are wildcards, and <span class="mono">*</span> alone means every account. Team-admins see this list, and can change it only if the team manages its own accounts.</div></div>
 <div class="btns"><span class="btn p">Save changes</span></div></div><div class="cb">
+<div class="field"><label>Who manages this list</label><div style="display:flex;gap:10px;align-items:center"><span class="tg"></span> <span>Team manages its own accounts</span><span class="muted small">Off: only service admins change the list. On: this team's admins can change it too.</span></div></div>
 <div class="field"><label>Patterns</label><div class="hint">One per line. Up to 50.</div>
 <div class="input mono" style="height:auto;line-height:1.7">payments-*<br>777788889999</div></div>
 <div class="alert"><span class="ic">ⓘ</span><div class="small">Enforced three times: the API refuses links outside the filter, the database rejects them, and the team's IAM permissions boundary only allows <span class="mono">sts:AssumeRole</span> into matching accounts. Narrowing the filter disables links that fall outside it.</div></div>

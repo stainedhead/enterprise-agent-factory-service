@@ -219,6 +219,10 @@ def st(kind, text):
     return f'<span class="st {kind}">{text}</span>'
 
 
+def tg(on, dis=False):
+    return f'<span class="tg{" on" if on else ""}{" dis" if dis else ""}"></span>'
+
+
 def bar(pct, cls=""):
     return f'<div class="bar {cls}"><i style="width:{min(pct,100)}%"></i></div>'
 
@@ -232,7 +236,6 @@ page("01-admin-dashboard", "admin", admin_nav("dash"), f"""
 <div class="hdr"><div><h1>Service dashboard <span class="info">Info</span></h1>
 <div class="desc">Fleet health, spend and reconciliation across all teams in prod.</div></div>
 <div class="btns"><span class="btn">Export showback CSV</span><span class="btn p">Create team</span></div></div>
-<div class="alert warn"><span class="ic">⚠</span><div><b>Cost reconciliation variance on 1 team.</b> search-relevance: gateway estimate is 4.2% below billed Bedrock cost for 2026-11-18 (threshold 3%). <a>Review reconciliation</a></div></div>
 <div class="grid g4">
  <div class="card"><div class="ch"><h2>Teams</h2></div><div class="cb"><div class="big">42</div><div class="small muted">38 persistent · 4 ephemeral</div></div></div>
  <div class="card"><div class="ch"><h2>Agents running</h2></div><div class="cb"><div class="big">318</div><div class="small muted">of 341 desired · 6 paused</div></div></div>
@@ -650,8 +653,9 @@ page("18-admin-team-aws-accounts", "admin", admin_nav("teams"), f"""
 <div class="hdr"><div><h1>payments-factory</h1><div class="desc">{st('ok','Active')} · namespace afs-t-payments-factory</div></div><div class="btns"><span class="btn">Suspend</span><span class="btn p">Edit</span></div></div>
 <div class="tabs"><span>Details</span><span>Members</span><span>Budget</span><span class="on">AWS account access</span><span>Audit</span></div>
 <div class="card"><div class="ch"><div><h2>Allowed accounts <span class="info">Info</span></h2>
-<div class="sub">Organization accounts this team's agents may assume roles in. Patterns match account ids or names; <span class="mono">*</span> and <span class="mono">?</span> are wildcards, and <span class="mono">*</span> alone means every account. Team-admins see this list but cannot change it.</div></div>
+<div class="sub">Organization accounts this team's agents may assume roles in. Patterns match account ids or names; <span class="mono">*</span> and <span class="mono">?</span> are wildcards, and <span class="mono">*</span> alone means every account. Team-admins see this list, and can change it only if the team manages its own accounts.</div></div>
 <div class="btns"><span class="btn p">Save changes</span></div></div><div class="cb">
+<div class="field"><label>Who manages this list</label><div style="display:flex;gap:10px;align-items:center">{tg(False)} <span>Team manages its own accounts</span><span class="muted small">Off: only service admins change the list. On: this team's admins can change it too.</span></div></div>
 <div class="field"><label>Patterns</label><div class="hint">One per line. Up to 50.</div>
 <div class="input mono" style="height:auto;line-height:1.7">payments-*<br>777788889999</div></div>
 <div class="alert"><span class="ic">ⓘ</span><div class="small">Enforced three times: the API refuses links outside the filter, the database rejects them, and the team's IAM permissions boundary only allows <span class="mono">sts:AssumeRole</span> into matching accounts. Narrowing the filter disables links that fall outside it.</div></div>
@@ -665,9 +669,6 @@ page("18-admin-team-aws-accounts", "admin", admin_nav("teams"), f"""
 </table></div>
 <div class="card"><div class="cb"><div class="k small muted">Equivalent CLI</div><div class="code">afs teams update-team --team-id team_01JD3Z… --allowed-aws-accounts "payments-*" 777788889999</div></div></div>
 """)
-
-def tg(on, dis=False):
-    return f'<span class="tg{" on" if on else ""}{" dis" if dis else ""}"></span>'
 
 CAT = [('Atlassian (Jira and Confluence)', 'Developer tools', '*.atlassian.net, api.atlassian.com +1', True, 14, 'Built in'), ('GitHub', 'Developer tools', 'github.com, api.github.com +2', True, 18, 'Built in'), ('Microsoft Outlook', 'Email', 'graph.microsoft.com, outlook.office365.com +1', True, 9, 'Built in'), ('Microsoft Teams', 'Collaboration', 'graph.microsoft.com +2', True, 11, 'Built in'), ('Microsoft Azure', 'Cloud', 'management.azure.com +2', True, 3, 'Built in'), ('Google Workspace and Cloud', 'Cloud', '*.googleapis.com, accounts.google.com', True, 5, 'Built in'), ('Slack', 'Collaboration', 'slack.com, *.slack.com', True, 12, 'Built in'), ('Okta', 'Identity', '*.okta.com, *.oktapreview.com', True, 4, 'Built in'), ('OpenAI', 'LLM · not Bedrock', 'api.openai.com', False, 0, 'Built in'), ('OpenRouter', 'LLM · not Bedrock', 'openrouter.ai', False, 0, 'Built in'), ('Internal artifact registry', 'Developer tools', 'nexus.corp.example:8443', True, 16, 'Custom')]
 
