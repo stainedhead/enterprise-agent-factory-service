@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract v1 at schema 000014 (2026-11-21). 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). Planned first release containing 000011 to 000014: `v0.13.0` |
+| **Status** | Contract v1 at schema 000016 (2026-11-21). 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). Planned first release containing 000011 to 000016: `v0.13.0` |
 | **Provider** | [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db): migrations, roles, row-level security, `migrate` Go package, `afs-migrate` |
 | **Consumer** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi): `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing` |
 | **Full data dictionary** | `-db/docs/data-model.md` (every table, column rule and function). This document is the interface: who connects how, what each service may touch, and how failures surface |
@@ -12,7 +12,7 @@
 | Rule | Detail |
 |---|---|
 | Module | `github.com/stainedhead/enterprise-agent-factory-service-db` at a semver tag. `-restapi` pins it in `go.mod`; it never vendors SQL or defines tables |
-| Migrations | Embedded (`migrations.FS`). `afs-api` runs `migrate.Up` at startup under a PostgreSQL advisory lock; other services check `migrate.Version` and refuse to start if the schema is older than the version they were built against |
+| Migrations | Embedded (`migrations.FS`). `afs-api` runs `migrate.Up` at startup under a PostgreSQL advisory lock; other services check `migrate.Version` and refuse to start if the schema is older than the version they were built against. `migrate.Up` and `migrate.Down` take options: `migrate.WithLockTimeout(d)` sets `lock_timeout` in each migration transaction (default `migrate.DefaultLockTimeout`, 10 s; 0 disables; negative is `migrate.ErrNegativeLockTimeout`), so a migration blocked on a table lock fails with `55P03` instead of queueing traffic behind it; `afs-migrate --lock-timeout` is the same |
 | Releases | A new migration is a minor release (`v0.N.0`). A fix to a function or view by a new migration is a patch release. Merged migrations never change; the runner refuses a changed checksum |
 | Forward only | Production never runs `down`. Every migration is online-safe and notes its lock impact |
 | Compatibility | A release must keep the previous `-restapi` release working (expand, then contract across two releases). Dropping a column used by a released `-restapi` needs that release retired first |
@@ -27,9 +27,9 @@ authentication on RDS (no static passwords). Pool sizes are per service.
 | Role | Service | May | May not |
 |---|---|---|---|
 | `afs_owner` | `afs-migrate`, `afs-api` at startup (migration step only, separate connection) | DDL | Be used for request traffic |
-| `afs_app` | `afs-api` | Read and write desired state; insert audit and outbox; read usage, costs, status, revisions, reports | Write status, spend counters, usage, activity, traffic; update or delete audit |
-| `afs_reconciler` | `afs-reconciler` (incl. activity and traffic collectors, outbox publisher, teardown, work order intake and tracking) | Read everything except idempotent response bodies and API key hashes; `LISTEN afs_desired_state`; open spend periods (`ensure_spend_counter`), release expired reservations, clear expired ceiling overrides and lower budgets to the base ceiling, drop partitions older than 13 months; write `resource_status`, lifecycle `state`, teardown columns, inference profile ARNs, identity and role-link status (agents and pools), `org_aws_accounts`, snapshots, `agent_activity`, `external_traffic`, tag sets; insert work orders from EventBridge, assign them, update repository progress from GitHub, insert work order notifications; purge expired idempotency keys; mark outbox published; create partitions; insert audit (drift) | Change desired state chosen by people |
-| `afs_gateway` | `afs-gateway` | Read teams, agents, pools, models (incl. `max_output_tokens`), prices, budgets, effective tags; `ensure_spend_counter`, `reserve_spend_held` / `settle_reservation` (and the older `reserve_spend` / `settle_spend`); insert `usage_events` (stamped with `tag_set_id`), tag sets, threshold events, outbox | Anything else |
+| `afs_app` | `afs-api` | Read and write desired state; insert audit and outbox; read usage, costs, status, revisions, reports; before the caller's scope is known, `authenticate_api_key`, `resolve_workload` and `team_directory` (000016) | Write status, spend counters, usage, activity, traffic; update or delete audit |
+| `afs_reconciler` | `afs-reconciler` (incl. activity and traffic collectors, outbox publisher, teardown, work order intake and tracking) | Read everything except idempotent response bodies and API key hashes; `LISTEN afs_desired_state`; open spend periods (`ensure_spend_counter`), release expired reservations, clear expired ceiling overrides and lower budgets to the base ceiling, drop partitions older than 13 months; write `resource_status`, lifecycle `state`, teardown columns, inference profile ARNs, identity and role-link status (agents and pools), `org_aws_accounts`, snapshots, `agent_activity`, `external_traffic`, tag sets; insert work orders from EventBridge, assign them and create their remediation teams (`instantiate_work_order_team`, 000016), mark pools deleted (000016), update repository progress from GitHub, insert work order notifications; purge expired idempotency keys; mark outbox published; create partitions; insert audit (drift) | Change desired state chosen by people |
+| `afs_gateway` | `afs-gateway` | Read teams, agents, pools, models (incl. `max_output_tokens`), prices, budgets, effective tags; `ensure_spend_counter`, `reserve_spend_held` / `settle_reservation` (and the older `reserve_spend` / `settle_spend`); insert `usage_events` (stamped with `tag_set_id`), tag sets, threshold events, outbox; `resolve_workload` (000016) | Anything else |
 | `afs_billing` | `afs-billing` | Read usage, teams, agents, models, prices, budgets, activity, traffic; write `cost_daily`, `cost_reconciliations`, `cost_allocation_tag_status`, tag sets; insert and supersede `model_price_proposals`; read `report_schedules` and `notification_channels` and update a schedule's run columns; insert outbox | Approve prices; change desired state |
 | `afs_readonly` | Reporting and support | Read everything except API key hashes and audit before/after payloads | Write |
 
@@ -63,11 +63,11 @@ R = read, W = insert/update/delete, I = insert only, U(cols) = update listed col
 | `team_models` | R; W service admins only (000013) | R | R | R |
 | `users` | R; W own row only, or service admins (000013) | R | — | — |
 | `role_bindings` | W: service-level roles (`service_admin`, `security_operator`) only by service admins; team roles only for teams the caller sees (000013) | R | — | — |
-| `api_keys` (incl. service-level `security_operator` keys) | W | R (not `key_hash`) | — | — |
-| `swarm_stages`, `agent_pools`, `pool_handoffs`, `pool_secret_bindings`, `pool_config_values`, `pool_role_links` | W (ephemeral teams only, by trigger) | R; U(pool role-link status) | R (agent_pools) | R |
+| `api_keys` (incl. service-level `security_operator` keys) | W; lookup by hash before scope through F `authenticate_api_key` (000016). `created_at` is set by the database on insert and cannot change (`55000`, 000015) | R (not `key_hash`) | — | — |
+| `swarm_stages`, `agent_pools`, `pool_handoffs`, `pool_secret_bindings`, `pool_config_values`, `pool_role_links` | W (ephemeral teams only, by trigger) | R; U(pool role-link status); U(`agent_pools.state`, `deleted_at`) (000016); remediation teams' rows through F `instantiate_work_order_team` (000016) | R (agent_pools) | R |
 | `swarm_templates` | W (service admins) | R | — | — |
 | `agent_templates` (000014: `id` `tpl_…`, `name`, `description`, `harness`, `default_resources`, `allowed_image_digests`, `current_image_digest`, `enabled`) | R all; W service admins only (`app_write` policy: `42501` on insert, zero rows on update and delete for others). The API lists only enabled templates to teams. Delete of a template in use → `23503` (`Conflict`: disable it instead) | R (flags existing agents and pools with `TemplateRetired`) | — | — |
-| `work_orders` | W security operators and service admins; team callers R only; D security operators and service admins (000012) | I (EventBridge intake), U(team_id, status, assigned_at, completed_at) | — | — |
+| `work_orders` | W security operators and service admins; team callers R only; D security operators and service admins (000012) | I (EventBridge intake), U(team_id, status, assigned_at, completed_at); F `instantiate_work_order_team` creates the team and assigns the order (000016) | — | — |
 | `work_order_repos` | I, U security operators and service admins; the assigned team may U only its repositories' progress columns (`work_order_repo_progress_guard`, `42501`, 000012); D security operators and service admins | I, U(status, pr_url, pr_number, detail, merged_at) | — | — |
 | `work_order_notifications` | R | I (once per kind and recipient) | — | — |
 | `report_schedules` | W (team-admins; team's own channels only) | — | — | R, U(next_run_at, last_run_at, last_status, last_error) |
@@ -82,13 +82,13 @@ R = read, W = insert/update/delete, I = insert only, U(cols) = update listed col
 | `spend_counters`, `budget_threshold_events` | R | F `ensure_spend_counter` (period start), U(limit_usd) | F `ensure_spend_counter`, `reserve_spend_held`, `settle_reservation` (and `reserve_spend`, `settle_spend`); I threshold events | R |
 | `spend_reservations` (000013: `id` uuid, `budget_id`, `period_start`, `amount_usd`, `holder`, `expires_at`) | — | F `release_expired_reservations` (every minute) | through the functions only | — |
 | `usage_events` | R | F `ensure_usage_partition`, `drop_partitions_older_than` | I | R |
-| `cost_daily` (with `tag_set_id`, `pool_id`), `cost_reconciliations` | R | — | — | W |
+| `cost_daily` (with `tag_set_id`, `pool_id`), `cost_reconciliations` | R | — | — | W. `cost_reconciliations.status` is derived by trigger from the amounts and `billing.variance_alert_pct` (the written value is replaced); amounts below 0 are `23514` (000015) |
 | `model_price_proposals` | R, U(status, note) (approve and reject, service admins) | R | — | I, U(status) (supersede) |
 | `agent_activity`, `external_traffic` (with `tag_set_id`, `pool_id`, `worker_pod`) | R | W, F `ensure_activity_partition`, `ensure_traffic_partition`, `drop_partitions_older_than` | — | R |
 | `resource_status` | R | W | — | — |
 | `config_revisions` | R | R | — | — |
-| `audit_log` | I | I | — | — |
-| `outbox_events` | I | R, U(published_at, attempts) | I | I |
+| `audit_log` | I within the caller's teams, and any team or none when `actor_id = afs.current_actor()` (policy `app_own_audit`, 000016: denials on service routes and on teams the caller does not see). Reads stay team-scoped, so no `INSERT … RETURNING` for such rows | I | — | — |
+| `outbox_events` | I within the caller's teams; with `afs.security_operator` on, `work_order.*` events on `work_orders` for any team or none (policy `app_operator_work_order_events`, 000016); no `INSERT … RETURNING` for such rows | R, U(published_at, attempts) | I | I |
 | `export_bundles` (000014: nullable `s3_uri` and `sha256`, `download_url`, `download_expires_at`, `size_bytes`) | W (export request rows in `pending`, with no `s3_uri` or `sha256` yet; import rows with the applied report, no `s3_uri`, with the `sha256` of the body) | R, U(status, summary, finished_at, s3_uri, sha256, download_url, download_expires_at, size_bytes) for exports (column grant, 000014); no insert or delete | — | — |
 | Desired-state tables (every table with `generation`) | Writes fire `afs.notify_desired_state()` (000013) | `LISTEN afs_desired_state`; payload `'<table>:<team_id>:<id>'` (empty team part for service-level tables, e.g. `agent_templates::tpl_…`, 000014); also polls `generation <> observed_generation` every 30 s; full resync every 10 min (D30) | — | — |
 
@@ -103,7 +103,7 @@ R = read, W = insert/update/delete, I = insert only, U(cols) = update listed col
 | `cost_daily_by_tag`, `agent_activity_daily_by_tag`, `external_traffic_daily_by_tag` | api, billing | Rollups by the tags in effect when each record happened (`tag_set_id`); a missing required key reads as NULL, shown as *(untagged)* |
 | `pool_config_resolved`, `pool_external_access` | api, reconciler | Pool ConfigMap content and egress policy |
 | `pool_workers_current` | api | Desired, reporting, working, idle and impaired workers per pool |
-| `teams_due_for_teardown` | reconciler | Ephemeral teams whose teardown rule has fired |
+| `teams_due_for_teardown` | reconciler | Ephemeral teams whose teardown rule has fired; only those (000015: before, every active ephemeral team was listed, with a NULL reason when none was due) |
 | `work_order_progress` | api, reconciler | Counts per repository status and `sla_state` |
 
 All views are `security_invoker`, so RLS applies to `afs_app` callers through them.
@@ -122,12 +122,16 @@ All views are `security_invoker`, so RLS applies to `afs_app` callers through th
 | `afs.drop_partitions_older_than(months) → SETOF text` (000013, returns the dropped partition names) | reconciler, monthly with `13` | Detaches and drops partitions of `usage_events`, `agent_activity` and `external_traffic` older than the given months (D36). Never touches `audit_log` |
 | `afs.image_digests_ok(text[]) → boolean`, `afs.template_use_guard()` (000014) | `agent_templates` check; agents and pools trigger | Digest list shape; refuses a new agent or pool on a disabled template or a digest not on the allowed list (`23514`) | 
 | `afs.resolve_repo_owners(host, repo) → SETOF text` (000014, SECURITY DEFINER) | api before `CreateWorkOrder`, for repositories given without an owner; reconciler | Team ids whose namespace configuration value `AFS_OWNED_REPOS` lists the repository (entries split on commas or whitespace, case-insensitive), only at the best match (exact `host/owner/repo` over `host/owner/*`), skipping teams that are deleting or deleted. Returns ids only, because a security operator cannot read other teams' configuration through RLS. Zero rows → the API's `unownedRepos`; two or more → `ambiguousRepos` (D38) |
+| `afs.authenticate_api_key(key_sha256 bytea) → (key_id, team_id, principal, role, roles, expires_at, revoked_at, state, team_state)` (000016, SECURITY DEFINER, `afs_app` only) | api, for every `afsk_` key, before the caller's scope is known | No row for an unknown hash. `team_id` NULL for a service-level key; `principal` is the key id (the audit `actor_id`); `state` `active`, `expired` or `revoked`; `team_state` the team's state (NULL for a service key). The API answers `401` unless `state = 'active'` and the team, if any, is active. Sets `last_used_at` at most once a minute for a usable key. Never returns the hash |
+| `afs.resolve_workload(namespace, service_account) → (team_id, agent_id, pool_id)` (000016, SECURITY DEFINER, `afs_app` and `afs_gateway`) | api and gateway, for a workload token | ServiceAccount `agent-<name>` or `pool-<name>` in an active team's namespace → that team and the live agent or pool; no row otherwise (unknown name, other namespace, team not active, workload deleted) |
+| `afs.team_directory() → (id, slug, display_name)` (000016, SECURITY DEFINER, `afs_app` only) | api, `ListTeamDirectory` | Every team not deleted, by slug, when `afs.service_admin` or `afs.security_operator` is on; otherwise `42501` |
+| `afs.instantiate_work_order_team(work_order_id) → text` (000016, SECURITY DEFINER, `afs_reconciler` only) | reconciler, for each open work order with a template (RC-12) | Locks the work order and returns its team if it has one (idempotent; concurrent calls create one team). Otherwise creates, in the caller's transaction, an ephemeral team (`slug` `wo-<ulid>`, `teardown_rule` and expiry `now() + ttl_hours` from the template, `costCenter` and `ownerEmail` from the template spec or settings `work_orders.cost_center` / `work_orders.owner_email`, ceiling equal to the budget), `spec.tags`, a lifetime blocking budget (`work_orders.budget_usd`, else the template's), `team_models` for the pools' models, `spec.stages`, `spec.pools` (stage by name), `spec.handoffs` (`from`/`to` pool names) and `spec.configValues` (`pool`, `name`, `value`, `source` default literal); sets `team_id`, `status = 'assigned'`, `assigned_at`; writes audit `InstantiateWorkOrderTeam` and outbox `team.created`, `pool.created` per pool, `work_order.assigned`; triggers write revisions and change notifications. Template `secrets` are not created (see §7). Unknown work order `P0002`; not open, no or disabled template, no cost center or owner `55000`; unknown model or stage `23503`; other rules as for any team (`23514`) |
 | `afs.account_allowed(team_id, account_id) → boolean` | api, reconciler | Allowed-accounts filter |
 | `afs.team_missing_required_tags(team_id, key) → text` | api | Required tags a team still lacks (for clear errors) |
 | `afs.ensure_usage_partition`, `afs.ensure_activity_partition`, `afs.ensure_traffic_partition` | reconciler, monthly | Create next month's partitions ahead of time |
 | `afs.tag_set_for(team_id, tags) → text`, `afs.current_team_tag_set(team_id) → text` | gateway, reconciler, billing | The snapshot id to stamp on a usage, activity, traffic or cost row; creates the set if new |
 | `afs.purge_idempotency_keys() → bigint` | reconciler, every few minutes | Deletes expired keys |
-| `afs.caller_sees_team`, `afs.caller_is_service_admin`, `afs.caller_is_security_operator`, `afs.caller_owns_scope`, `afs.work_order_team`, `afs.caller_owns_work_order_repo`, `afs.current_actor` | RLS and triggers | Not called by services directly |
+| `afs.caller_sees_team`, `afs.caller_is_service_admin`, `afs.caller_is_security_operator`, `afs.caller_owns_scope`, `afs.work_order_team`, `afs.caller_owns_work_order_repo`, `afs.current_actor`, `afs.new_id` (000016, owner only) | RLS, triggers and other functions | Not called by services directly |
 
 ## 5. Transaction rules for `afs-api`
 
@@ -149,12 +153,14 @@ layer maps those to the [API contract](api-contract.md) §6 codes.
 
 | SQLSTATE | Meaning in this schema | API code |
 |---|---|---|
-| `23514` check_violation | Field rule, guard trigger (for example a fixed tag, a disabled provider, ceiling exceeded, a `kind` change, `notify` on an ephemeral team, a disabled agent template or an image digest not on the template's allowed list, a succeeded export without `s3_uri`) | `ValidationError` |
+| `23514` check_violation | Field rule, guard trigger (for example a fixed tag, a disabled provider, ceiling exceeded, a `kind` change, `notify` on an ephemeral team, a disabled agent template or an image digest not on the template's allowed list, a succeeded export without `s3_uri`, an image without a full `@sha256:<64 hex>` digest (000015), a secret on a service-level notification channel (000015), a negative reconciliation amount (000015)) | `ValidationError` |
 | `23502` not_null_violation | Missing required field | `ValidationError` |
 | `23505` unique_violation | Duplicate name, slug, issuer, pending proposal | `Conflict` |
 | `23503` foreign_key_violation | Unknown reference on write → `ValidationError`; dependents exist on delete → `Conflict` | as stated |
-| `55000` object_not_in_prerequisite_state | State does not allow it (provider in use, proposal already decided, key in use by teams) | `Conflict` |
-| `42501` insufficient_privilege | Guard trigger refused a role (team caller changing a guardrail, approving a price) | `AccessDenied` |
+| `55000` object_not_in_prerequisite_state | State does not allow it (provider in use, proposal already decided, key in use by teams, a change to `api_keys.created_at` (000015); for the reconciler, a work order that cannot be instantiated (000016)) | `Conflict` |
+| `P0002` no_data_found | `instantiate_work_order_team` on an unknown work order (reconciler only) | logged, not shown |
+| `55P03` lock_not_available | A migration hit `lock_timeout` (`migrate`); retry the deployment when traffic is lower | startup fails |
+| `42501` insufficient_privilege | Guard trigger or policy refused a role (team caller changing a guardrail, approving a price, `team_directory` without service admin or security operator, an audit row for another actor, a non-work-order outbox event outside the caller's teams) | `AccessDenied` |
 | `22xxx` data exceptions | Bad value format; `22023` from `settle_reservation` is a gateway bug and is logged, not shown to agents | `ValidationError` |
 | `40001`, `40P01` | Retry (§5.6), then | `InternalError` |
 | `P0001` and others | Unexpected | `InternalError` |
@@ -174,9 +180,16 @@ rollover, no reservation expiry, no retention, missing settings, missing `models
 closed by `000011`, `000012` and `000013` as marked above. The two gaps left open at `000013` are closed
 by `000014`: the agent template catalog (`agent_templates`, `template_id` on agents and pools, root PRD
 AGT-11, D54) and the export and import transport (`export_bundles` with nullable `s3_uri` and `sha256`,
-`download_url`, `download_expires_at`, `size_bytes`; D49). Still open after `000014`:
+`download_url`, `download_expires_at`, `size_bytes`; D49). `000015` closes the gaps found while proving
+the `-db` PRD (service-level channels hold no secret, `teams_due_for_teardown` lists only teams due, derived
+reconciliation status, database-set API key creation time, full image digests) and `000016` the access gaps
+`-restapi` found (X-DB-1 to X-DB-6: API key and workload lookups, team directory, remediation team creation,
+pool deletion, audit and outbox inserts outside the caller's teams). Still open after `000016`:
 
 - `audit_log` partitioning (OQ-4).
+- Swarm template `secrets`: `instantiate_work_order_team` does not create them, because a secret row needs
+  the ARN Secrets Manager assigns and `afs_reconciler` may not insert `secrets` or `pool_secret_bindings`.
+  A follow-up is needed before a template that declares secrets can be instantiated with them.
 
 Two things the API must know about `000014`: the free-text `template` columns of `agents` and `agent_pools`
 stay and are not checked against the catalog (only rows with `template_id` are guarded), and the database
@@ -201,6 +214,8 @@ The same list as root PRD §6.13. The database refuses a value outside its range
 | `egress.denied_spike_threshold` | `20` | 1 to 100000 (per agent or pool, 5 minutes) | 000013 |
 | `gateway.reservation_ttl_seconds` | `900` | 60 to 3600 | 000013 |
 | `api.cors_origins` | `[]` | JSON array of `https://host[:port]` origins | 000013 |
+| `work_orders.cost_center` | unset | string of 1 to 100 characters; cost center of a remediation team whose template names none | 000016 |
+| `work_orders.owner_email` | unset | string `local@domain`; owner of a remediation team whose template names none | 000016 |
 
 ## 7.1 Idempotency for `afs-api`
 
