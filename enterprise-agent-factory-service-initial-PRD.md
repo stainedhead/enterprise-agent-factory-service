@@ -75,7 +75,7 @@ on another. Only service admins grant service admin.
 | Edit team settings, suspend / resume | ✓ | ✓ | |
 | Agents: create, edit, scale, pause, restart, delete | ✓ | ✓ | |
 | Members and API keys | ✓ | ✓ (team roles only) | |
-| Secrets: create, register, rotate, bind | ✓ | ✓ | |
+| Secrets: create, rotate, bind | ✓ | ✓ | |
 | Secrets: see names, references, usage | ✓ | ✓ | ✓ |
 | Budget: set amount (≤ ceiling), thresholds | ✓ | ✓ | |
 | Usage, costs, reconciliation | ✓ | ✓ | ✓ |
@@ -179,22 +179,27 @@ status and conditions, budget burn, agent health and recent activity.
 
 ![Team overview, team-admin](docs/ui/06-ta-team-overview.png)
 
-**T2 · Agents.** Agents with status, replicas, model, runtime template, bound secrets and cost. Selecting
-an agent opens its detail panel with *Restart*, *Scale*, *Pause* and *Edit*, and tabs for secrets and
-identity, usage, logs and revisions.
+**T2 · Agents.** Agents with status, model, runtime template, bound secrets and cost. Selecting an agent
+opens its detail panel with *Restart*, *Pause* and *Edit*, and tabs for secrets and identity, usage, logs
+and revisions. An agent is one identity and runs as exactly one pod, so there is no replica count or
+*Scale* action. A team adds capacity by adding agents (see AGT-7).
 
 ![Agents](docs/ui/07-ta-agents.png)
 
 **T3 · Create agent.** Template from the Agentic Teammates catalog, image pinned by digest, persona, model
-(limited to models enabled for the team), replicas and resources, and secret bindings as environment
-variables or files. The side panel shows the equivalent CLI command.
+(limited to models enabled for the team), resources, and secret bindings as environment variables or
+files. There is no replicas field: each agent is a single pod with its own ServiceAccount and IAM identity.
+Binding lists only the team's shared secrets and this agent's own secrets. The side panel shows the
+equivalent CLI command.
 
 ![Create agent](docs/ui/08-ta-create-agent.png)
 
-**T4 · Secrets, with create dialog.** Secrets are Secrets Manager references. *Create secret* sends the
-value once, straight to Secrets Manager; *Register existing* references a secret the team already tagged.
-The table shows origin, ARN, usage, rotation and last change; the value column always reads
-"Write-only".
+**T4 · Secrets, with create dialog.** Secrets are stored in AWS Secrets Manager. *Create secret* asks
+only for a scope (*Team shared* or one agent), a name, a description and the value, and sends the value
+once, straight to Secrets Manager. The user never types or edits the Secrets Manager path. AFS builds it
+from the hierarchy `<service>/<namespace>/<agent>/<secret-name>`, or `<service>/<namespace>/_shared/<secret-name>`
+for team-shared secrets (SEC-5), and shows it read-only. The table shows scope, the managed path, usage,
+rotation and last change; the value column always reads "Write-only".
 
 ![Secrets with create dialog](docs/ui/09-ta-secrets.png)
 
@@ -217,8 +222,8 @@ shown.
 
 ![Team overview, team viewer](docs/ui/12-tv-team-overview.png)
 
-**V2 · Secrets, read-only.** Viewers see which secrets exist, their references and where they are used,
-so they can troubleshoot, but cannot create, rotate or bind them, and nobody sees values.
+**V2 · Secrets, read-only.** Viewers see which secrets exist, their scope, managed path and where they
+are used, so they can troubleshoot, but cannot create, rotate or bind them, and nobody sees values.
 
 ![Secrets, team viewer](docs/ui/13-tv-secrets.png)
 
@@ -268,21 +273,23 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 
 | ID | Requirement | Pri |
 |---|---|---|
-| AGT-1 | Team-admins create, update, scale (0–50 replicas), pause, restart and delete agents | P0 |
+| AGT-1 | Team-admins create, update, pause, restart and delete agents | P0 |
 | AGT-2 | Agents use templates from the Agentic Teammates catalog; images are pinned by digest | P0 |
 | AGT-3 | Each agent gets its own ServiceAccount; AWS access via EKS Pod Identity with session tags `afs-team-id`, `afs-agent-id` | P0 |
 | AGT-4 | Agents have no direct Bedrock permission; model calls go through the gateway | P0 |
 | AGT-5 | External identities (GitHub App installation, bot accounts) are modeled per agent with credentials as secret references | P1 |
 | AGT-6 | Optional per-agent IAM role for least privilege | P1 |
+| AGT-7 | One agent is one identity and one pod (a StatefulSet with one replica, so the name, ServiceAccount, IAM session and audit trail stay stable). There is no replica count. A team scales by adding agents. Pools of interchangeable workers are a phase 2 concern of ephemeral teams | P0 |
 
 ### 6.3 Secrets
 
 | ID | Requirement | Pri |
 |---|---|---|
 | SEC-1 | AFS stores Secrets Manager references and metadata only; no secret value is stored, logged or returned | P0 |
-| SEC-2 | Create (value written straight to Secrets Manager) and register-existing (must carry the team tag) | P0 |
-| SEC-3 | Bind secrets to agents as env vars or files; delivered by External Secrets Operator using the team's IAM role | P0 |
+| SEC-2 | Create through AFS only: the user gives scope, name and value; the value goes straight to Secrets Manager. Registering an arbitrary existing ARN is not offered, because it would bypass the managed hierarchy | P0 |
+| SEC-3 | Bind secrets to agents as env vars or files; delivered by External Secrets Operator. A team-shared secret can be bound to any agent in the team; an agent secret only to its own agent | P0 |
 | SEC-4 | Rotate: new value, rolling restart of bound agents | P1 |
+| SEC-5 | AFS alone sets the Secrets Manager name: `<service>/<namespace>/<agent-name>/<secret-name>`, or `<service>/<namespace>/_shared/<secret-name>`. `<service>` is the installation's prefix (service setting, default `afs`). Users cannot set or change the path; team slug, agent name and secret name are immutable once created. IAM policies are prefix rules on this path: `afs-api` writes under `<service>/*`, a team's secret store reads `<service>/<namespace>/*`, and a per-agent role reads only `<service>/<namespace>/<agent-name>/*` plus `_shared/*`. The `afs-team-id` tag stays as a second check | P0 |
 
 ### 6.4 Budgets, usage and cost
 
@@ -377,7 +384,7 @@ the REST API contract in `-restapi/api/openapi.yaml`.
 |---|---|---|
 | M0 Foundations | Repos, CI, schema v1, OpenAPI skeleton, auth middleware, `/v1/me` | All gates green; isolation and RLS tests pass |
 | M1 Teams & access | TEAM-1..5, ACC-1..3, CFG-1..3, reconciler for namespace/network/IAM; console S1–S3, T1, T6, V1; CLI `teams`, `members` | A service admin onboards a team end to end in dev |
-| M2 Agents & secrets | AGT-1..4, SEC-1..3; console T2–T4, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
+| M2 Agents & secrets | AGT-1..4, AGT-7, SEC-1..3, SEC-5; console T2–T4, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
 | M3 Spend control | BUD-1..5, OPS-2; gateway; console T5, S4 | Load test proves the hard cap; alerts fire once per threshold |
 | M4 Production readiness | CFG-4, BUD-6/7, OPS-1/3, ACC-4, AGT-5/6, CFG-5/6, S5 | DR rebuild drill passes; security review signed off |
 | Phase 2 | TEAM-7, BUD-8, P2 screen | First POC team runs and tears itself down |

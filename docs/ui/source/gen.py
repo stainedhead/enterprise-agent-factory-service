@@ -379,7 +379,7 @@ def team_overview(role):
 <table><tr><th>Type</th><th>Status</th><th>Last transition</th><th>Message</th></tr>
 <tr><td>NamespaceReady</td><td>{st('ok','True')}</td><td>2026-09-02</td><td>Namespace, quota and PSA restricted applied</td></tr>
 <tr><td>NetworkIsolated</td><td>{st('ok','True')}</td><td>2026-11-20 18:31</td><td>Default-deny + 4 egress rules; drift reverted 0 times today</td></tr>
-<tr><td>IdentityReady</td><td>{st('ok','True')}</td><td>2026-09-02</td><td>IAM role and 12 Pod Identity associations</td></tr>
+<tr><td>IdentityReady</td><td>{st('ok','True')}</td><td>2026-09-02</td><td>IAM role and 7 Pod Identity associations</td></tr>
 <tr><td>SecretsSynced</td><td>{st('ok','True')}</td><td>2026-11-20 12:40</td><td>7 of 7 ExternalSecrets synced</td></tr>
 <tr><td>InferenceProfilesReady</td><td>{st('ok','True')}</td><td>2026-10-01</td><td>3 application inference profiles tagged afs-team-id</td></tr>
 </table></div>
@@ -404,7 +404,7 @@ def agent_rows(selected=None, selectable=True):
     for name, state, sk, rep, model, tmpl, secs, cost in AGENTS:
         cls = "sel" if name == selected else ""
         box = f'<span class="cb2 {"on" if cls else ""}"></span>' if selectable else ""
-        out.append(f'<tr class="{cls}"><td>{box}</td><td><a>{name}</a></td><td>{st(sk, state)}</td><td>{rep}</td><td class="mono">{model}</td><td>{tmpl}</td><td>{secs}</td><td>{cost}</td></tr>')
+        out.append(f'<tr class="{cls}"><td>{box}</td><td><a>{name}</a></td><td>{st(sk, state)}</td><td class="mono small">{name + "-0" if state != "Paused" else "— (paused)"}</td><td class="mono">{model}</td><td>{tmpl}</td><td>{secs}</td><td>{cost}</td></tr>')
     return "".join(out)
 
 
@@ -414,14 +414,14 @@ page("07-ta-agents", "ta", team_nav("agents", "ta"), f"""
 <div class="sub">Containerized agents in namespace afs-t-payments-factory. Model calls go through the metering gateway.</div></div>
 <div class="btns"><span class="btn">⟳</span><span class="btn">View details</span><span class="btn dd">Actions</span><span class="btn p">Create agent</span></div></div>
 <div class="tools"><div class="filter">🔍 Find agents</div><span class="sel">Any state ▾</span><div class="pager">‹ <b>1</b> › ⚙</div></div>
-<table><tr><th></th><th>Name</th><th>Status</th><th>Replicas</th><th>Model</th><th>Template</th><th>Secrets</th><th>Cost, Nov MTD</th></tr>
+<table><tr><th></th><th>Name</th><th>Status</th><th>Pod</th><th>Model</th><th>Template</th><th>Secrets</th><th>Cost, Nov MTD</th></tr>
 {agent_rows("reviewer-bot")}</table></div>
-<div class="card" style="position:relative"><div class="ch"><h2>reviewer-bot</h2><div class="btns"><span class="btn sm">Restart</span><span class="btn sm">Scale</span><span class="btn sm">Pause</span><span class="btn sm">Edit</span></div></div>
+<div class="card" style="position:relative"><div class="ch"><h2>reviewer-bot</h2><div class="btns"><span class="btn sm">Restart</span><span class="btn sm">Pause</span><span class="btn sm">Edit</span></div></div>
 <div class="tabs" style="margin:0 20px 14px"><span class="on">Details</span><span>Secrets & identity</span><span>Usage</span><span>Logs</span><span>Revisions</span></div>
 <div class="cb"><div class="grid g4">
 <div class="kv"><div class="k">Image</div><div class="v mono small">ghcr.io/…/omp-review@sha256:9f2c…e1</div></div>
 <div class="kv"><div class="k">Service account</div><div class="v mono">agent-reviewer-bot</div></div>
-<div class="kv"><div class="k">Resources</div><div class="v">2 vCPU · 8 GiB per replica</div></div>
+<div class="kv"><div class="k">Resources</div><div class="v">2 vCPU · 8 GiB · one pod</div></div>
 <div class="kv"><div class="k">Last change</div><div class="v">6h ago by key:ci-deployer</div></div></div></div></div>
 """)
 
@@ -435,57 +435,64 @@ page("08-ta-create-agent", "ta", team_nav("agents", "ta"), f"""
 <div class="field"><label>Image</label><div class="hint">Pinned by digest. Tags are not accepted.</div><div class="input mono">ghcr.io/stainedhead/hermes-dev@sha256:4b1e…77</div></div>
 <div class="field"><label>Persona and instructions</label><div class="input" style="height:60px">Keeps payments services free of known-vulnerable dependencies; opens PRs, never merges.</div></div>
 </div></div>
-<div class="card"><div class="ch"><h2>Model and capacity</h2></div><div class="cb"><div class="grid g3">
+<div class="card"><div class="ch"><h2>Model and resources</h2></div><div class="cb"><div class="grid g2">
 <div class="field"><label>Model</label><div class="hint">Enabled for this team</div><div class="input">claude-sonnet ▾</div></div>
-<div class="field"><label>Replicas</label><div class="input">2</div></div>
-<div class="field"><label>Resources per replica</label><div class="input">2 vCPU · 8 GiB ▾</div></div></div></div></div>
-<div class="card"><div class="ch"><h2>Secrets</h2><span class="btn sm">Add secret binding</span></div>
-<table><tr><th>Secret</th><th>Delivery</th><th>Target</th><th></th></tr>
-<tr><td>github-bot-key</td><td>Environment variable</td><td class="mono">GITHUB_APP_KEY</td><td><a>Remove</a></td></tr>
-<tr><td>snyk-token</td><td>File</td><td class="mono">/var/run/secrets/snyk/token</td><td><a>Remove</a></td></tr></table></div>
+<div class="field"><label>Resources</label><div class="hint">One pod per agent. Add agents to add capacity.</div><div class="input">2 vCPU · 8 GiB ▾</div></div></div></div></div>
+<div class="card"><div class="ch"><div><h2>Secrets</h2><div class="sub">Team-shared secrets can be bound now. Secrets only this agent can read are added after it is created, under Secrets.</div></div><span class="btn sm">Add secret binding</span></div>
+<table><tr><th>Secret</th><th>Scope</th><th>Delivery</th><th>Target</th><th></th></tr>
+<tr><td>github-bot-key</td><td><span class="badge b-per" style="white-space:nowrap">Team shared</span></td><td>Environment variable</td><td class="mono">GITHUB_APP_KEY</td><td><a>Remove</a></td></tr>
+<tr><td>artifactory-reader</td><td><span class="badge b-per" style="white-space:nowrap">Team shared</span></td><td>File</td><td class="mono">/var/run/secrets/artifactory/token</td><td><a>Remove</a></td></tr></table></div>
 <div style="display:flex;justify-content:flex-end;gap:8px"><span class="btn" style="border:0">Cancel</span><span class="btn">Preview CLI command</span><span class="btn p">Create agent</span></div>
 </div>
 <div style="width:360px"><div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb">
-<div class="code">afs agents create-agent \\<br>&nbsp; --team-id team_01JD3Z… \\<br>&nbsp; --name security-patcher \\<br>&nbsp; --template hermes-dev \\<br>&nbsp; --model-id claude-sonnet \\<br>&nbsp; --replicas 2 \\<br>&nbsp; --secret-bindings file://bindings.json</div>
+<div class="code">afs agents create-agent \\<br>&nbsp; --team-id team_01JD3Z… \\<br>&nbsp; --name security-patcher \\<br>&nbsp; --template hermes-dev \\<br>&nbsp; --model-id claude-sonnet \\<br>&nbsp; --secret-bindings file://bindings.json</div>
 <div class="small muted" style="margin-top:8px">Every console action maps to one CLI operation and one REST call.</div></div></div></div>
 </div>
 """)
 
 SECRETS = [
-    ("github-bot-key", "Managed", "GitHub App private key for PRs", "3 agents", "Every 90 days", "Nov 20, 12:40"),
-    ("snyk-token", "Managed", "Snyk API token", "2 agents", "—", "Oct 02"),
-    ("jira-bot-api-key", "Registered", "Jira automation user", "2 agents", "Every 30 days", "Nov 11"),
-    ("splunk-hec-token", "Managed", "Log delivery to Splunk", "Log delivery", "—", "Sep 02"),
-    ("artifactory-reader", "Registered", "Read-only package mirror", "5 agents", "Every 90 days", "Oct 28"),
+    ("github-bot-key", "_shared", "GitHub App private key for PRs", "3 agents", "Every 90 days", "Nov 20, 12:40"),
+    ("artifactory-reader", "_shared", "Read-only package mirror", "5 agents", "Every 90 days", "Oct 28"),
+    ("splunk-hec-token", "_shared", "Log delivery to Splunk", "Log delivery", "—", "Sep 02"),
+    ("snyk-token", "dependency-updater", "Snyk API token", "dependency-updater", "—", "Oct 02"),
+    ("jira-bot-api-key", "incident-scribe", "Jira automation user", "incident-scribe", "Every 30 days", "Nov 11"),
 ]
+NS = "afs-t-payments-factory"
+
+
+def scope_badge(scope):
+    if scope == "_shared":
+        return '<span class="badge b-per" style="white-space:nowrap">Team shared</span>'
+    return f'<span class="badge b-blue" style="white-space:nowrap">Agent: {scope}</span>'
 
 
 def secret_rows(selectable=True):
     out = []
-    for n, origin, d, used, rot, chg in SECRETS:
+    for n, scope, d, used, rot, chg in SECRETS:
         box = '<span class="cb2"></span>' if selectable else ""
-        out.append(f'<tr><td>{box}</td><td><a>{n}</a></td><td><span class="badge {"b-blue" if origin=="Managed" else "b-per"}">{origin}</span></td><td>{d}</td>'
-                   f'<td class="mono small">…:secret:/afs/prod/teams/payments/{n}-a1B2c3</td><td>{used}</td><td>{rot}</td><td>{chg}</td><td class="muted small">Write-only</td></tr>')
+        out.append(f'<tr><td>{box}</td><td><a>{n}</a></td><td>{scope_badge(scope)}</td><td>{d}</td>'
+                   f'<td class="mono small">afs/{NS}/{scope}/{n}</td><td>{used}</td><td>{rot}</td><td>{chg}</td><td class="muted small">Write-only</td></tr>')
     return "".join(out)
 
 
 secret_modal = """<div class="modalwrap"><div class="modal"><div class="mh">Create secret<span class="muted">✕</span></div><div class="mb">
+<div class="field"><label>Scope</label><div class="hint">Team shared: any agent in this team can be bound to it. Agent: only that agent can read it.</div><div class="input">Agent: incident-scribe ▾</div></div>
 <div class="field"><label>Name</label><div class="input">pagerduty-token</div></div>
 <div class="field"><label>Description</label><div class="input">PagerDuty Events API token for incident-scribe</div></div>
 <div class="field"><label>Secret value</label><div class="hint">Sent once, straight to AWS Secrets Manager. Agent Factory stores only the reference and cannot show it again.</div>
 <div class="input mono">••••••••••••••••••••••••••••••••</div></div>
 <div class="grid g2"><div class="field"><label>Rotation reminder</label><div class="input">Every 90 days ▾</div></div>
-<div class="field"><label>Stored at</label><div class="input ro mono small">/afs/prod/teams/payments/pagerduty-token</div></div></div>
-<div class="alert" style="margin:4px 0 0"><span class="ic">ⓘ</span><div class="small">Encrypted with the environment KMS key, tagged <span class="mono">afs-team-id</span>. Only this team's IAM role can read it.</div></div>
+<div class="field"><label>Secrets Manager path</label><div class="hint">Set by Agent Factory. Cannot be changed.</div><div class="input ro mono small">afs/afs-t-payments-factory/incident-scribe/pagerduty-token</div></div></div>
+<div class="alert" style="margin:4px 0 0"><span class="ic">ⓘ</span><div class="small">The path follows <span class="mono">service / namespace / agent / name</span>, so access rules are prefix rules. Only incident-scribe and this team's secret store can read it. Encrypted with the environment KMS key and tagged <span class="mono">afs-team-id</span>.</div></div>
 </div><div class="mf"><span class="btn" style="border:0">Cancel</span><span class="btn p">Create secret</span></div></div></div>"""
 
 page("09-ta-secrets", "ta", team_nav("secrets", "ta"), f"""
 <div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › Secrets</div>
 <div class="card"><div class="ch"><div><h2>Secrets <span class="cnt">(5)</span> <span class="info">Info</span></h2>
-<div class="sub">References to AWS Secrets Manager. Values are write-only and never stored in or shown by Agent Factory.</div></div>
-<div class="btns"><span class="btn">Register existing</span><span class="btn dd">Actions</span><span class="btn p">Create secret</span></div></div>
+<div class="sub">Stored in AWS Secrets Manager under paths Agent Factory manages. Values are write-only and never stored in or shown by Agent Factory.</div></div>
+<div class="btns"><span class="btn dd">Actions</span><span class="btn p">Create secret</span></div></div>
 <div class="tools"><div class="filter">🔍 Find secrets</div><div class="pager">‹ <b>1</b> › ⚙</div></div>
-<table><tr><th></th><th>Name</th><th>Origin</th><th>Description</th><th>Secrets Manager ARN</th><th>Used by</th><th>Rotation</th><th>Last changed</th><th>Value</th></tr>
+<table><tr><th></th><th>Name</th><th>Scope</th><th>Description</th><th>Secrets Manager path</th><th>Used by</th><th>Rotation</th><th>Last changed</th><th>Value</th></tr>
 {secret_rows()}</table></div>
 """, modal=secret_modal)
 
@@ -549,10 +556,10 @@ page("13-tv-secrets", "tv", team_nav("secrets", "tv"), f"""
 <div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › Secrets</div>
 <div class="alert"><span class="ic">ⓘ</span><div><b>Read-only.</b> You can see which secrets exist and where they are used. Values are never shown to anyone in Agent Factory.</div></div>
 <div class="card"><div class="ch"><div><h2>Secrets <span class="cnt">(5)</span> <span class="info">Info</span></h2>
-<div class="sub">References to AWS Secrets Manager.</div></div>
-<div class="btns"><span class="btn dis">Register existing</span><span class="btn dis dd">Actions</span><span class="btn p dis">Create secret</span></div></div>
+<div class="sub">Stored in AWS Secrets Manager under paths Agent Factory manages.</div></div>
+<div class="btns"><span class="btn dis dd">Actions</span><span class="btn p dis">Create secret</span></div></div>
 <div class="tools"><div class="filter">🔍 Find secrets</div><div class="pager">‹ <b>1</b> › ⚙</div></div>
-<table><tr><th></th><th>Name</th><th>Origin</th><th>Description</th><th>Secrets Manager ARN</th><th>Used by</th><th>Rotation</th><th>Last changed</th><th>Value</th></tr>
+<table><tr><th></th><th>Name</th><th>Scope</th><th>Description</th><th>Secrets Manager path</th><th>Used by</th><th>Rotation</th><th>Last changed</th><th>Value</th></tr>
 {secret_rows(selectable=False)}</table></div>
 """)
 
