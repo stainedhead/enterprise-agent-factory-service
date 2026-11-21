@@ -44,7 +44,7 @@ build order only (PRD §9, milestones M0 to M6).
 | ID | Requirement | Source |
 |---|---|---|
 | F1 | Create, update, suspend, resume and delete teams. Each team maps to one isolated EKS namespace | J |
-| F2 | Define the agents in a team (template/image, persona, model, resources, secrets, schedule). One agent is one pod | J |
+| F2 | Define the agents in a team (template/image, persona, model, resources, secrets). One agent is one pod | J |
 | F3 | Manage human teammates and their role on the team | J |
 | F4 | Manage agent identities (Kubernetes service account, AWS IAM role via Pod Identity, external identities such as a GitHub App installation) | J |
 | F5 | Manage secrets as references to AWS Secrets Manager. Values are write-only through the API and never stored in or returned by AFS | J |
@@ -52,7 +52,7 @@ build order only (PRD §9, milestones M0 to M6).
 | F7 | Budget and usage reporting: real time from the gateway, reconciled daily against CUR, including EKS compute | J |
 | F8 | Log delivery configuration per team (CloudWatch, S3, OTLP, Splunk/Datadog via HEC/API) | J |
 | F9 | Team configuration (allowed models, external systems, resource quotas) and non-secret configuration values at namespace and agent level | J |
-| F10 | Three roles: service admin, team-admin, team viewer. Enforced in API, respected by CLI and web | J |
+| F10 | Four roles: service admin, team-admin, team viewer and security operator (service level, work orders only). Enforced in API, respected by CLI and web | J, security operator by Claude (D18) |
 | F11 | Desired state stored in RDS PostgreSQL, versioned and audited. Exportable as a portable bundle and importable in another account or cluster | J |
 | F12 | Reconciler applies stored state on startup and continuously, recovering from failure and reverting manual drift | J |
 | F13 | Web console, CLI and SDK over one REST API | J |
@@ -84,7 +84,7 @@ Decided by J on 2026-11-21 (PRD §10.1):
 7. **Secrets and configuration in the pod:** zero impact on the container. Everything arrives as environment variables and files; the agent makes no calls (§6).
 8. **Currency:** USD only.
 
-Decisions made after the PRD review (D23 to D56) are in PRD §10.1 and ADR-015. Open technical questions,
+Decisions made after the PRD review (D23 to D57) are in PRD §10.1 and ADR-015. Open technical questions,
 with owners and defaults, are PRD §10.3 (OQ-1 to OQ-9).
 
 ## 3. Architecture overview
@@ -108,9 +108,9 @@ with owners and defaults, are PRD §10.3 (OQ-1 to OQ-9).
         ┌──── EKS cluster ─────────────────────┐   IAM, Pod Identity, Secrets Manager,
         │ ns afs-t-payments  ns afs-t-search … │   Bedrock app inference profiles,
         │  agents (Agentic Teammates runtime)  │   CloudWatch/S3 log destinations
-        │    │ projected SA token              │
+        │    │ pod identity (source IP)        │
         │    ▼                                 │
-        │ ns afs-system: afs-llm-gateway ──────┼──► Bedrock (via VPC endpoint)
+        │ ns afs-system: afs-gateway ──────┼──► Bedrock (via VPC endpoint)
         └──────────────────────────────────────┘        │ per-team inference profile
                                                          ▼
           afs-billing-ingestor ◄── CUR 2.0 (S3/Athena) ── daily reconciliation
@@ -124,7 +124,7 @@ with owners and defaults, are PRD §10.3 (OQ-1 to OQ-9).
 
 - Namespace `afs-t-<slug>` with labels `afs.io/team-id`, Pod Security Admission `restricted`.
 - `ResourceQuota`, `LimitRange`.
-- `NetworkPolicy` default deny all ingress/egress, then allow DNS and egress to `afs-llm-gateway`. Per agent, a `CiliumNetworkPolicy` (selected by the `afs.io/agent-id` pod label) allows `toFQDNs` egress to the endpoints of every external system in `agent_external_access` with `disabled_at IS NULL` (service catalog entries that are on, minus team and agent opt-outs, plus the team's declared systems). Ports default to 443. Policy changes apply to running pods without a restart. Denied egress is logged through Hubble. Secrets whose `external_system_id` is off for an agent are left out of that agent's ExternalSecret.
+- `NetworkPolicy` default deny all ingress/egress, then allow DNS and egress to `afs-gateway`. Per agent, a `CiliumNetworkPolicy` (selected by the `afs.io/agent-id` pod label) allows `toFQDNs` egress to the endpoints of every external system in `agent_external_access` with `disabled_at IS NULL` (service catalog entries that are on, minus team and agent opt-outs, plus the team's declared systems). Ports default to 443. Policy changes apply to running pods without a restart. Denied egress is logged through Hubble. Secrets whose `external_system_id` is off for an agent are left out of that agent's ExternalSecret.
 - ServiceAccounts per agent, EKS Pod Identity associations to the team's IAM role. Pod Identity sets its own session tags (`kubernetes-namespace`, `kubernetes-service-account`, `kubernetes-pod-name`, `eks-cluster-name` and others) and cannot add custom ones, so team and agent ids are tags on the roles (D26, OQ-1).
 - One StatefulSet with exactly one replica per agent (stable name, ServiceAccount and IAM session). There is no replica count: a team scales by adding agents.
 - One ConfigMap per agent (`agent-<name>-config`) holding its resolved configuration values (`afs.agent_config_resolved`), loaded with `envFrom` and mounted read-only at `/etc/afs/config` (one file per name). A change to a namespace value re-renders every ConfigMap that links to it and rolls those agents (a pod-template hash annotation), because environment variables only change on restart. A ConfigMap edited by hand is restored.
@@ -141,10 +141,10 @@ It records `observed_generation`, phase and conditions per resource in `resource
 
 Volume drift is handled like any other: a volume smaller than desired is expanded (online, EBS supports it); a PVC that is missing is re-created from the agent's latest completed snapshot when one exists (empty otherwise) and raises an alert; a volume bigger than desired, or of another storage class, is reported as a condition rather than changed, because EBS cannot shrink and a class change needs a data migration. EBS volumes live in one Availability Zone, so an agent reschedules within its volume's zone; moving it to another zone is a restore from snapshot.
 
-**afs-llm-gateway (Go).** The only path from agents to Bedrock. Runs in `afs-system`, multi-AZ. The wire interface is the [gateway contract](contracts/gateway-contract.md) (D28).
+**afs-gateway (Go).** The only path from agents to Bedrock. Runs in `afs-system`, multi-AZ. The wire interface is the [gateway contract](contracts/gateway-contract.md) (D28).
 
-1. Agent calls a Bedrock Runtime compatible path (`POST /model/{modelId}/converse`, `/converse-stream`, `/invoke`, `/invoke-with-response-stream`) or the Anthropic Messages compatible `POST /anthropic/v1/messages`, with its projected service account token (audience `afs-gateway`, file `/var/run/secrets/afs/gateway/token`). The pod gets `AFS_GATEWAY_URL`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` and `ANTHROPIC_BASE_URL`, so standard SDKs need no change.
-2. Gateway validates the token with the Kubernetes TokenReview API (cached), which yields namespace, service account and pod, hence `team_id`, `agent_id` or `pool_id`, and the worker pod.
+1. Agent calls a Bedrock Runtime compatible path (`POST /model/{modelId}/converse`, `/converse-stream`, `/invoke`, `/invoke-with-response-stream`) or the Anthropic Messages compatible `POST /anthropic/v1/messages`, using its standard SDK. The pod gets `AFS_GATEWAY_URL`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY=afs-gateway` (a placeholder, not a secret) and the gateway's CA (`/var/run/secrets/afs/gateway/ca.crt`, named in `AWS_CA_BUNDLE`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS`), so standard SDKs need no change.
+2. Gateway identifies the caller by its source pod IP, mapped through the Kubernetes API and Cilium endpoint identity to namespace, service account and pod, hence `team_id`, `agent_id` or `pool_id`, and the worker pod. Cilium lets only team pods reach the gateway, binds each IP to its endpoint identity and encrypts node-to-node traffic with WireGuard, so the source cannot be spoofed. The SigV4 `Authorization` header and `ANTHROPIC_API_KEY` are ignored. A projected token (audience `afs-gateway`, `/var/run/secrets/afs/gateway/token`) is optional defence in depth: when sent it is checked with TokenReview and must name the same pod, else `401` (D57).
 3. Gateway checks the model is allowed for the team, opens the period if needed (`afs.ensure_spend_counter`), then **reserves** the worst-case cost (`maxTokens` from the request, else `models.max_output_tokens`, × output price, plus request bytes ÷ 3 × input price) with `afs.reserve_spend_held`. If it returns NULL the request is rejected with `402 BudgetExceeded`, which SDKs do not retry. If the database cannot be reached it fails closed with `503 Unavailable`.
 4. Gateway assumes the team's Bedrock role (`afs-<team id>-bedrock`) with session tags and invokes the team's application inference profile, adding the agent's tags as `requestMetadata` (at most 16 pairs, D27).
 5. On response (or stream end) it settles with `afs.settle_reservation` to the actual token cost and writes a `usage_events` row (batched). A reservation never settled expires after `gateway.reservation_ttl_seconds` (default 900) and the reconciler releases it (D31).
@@ -163,7 +163,7 @@ At higher scale the spend counters move to ElastiCache (Redis/Valkey) with Postg
 |---|---|
 | Network | Namespace per team. Default-deny `NetworkPolicy` for ingress and egress. Only DNS, gateway and the endpoints of the external systems each agent may use (service catalog → team → agent, each level only narrowing). No cross-namespace traffic. Admission policy (ValidatingAdmissionPolicy by default; Kyverno is the alternative, OQ-6) blocks teams from creating their own NetworkPolicies, Services of type LoadBalancer/NodePort, or hostNetwork pods |
 | Compute | Pod Security Admission `restricted`. ResourceQuota/LimitRange. Optional dedicated Karpenter NodePool per sensitivity tier (taints + tolerations) for teams needing node-level isolation |
-| Kubernetes API | Agents' service accounts get no Kubernetes RBAC by default (`automountServiceAccountToken: false` except the projected gateway token). Humans have no kubectl access by default; team viewers can optionally get read-only via EKS access entries scoped to their namespace |
+| Kubernetes API | Agents' service accounts get no Kubernetes RBAC by default (`automountServiceAccountToken: false`; only the optional projected gateway token and, for work order reporting, the `afs-api` token are mounted). Humans have no kubectl access by default; team viewers can optionally get read-only via EKS access entries scoped to their namespace |
 | AWS IAM | One IAM role per team, ABAC by the `afs-team-id` role tag and the Pod Identity `kubernetes-namespace` session tag. Secrets, S3 prefixes, log groups and inference profiles are all tagged with the team id, and the policy only matches its own tag |
 | Secrets | Secrets Manager name set by AFS, never by users: `<service>/<namespace>/<agent-name>/<secret-name>` or `<service>/<namespace>/_shared/<secret-name>` (§6). IAM uses prefix rules on that path, with tag `afs-team-id` as a second check. KMS key per environment with an encryption context of team id |
 | Data (AFS DB) | Every team-scoped table has `team_id`. API authorization filters on it. PostgreSQL row-level security as defense in depth (`afs.team_ids`, `afs.service_admin`, `afs.security_operator` session settings, database contract §3) |
@@ -178,7 +178,7 @@ Namespace isolation shares the kernel. That is acceptable for internal enterpris
 
 OIDC Authorization Code + PKCE for the web console; OIDC device authorization grant for the CLI (`afs sso login`); short-lived API keys (hashed in DB, max 90 days, scoped to one team and role) for pipelines. The API validates JWTs against the IdP's JWKS and maps `sub` to a `users` row (just-in-time provisioning on first login). A token is accepted from any enabled service-level provider; for a team-scoped request, a group binding counts only if the token came from that team's provider (`teams.identity_provider_id`, or the default when unset). Service-level group bindings (service admins) name the provider their group comes from. `ListSignInProviders` returns each provider's `consoleClientId` and public `cliClientId` (D48).
 
-Agents and pools that report work order progress call `afs-api` with a second projected token (audience `afs-api`, `/var/run/secrets/afs/api/token`); `afs-api` validates it with TokenReview and treats it as a *workload* principal that holds only `work-orders:report` on its own team's work orders, plus `GetMe` (D29).
+Agents and pools that report work order progress call `afs-api` with a second projected token (audience `afs-api`, `/var/run/secrets/afs/api/token`); `afs-api` validates it offline against the cluster's OIDC issuer JWKS (audience `afs-api`; no TokenReview, because `afs-api` never calls Kubernetes) and treats it as a *workload* principal that holds only `work-orders:report` on its own team's work orders, plus `GetMe` (D29).
 
 ### 5.2 Roles
 
@@ -345,8 +345,7 @@ container (SEC-6, D32). Pool secrets (`secrets.pool_id`, path
 `<prefix>/<namespace>/<pool>/<name>`), bindings (`pool_secret_bindings`), configuration
 (`pool_config_values`) and opt-outs follow the agent rules. Pools get a namespace-scoped `NetworkPolicy`
 per pool from `pool_external_access`. Usage, activity and traffic rows carry `pool_id` and `worker_pod`;
-the gateway authenticates a worker by its ServiceAccount token and reads the pod name from the token's
-pod claim.
+the gateway identifies a worker by its source pod IP, which gives the pool and the worker pod name (D57).
 
 **Isolation tier and viewer kubectl.** `teams.isolation_tier = dedicated` makes the reconciler create a
 Karpenter NodePool `afs-t-<slug>` with a taint and label for the team, and add the toleration and node
@@ -421,9 +420,9 @@ afs admin create-export
 - **Global options:** `--profile`, `--endpoint-url`, `--output json|table|text|yaml|csv` (`csv` only on operations marked *CSV*, not with `--query`, D39), `--query` (JMESPath), `--no-paginate`, `--max-items`, `--page-size`, `--starting-token`, `--cli-input-json`, `--generate-cli-skeleton`, `--debug`, `--no-cli-pager`, `--color`, `--version`.
 - **Safe updates:** `--if-match <version>`; without it the CLI reads, then writes, and prints the version it applied to (D40).
 - **Secret values:** `--secret-value` takes `file://`, `fileb://` or `-` (stdin), or prompts without echo; never a plain argument.
-- **Work order owners:** `--repos host/owner/repo=<owner>[,<owner>]`; an owner with `@` is an email, one starting `team_` a team id; no slug lookup (D38).
+- **Work order owners:** `--repos host/owner/repo[=<owner>[,<owner>]]`; without `=` the API resolves the owner from the teams' `AFS_OWNED_REPOS` configuration value; an owner with `@` is an email, one starting `team_` a team id; no slug lookup (D38).
 - **Config files:** `~/.afs/config` (profiles: endpoint, sso provider, default team, output) and `~/.afs/credentials` / SSO token cache under `~/.afs/sso/cache`. Env vars: `AFS_PROFILE`, `AFS_ENDPOINT_URL`, `AFS_API_KEY`, `AFS_DEFAULT_OUTPUT`.
-- **Paging:** auto-paginates by default like the AWS CLI; prints `NextToken` when `--max-items` truncates; CSV pages share one header row.
+- **Paging:** auto-paginates by default like the AWS CLI; prints `NextToken` when `--max-items` truncates; CSV pages share one header row, with the next token read from the `X-Afs-Next-Token` response header.
 - **Errors:** `An error occurred (AccessDenied) when calling the CreateAgent operation: ...`, exit code 254 for service errors, 252 for usage errors, 255 for others (AWS CLI codes). A locally expired SSO token exits 255 with the `afs sso login` hint before any call (D41).
 - **RBAC:** the CLI calls `GET /v1/me` (cached 5 minutes) only to give helpful messages; the API's 403 is authoritative.
 
@@ -489,7 +488,7 @@ enterprise-agent-factory-service/              docs-only root: PRD, this design,
 |---|---|---|---|
 | Source of truth | PostgreSQL + reconciler | CRDs in etcd (pure operator) | Portability across clusters, SQL reporting, audit, backups independent of cluster |
 | Spend enforcement | Gateway reservation + IAM deny backstop | AWS Budgets actions | Budgets lag hours; reservations are per request |
-| Agent → Bedrock auth | Projected SA token to gateway; gateway assumes team role | Agents call Bedrock directly | Direct calls cannot be metered or capped in real time |
+| Agent → Bedrock auth | Gateway identifies the pod by source IP (Cilium identity, D57); gateway assumes team role | Agents call Bedrock directly | Direct calls cannot be metered or capped in real time |
 | Secrets | Secrets Manager refs + ESO | Store encrypted values in DB | Keeps AFS out of the secret blast radius |
 | CLI language | Go | Python (like AWS CLI) | Single static binary, shares API types |
 | Network policy | Cilium (decided) | VPC CNI network policy | FQDN egress rules for SaaS endpoints |

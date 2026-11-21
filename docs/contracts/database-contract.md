@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract v1 at schema 000013 (2026-11-21). 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below |
+| **Status** | Contract v1 at schema 000014 (2026-11-21). 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). Planned first release containing 000011 to 000014: `v0.13.0` |
 | **Provider** | [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db): migrations, roles, row-level security, `migrate` Go package, `afs-migrate` |
 | **Consumer** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi): `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing` |
 | **Full data dictionary** | `-db/docs/data-model.md` (every table, column rule and function). This document is the interface: who connects how, what each service may touch, and how failures surface |
@@ -66,6 +66,7 @@ R = read, W = insert/update/delete, I = insert only, U(cols) = update listed col
 | `api_keys` (incl. service-level `security_operator` keys) | W | R (not `key_hash`) | — | — |
 | `swarm_stages`, `agent_pools`, `pool_handoffs`, `pool_secret_bindings`, `pool_config_values`, `pool_role_links` | W (ephemeral teams only, by trigger) | R; U(pool role-link status) | R (agent_pools) | R |
 | `swarm_templates` | W (service admins) | R | — | — |
+| `agent_templates` (000014: `id` `tpl_…`, `name`, `description`, `harness`, `default_resources`, `allowed_image_digests`, `current_image_digest`, `enabled`) | R all; W service admins only (`app_write` policy: `42501` on insert, zero rows on update and delete for others). The API lists only enabled templates to teams. Delete of a template in use → `23503` (`Conflict`: disable it instead) | R (flags existing agents and pools with `TemplateRetired`) | — | — |
 | `work_orders` | W security operators and service admins; team callers R only; D security operators and service admins (000012) | I (EventBridge intake), U(team_id, status, assigned_at, completed_at) | — | — |
 | `work_order_repos` | I, U security operators and service admins; the assigned team may U only its repositories' progress columns (`work_order_repo_progress_guard`, `42501`, 000012); D security operators and service admins | I, U(status, pr_url, pr_number, detail, merged_at) | — | — |
 | `work_order_notifications` | R | I (once per kind and recipient) | — | — |
@@ -73,7 +74,8 @@ R = read, W = insert/update/delete, I = insert only, U(cols) = update listed col
 | `idempotency_keys` | I, R, D (own principal only, by RLS). A CHECK (000011) refuses a `response_body` containing a `secretKey` field anywhere; the API stores those responses with `secretKey` removed (D35, D52) | R(principal, key, expires_at) only (column grant, 000011), D (`purge_idempotency_keys`) | — | — |
 | `tag_sets` | R | I, R (`tag_set_for`, `current_team_tag_set`) | I, R | I, R |
 | `cost_allocation_tag_status` | R | R | — | W |
-| `agents`, `agent_secret_bindings`, `agent_identities`, `agent_role_links`, `agent_config_values`, `namespace_config_values`, `team_tags`, `external_system_optouts`, team `external_systems`, `secrets`, `budgets`, `log_destinations`, `notification_channels`, `work_orders` | W | R; U(status columns) | R (agents, team_models, budgets) | R (agents) |
+| `agents` and `agent_pools` (000014: nullable `template_id` → `agent_templates`) | `template_id` set: a new row, or a changed `template_id` or `image`, needs an enabled template and an image digest on its allowed list, else `23514` (`agents_template_guard`, `agent_pools_template_guard`); NULL `template_id` is not guarded and the free-text `template` stays | as the rows below | as the rows below | as the rows below |
+| `agents`, `agent_secret_bindings`, `agent_identities`, `agent_role_links`, `agent_config_values`, `namespace_config_values`, `team_tags`, `external_system_optouts`, team `external_systems`, `secrets`, `budgets`, `log_destinations`, `notification_channels` | W | R; U(status columns) | R (agents, team_models, budgets) | R (agents) |
 | `agent_volume_snapshots` | I (manual requests) | W | — | — |
 | `org_aws_accounts` | R | W | — | — |
 | `budgets` | W (`on_exhaust = 'notify'` only by service admins and only on persistent teams, guard 000013) | U(amount_usd) only to lower it to the base ceiling when an override expires | R | R |
@@ -87,8 +89,8 @@ R = read, W = insert/update/delete, I = insert only, U(cols) = update listed col
 | `config_revisions` | R | R | — | — |
 | `audit_log` | I | I | — | — |
 | `outbox_events` | I | R, U(published_at, attempts) | I | I |
-| `export_bundles` | W (request rows; import rows with the applied report) | R, U(status, s3_uri, sha256, summary, finished_at) for exports | — | — |
-| Desired-state tables (every table with `generation`) | Writes fire `afs.notify_desired_state()` (000013) | `LISTEN afs_desired_state`; payload `'<table>:<team_id>:<id>'`; also polls `generation <> observed_generation` every 30 s; full resync every 10 min (D30) | — | — |
+| `export_bundles` (000014: nullable `s3_uri` and `sha256`, `download_url`, `download_expires_at`, `size_bytes`) | W (export request rows in `pending`, with no `s3_uri` or `sha256` yet; import rows with the applied report, no `s3_uri`, with the `sha256` of the body) | R, U(status, summary, finished_at, s3_uri, sha256, download_url, download_expires_at, size_bytes) for exports (column grant, 000014); no insert or delete | — | — |
+| Desired-state tables (every table with `generation`) | Writes fire `afs.notify_desired_state()` (000013) | `LISTEN afs_desired_state`; payload `'<table>:<team_id>:<id>'` (empty team part for service-level tables, e.g. `agent_templates::tpl_…`, 000014); also polls `generation <> observed_generation` every 30 s; full resync every 10 min (D30) | — | — |
 
 ### 4.1 Views the services read
 
@@ -118,6 +120,8 @@ All views are `security_invoker`, so RLS applies to `afs_app` callers through th
 | `afs.release_expired_reservations() → bigint` (000013) | reconciler, every minute | Releases expired reservations; returns the count (alerted when above zero for 3 runs) |
 | `afs.reserve_spend(budget_id, period_start, amount) → boolean`, `afs.settle_spend(budget_id, period_start, reserved, actual)` | gateway (compatibility) | Older pair without expiry; kept so a released gateway keeps working, removed in a later expand/contract cycle |
 | `afs.drop_partitions_older_than(months) → SETOF text` (000013, returns the dropped partition names) | reconciler, monthly with `13` | Detaches and drops partitions of `usage_events`, `agent_activity` and `external_traffic` older than the given months (D36). Never touches `audit_log` |
+| `afs.image_digests_ok(text[]) → boolean`, `afs.template_use_guard()` (000014) | `agent_templates` check; agents and pools trigger | Digest list shape; refuses a new agent or pool on a disabled template or a digest not on the allowed list (`23514`) | 
+| `afs.resolve_repo_owners(host, repo) → SETOF text` (000014, SECURITY DEFINER) | api before `CreateWorkOrder`, for repositories given without an owner; reconciler | Team ids whose namespace configuration value `AFS_OWNED_REPOS` lists the repository (entries split on commas or whitespace, case-insensitive), only at the best match (exact `host/owner/repo` over `host/owner/*`), skipping teams that are deleting or deleted. Returns ids only, because a security operator cannot read other teams' configuration through RLS. Zero rows → the API's `unownedRepos`; two or more → `ambiguousRepos` (D38) |
 | `afs.account_allowed(team_id, account_id) → boolean` | api, reconciler | Allowed-accounts filter |
 | `afs.team_missing_required_tags(team_id, key) → text` | api | Required tags a team still lacks (for clear errors) |
 | `afs.ensure_usage_partition`, `afs.ensure_activity_partition`, `afs.ensure_traffic_partition` | reconciler, monthly | Create next month's partitions ahead of time |
@@ -145,7 +149,7 @@ layer maps those to the [API contract](api-contract.md) §6 codes.
 
 | SQLSTATE | Meaning in this schema | API code |
 |---|---|---|
-| `23514` check_violation | Field rule, guard trigger (for example a fixed tag, a disabled provider, ceiling exceeded, a `kind` change, `notify` on an ephemeral team) | `ValidationError` |
+| `23514` check_violation | Field rule, guard trigger (for example a fixed tag, a disabled provider, ceiling exceeded, a `kind` change, `notify` on an ephemeral team, a disabled agent template or an image digest not on the template's allowed list, a succeeded export without `s3_uri`) | `ValidationError` |
 | `23502` not_null_violation | Missing required field | `ValidationError` |
 | `23505` unique_violation | Duplicate name, slug, issuer, pending proposal | `Conflict` |
 | `23503` foreign_key_violation | Unknown reference on write → `ValidationError`; dependents exist on delete → `Conflict` | as stated |
@@ -167,14 +171,17 @@ are not stored (D17): the traffic collector writes them to the team's log delive
 The review gaps at `000012` (unguarded ceilings and quotas, writable service catalogs, `role_bindings`
 and work order writes, secret keys in idempotent responses, no change notification, no spend period
 rollover, no reservation expiry, no retention, missing settings, missing `models.max_output_tokens`) are
-closed by `000011`, `000012` and `000013` as marked above. Open after `000013`:
+closed by `000011`, `000012` and `000013` as marked above. The two gaps left open at `000013` are closed
+by `000014`: the agent template catalog (`agent_templates`, `template_id` on agents and pools, root PRD
+AGT-11, D54) and the export and import transport (`export_bundles` with nullable `s3_uri` and `sha256`,
+`download_url`, `download_expires_at`, `size_bytes`; D49). Still open after `000014`:
 
-- `agent_templates` table for the agent template catalog (root PRD AGT-11, D54); until then
-  `agents.template` stays free text. Needs a later migration.
-- `export_bundles` for D49: `s3_uri` is `NOT NULL`, but an import no longer has an S3 object, and there
-  is no column for the pre-signed `download_url` and `size_bytes`. Needs a later migration (nullable
-  `s3_uri`, new columns).
 - `audit_log` partitioning (OQ-4).
+
+Two things the API must know about `000014`: the free-text `template` columns of `agents` and `agent_pools`
+stay and are not checked against the catalog (only rows with `template_id` are guarded), and the database
+checks the shape of `harness` (kebab-case), not a closed list, because the harnesses belong to Agentic
+Teammates.
 
 ## 7.0 Service settings
 

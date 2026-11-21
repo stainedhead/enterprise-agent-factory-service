@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft for review, feature-complete scope (2026-11-21); revised after the `review-prd` pass the same day (decisions D23 to D56, open questions OQ-1 to OQ-9) |
+| **Status** | Draft for review, feature-complete scope (2026-11-21); revised after the `review-prd` pass the same day (decisions D23 to D57, open questions OQ-1 to OQ-9) |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Date** | 2026-11-20 |
 | **Repositories** | `enterprise-agent-factory-service` (this root), `-db`, `-restapi`, `-cli`, `-website` |
@@ -159,7 +159,7 @@ fifth kind of caller, a *workload* principal, that may only report progress on t
 6. **Desired state vs. actual state.** Resources show reconcile status as `phase`: `Pending`,
    `Reconciling`, `Ready`, `Degraded`, `Failed` or `Deleting`, with the generation observed, so users can
    see when a change has been applied. Lifecycle is a separate field: a team's `state` is `active`,
-   `suspended`, `deleting` or `deleted`; agents and pools carry `paused` (pools also `state`). Budget
+   `suspended`, `deleting` or `deleted`; agents carry `paused`, and pools carry `state` (`enabled`, `paused`, `deleting`, `deleted`). Budget
    exhaustion is a condition, `BudgetExhausted=True`, on a `Ready` resource, shown as the words *Budget
    blocked*. No other status words are used (D24).
 7. **Accessible.** WCAG 2.2 AA: keyboard reachable, labelled inputs, status and alert regions announced.
@@ -177,7 +177,7 @@ Service admin (global navigation)            Team context (team-admin / team vie
 │  ├─ Budgets & ceilings                      ├─ Configuration
 │  ├─ Cost reconciliation                     │  ├─ Secrets
 │  ├─ Cost allocation tags                    │  ├─ Agent identities
-│  └─ Audit log                               │  │
+│  └─ Audit log                               │  ├─ Configuration values
 └─ Platform                                   │  ├─ External systems
    ├─ Model catalog & pricing                 │  ├─ Models
    ├─ Agent templates                         │  ├─ Log delivery
@@ -207,7 +207,7 @@ Every navigation item opens one screen below:
 | Agent templates, Service settings | S10 (the *Agent templates* tab opens directly) |
 | Swarm templates, External systems, Export & import | P5, S7, S11 |
 | Team: Overview, Agents, Pools & stages, Members & access | T1 (V1), T2, P4, T6 |
-| Configuration: Secrets, Agent identities, External systems, Models | T4 (V2), T8, T9, T1 *Models* tab |
+| Configuration: Secrets, Agent identities, Configuration values, External systems, Models | T4 (V2), T8, T7, T9, T1 *Models* tab |
 | Configuration: Log delivery, Notifications | T14 |
 | Cost: Budget & usage, Reports, Cost tags | T5, T11, T13 |
 | History: Activity & audit, Config revisions | T15 |
@@ -300,6 +300,7 @@ and a default), spend grouped by any tag, and the teams missing a required value
   (AGT-11).
 - *Service API keys*: keys with the security operator role, shown once at creation (ACC-4).
 - *Security operators*: people and IdP groups bound to the security operator role (ACC-2).
+- *Notification channels*: service-level channels, their events and delivery status (OPS-5).
 
 Hidden from every role except service admins.
 
@@ -557,7 +558,7 @@ are not reversible; recovery is an import (CFG-5).
 | Team API keys, role bindings | Keep authenticating; writes refused | Writes allowed | Revoked and removed (kept in the audit log) |
 | Budget, spend counters | Kept; no spend | Kept | Kept read-only |
 | Team row, revisions, usage, cost, activity, traffic, audit | Kept | Kept | Kept; `state = deleted`, `tornDownAt`, `teardownReason`; readable by service admins |
-| Work order (remediation team) | Unchanged | Unchanged | `failed` when repositories remain, else already `done` |
+| Work order (remediation team) | Unchanged | Unchanged | `cancelled` stays `cancelled`; otherwise `failed` when repositories remain, else `done` |
 
 ### 6.2 Agents and identity
 
@@ -573,7 +574,7 @@ are not reversible; recovery is an import (CFG-5).
 | AGT-8 | Swarms (ephemeral teams) hold several pools that work together, alongside any agents. Each pool has its own identity (ServiceAccount, IAM role, GitHub identity), secrets, configuration values, external-system opt-outs and a worker count (0 to 200); its workers share that identity and run as a Deployment. Pools can be grouped into ordered stages and hand work to named pools. Each receiving pool has one SQS inbox queue (`afs-<team ulid>-<short hash>`); the receiver gets `AFS_INBOX_QUEUE_URL`, and each pool that hands work to it gets `AFS_HANDOFF_<TO_POOL_NAME_UPPER_SNAKE>_QUEUE_URL` pointing at that inbox. Only the roles of pools with a handoff to it may send (D32). Pools exist only in ephemeral teams, and pool and agent names share the team's namespace. Storage per pool: a scratch volume per worker (1 to 500 GiB, deleted with the worker), plus optionally one shared EFS volume for the pool; workers get no persistent volume. The swarm has one lifetime budget; usage, activity, traffic and audit are attributed to the pool, with the worker pod recorded. A pool can use one shared named role in one or many organization accounts (inside the team's allowed accounts): the same role name in every account, one profile per account in the workers' AWS config, verified like AGT-10 | P2 |
 | AGT-9 | Every agent has one persistent volume (encrypted EBS gp3 by default, through a StatefulSet volume claim) mounted at `/var/lib/agent` for memory, configuration and work in progress. It survives restarts, pauses, image upgrades and reschedules. Team-admins set size (1 to 1000 GiB, default 20, grow only), storage class (from the service admin's list, fixed after creation), on-delete rule (snapshot then delete by default, delete, or retain) and snapshot schedule (off, daily or weekly, keeping 1 to 90). Viewers see the settings and snapshot history read-only. Volume usage counts toward the team's storage quota, and EBS cost is attributed to the team by tag | P0 |
 | AGT-10 | An agent with a dedicated role can be linked to roles in other accounts of the organization, inside the team's allowed accounts (TEAM-8). Each link has the target role ARN, a profile name, a maximum session (15 minutes to 12 hours) and an external ID that AFS generates. AFS shows the trust policy for the target account's owner to add (principal: the agent's role; conditions: the external ID and `aws:PrincipalTag/afs-team-id`, which comes from the role's tag). The reconciler grants the agent's role `sts:AssumeRole` on the target, writes an AWS config file into the pod with one profile per link (`role_arn`, `external_id`, `credential_source`, and `role_session_name` set to the agent id), verifies each link by assuming it (on creation, daily and on demand) and records *Pending trust*, *Verified*, *Failed* or *Disabled*. A link's role ARN and external ID cannot change; replace the link instead. Team-admins add and remove links; viewers see them read-only. CloudTrail in the target account shows the agent through the role name, the role's `afs-team-id` and `afs-agent-id` tags and the session name (D51); whether Pod Identity session tags carry through the role chain is checked in the M0 spike (OQ-1) | P1 |
-| AGT-11 | Agent template catalog. Service admins curate the Agentic Teammates templates teams may use: name, description, harness, default resources and the list of allowed image digests, with one marked current. Teams pick only enabled templates and allowed digests; disabling a template or removing a digest blocks new agents and pools with it and flags existing ones with condition `TemplateRetired=True`, without restarting them. Every change is audited and versioned (S10). Today `agents.template` is free text; the catalog needs a `-db` table `agent_templates` in a migration after 000013 (D54) | P0 |
+| AGT-11 | Agent template catalog. Service admins curate the Agentic Teammates templates teams may use: name, description, harness, default resources and the list of allowed image digests, with one marked current. Teams pick only enabled templates and allowed digests; disabling a template or removing a digest blocks new agents and pools with it and flags existing ones with condition `TemplateRetired=True`, without restarting them. Every change is audited and versioned (S10). Today `agents.template` is free text; the catalog is the `-db` table `agent_templates` in migration 000014 (D54) | P0 |
 
 ### 6.3 Secrets
 
@@ -584,7 +585,7 @@ are not reversible; recovery is an import (CFG-5).
 | SEC-3 | Bind secrets to agents as env vars or files; delivered by External Secrets Operator. A team-shared secret can be bound to any agent in the team; an agent secret only to its own agent | P0 |
 | SEC-4 | Rotate: new value, rolling restart of bound agents and pool workers. Viewers cannot rotate; a rotate on a secret whose value cannot be written to Secrets Manager fails with `503 Unavailable` and leaves the old value in place | P1 |
 | SEC-5 | AFS alone sets the Secrets Manager name: `<service>/<namespace>/<agent-name>/<secret-name>`, `<service>/<namespace>/<pool-name>/<secret-name>` for pool secrets, or `<service>/<namespace>/_shared/<secret-name>`. `<service>` is the installation's prefix (service setting `secrets.path_prefix`, default `afs`). Users cannot set or change the path; team slug, agent name and secret name are immutable once created. IAM policies are prefix rules on this path: `afs-api` writes under `<service>/*`, a team's secret store reads `<service>/<namespace>/*`, a per-agent role reads only `<service>/<namespace>/<agent-name>/*` plus `_shared/*`, and a pool's role reads only `<service>/<namespace>/<pool-name>/*` plus `_shared/*`. The `afs-team-id` tag stays as a second check | P0 |
-| SEC-6 | **Zero impact on the agent's container.** Secrets and configuration values reach the agent without code, SDKs, sidecars the agent talks to, or calls from the agent: each secret binding becomes an environment variable or a file at the path the team-admin chose (delivered by External Secrets Operator into a namespace Secret the pod mounts), configuration values become environment variables and files under `/etc/afs/config` (CFG-7), cross-account profiles a file under `/etc/afs/aws` (AGT-10) and tags `/etc/afs/tags.json` plus `AFS_TAGS` (TAG-4). A rotated secret or changed value rolls the agents that use it, so environment variables are always current. The model-call path is delivered the same way: `AFS_GATEWAY_URL`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, `ANTHROPIC_BASE_URL` and a projected token file (IF-5). An on-demand endpoint for secrets is a non-goal (D12) | P0 |
+| SEC-6 | **Zero impact on the agent's container.** Secrets and configuration values reach the agent without code, SDKs, sidecars the agent talks to, or calls from the agent: each secret binding becomes an environment variable or a file at the path the team-admin chose (delivered by External Secrets Operator into a namespace Secret the pod mounts), configuration values become environment variables and files under `/etc/afs/config` (CFG-7), cross-account profiles a file under `/etc/afs/aws` (AGT-10) and tags `/etc/afs/tags.json` plus `AFS_TAGS` (TAG-4). A rotated secret or changed value rolls the agents that use it, so environment variables are always current. The model-call path is delivered the same way: `AFS_GATEWAY_URL`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY=afs-gateway` (a placeholder, not a secret), the gateway's CA through `AWS_CA_BUNDLE`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS`, and an optional projected token file; the gateway knows the caller by its pod, so standard SDKs work unchanged (IF-5, D57). An on-demand endpoint for secrets is a non-goal (D12) | P0 |
 
 ### 6.4 Budgets, usage and cost
 
@@ -599,7 +600,7 @@ are not reversible; recovery is an import (CFG-5).
 | BUD-7 | Showback export by cost center and by any cost allocation tag (TAG-6), as CSV through the reports API (`groupBy=tag:<key>`), for service admins across teams and for a team's members within it | P1 |
 | BUD-8 | Lifetime budgets for ephemeral teams: one budget for the team's whole life, blocking at the cap, with the same thresholds and alerts as monthly budgets. Pools and agents in the team share it. The cap can be raised up to the ceiling; it cannot be removed while the team exists | P2 |
 | BUD-9 | Model prices stay current because token and model costs drive budgets: when price sync is on (service setting `pricing.price_list_sync`, default on), the billing job reads the AWS Price List daily and proposes each changed price as a pending change with its effective date. A service admin approves or rejects it; an approved price takes effect from its effective date or from the approval, whichever is later, and is never backdated. Manual prices remain possible. Every proposal and decision is audited (D10) | P1 |
-| BUD-10 | Exhaustion action. A budget blocks at the cap (`onExhaust: block`, the default). A service admin may choose `notify` for a persistent team only: spend continues past the cap and alerts still fire. Ephemeral teams always block. Team-admins cannot set or change it; the API and the database refuse it (D33) | P0 |
+| BUD-10 | Exhaustion action. A budget blocks at the cap (`onExhaust: block`, the default). A service admin may choose `notify` for a persistent team only: spend continues past the cap and alerts still fire. Ephemeral teams always block. A team-admin sending `onExhaust: notify` gets `403 AccessDenied` (the database refuses the write with `42501`); a team-admin sending `block`, or the unchanged value, is accepted (D33) | P0 |
 
 ### 6.5 People and access
 
@@ -621,7 +622,7 @@ are not reversible; recovery is an import (CFG-5).
 | CFG-4 | PITR backups and cross-region/cross-account snapshot copies | P0 |
 | CFG-5 | Export a versioned, checksummed bundle (no secret values); import with ARN/account mapping and dry-run plan. Agent volumes are carried as their settings plus the latest snapshot reference; import can restore an agent's volume from that snapshot once it is shared or copied to the target account. Teams' allowed-accounts filters and agents' identity settings and cross-account links (with their external IDs) are exported; import maps account ids and re-verifies every link. The external systems catalog, team-declared systems and team and agent opt-outs are exported too. Export is asynchronous: the reconciler writes the bundle to S3 and the export record holds a pre-signed download link. Import sends the bundle as the request body (JSON, up to 100 MB); `afs-api` applies it as desired-state writes, one transaction per team, and returns a report, so `afs-api` never reads S3 (D49) | P1 |
 | CFG-6 | Restore a team to a previous revision | P1 |
-| CFG-7 | Non-secret configuration values at two levels: the team's namespace (shared by its agents) and the agent. Each agent value is either its own literal value or a link to the namespace value with the same name (the link is offered only when that value exists). Team-admins manage both levels; viewers see names, values and sources read-only. Values are delivered to the agent's pod as environment variables and as files under `/etc/afs/config`, through a ConfigMap the reconciler owns (manual edits are reverted). Changing a value restarts the agents that use it. A linked namespace value cannot be deleted or renamed until no agent links to it. Names are `UPPER_SNAKE`; names that look like credentials (`*_PASSWORD`, `*_TOKEN`, `*_API_KEY` and similar) are refused with a pointer to Secrets, and a name cannot reuse an environment variable already used by the agent's secrets. Configuration values are included in export bundles | P0 |
+| CFG-7 | Non-secret configuration values at two levels: the team's namespace (shared by its agents) and the agent. Each agent value is either its own literal value or a link to the namespace value with the same name (the link is offered only when that value exists). Team-admins manage both levels; viewers see names, values and sources read-only. Values are delivered to the agent's pod as environment variables and as files under `/etc/afs/config`, through a ConfigMap the reconciler owns (manual edits are reverted). Changing a value restarts the agents that use it. A linked namespace value cannot be deleted until no agent links to it. Names are `UPPER_SNAKE`; names that look like credentials (`*_PASSWORD`, `*_TOKEN`, `*_API_KEY` and similar) are refused with a pointer to Secrets, and a name cannot reuse an environment variable already used by the agent's secrets. Configuration values are included in export bundles | P0 |
 
 ### 6.7 Delivery and notifications
 
@@ -631,17 +632,19 @@ are not reversible; recovery is an import (CFG-5).
 | OPS-2 | Events (team, agent, budget, drift, work order) published to EventBridge via a transactional outbox, at least once, in order per resource; consumers deduplicate on the event `id`. An event is published within 30 seconds of its commit (p95) | P0 |
 | OPS-3 | Notification channels per team: Slack, email, webhook, Jira. The reconciler turns each channel into an EventBridge rule and target (an API destination for Slack, webhook and Jira; SES for email), and records delivery failures on the channel (D46) | P1 |
 | OPS-4 | Credential hygiene in logs: agent logs and external-traffic records pass through a redaction step before storage or delivery. Values that look like passwords, tokens or keys (and the values of the agent's own bound secrets) are replaced by a stable token (`[redacted:<hash prefix>]`), so repeats can be correlated without exposing the value. Agent sign-ins to external systems (connections to a system's sign-in endpoints) are written to the team's log delivery as sign-in events with the agent or pool worker, system and time. They are not stored in the AFS database or shown in the console (D17) | P0 |
+| OPS-5 | Service-level notification channels: service admins manage channels (email, Slack, webhook, Jira) that belong to the service, not to a team, for service events (variance, price proposals, cost tag status, egress spikes across teams) and for outside work order contacts (setting `work_orders.notification_channel_id`). Team-scoped features (scheduled reports, team alerts) cannot choose them. Managed on S10; a channel named in a setting cannot be deleted | P1 |
 
 ### 6.8 Work orders
 
 | ID | Requirement | Pri |
 |---|---|---|
-| WO-1 | Security operators create CVE work orders (CVE id, severity, title, affected repositories with their owners, SLA due time, swarm template, optional cap) through the console, CLI, API, or an EventBridge event on the service bus. Events are deduplicated by event id; there is at most one open work order per CVE. Owners are AFS teams, outside contacts (email), or both | P2 |
+| WO-1 | Security operators create CVE work orders (CVE id, severity, title, affected repositories with their owners, SLA due time, swarm template, optional cap) through the console, CLI, API, or an EventBridge event on the service bus. Events are deduplicated by event id; there is at most one open work order per CVE. Owners are AFS teams, outside contacts (email), or both. A repository may name its owner explicitly or name none; with none, AFS resolves it from the teams' namespace configuration value `AFS_OWNED_REPOS` (WO-7). An explicit owner always wins (D38) | P2 |
 | WO-2 | For each work order, AFS creates an ephemeral remediation team from the swarm template, with the work order's cap (or the template's) as its lifetime budget, the template's time to live as expiry, and *when its work order completes* as teardown rule. Service admins maintain the templates (P5) | P2 |
 | WO-3 | Progress is tracked per repository: pending, in progress, PR opened (with link), merged, not affected, failed or skipped. The remediation team's agents and pools report progress through the API with the assigned team's identity; the reconciler also reads pull request state from GitHub through one GitHub App installation per organization, within a budget of 5,000 requests per hour per installation (OQ-5) | P2 |
 | WO-4 | Owners are notified once per event: assigned, PR opened, merged, SLA warning (service setting `work_orders.sla_warning_hours` before due, default 48) and SLA breached, and on completion. AFS teams are notified on their channels; outside contacts by email through the service-level channel named in service setting `work_orders.notification_channel_id` (D22) | P2 |
-| WO-5 | Work order `status` is `open` (created), `assigned` (team created), `in_progress` (a repository started), `pr_opened` (every remaining repository has a PR), `done`, `failed` or `cancelled`; `slaState` is separate (`on_track`, `due_soon`, `breached`, `met`, `missed`). A work order is done when every repository is merged, not affected or skipped; failed when the team is torn down with work remaining; cancelled by a security operator or service admin. Each change publishes a `work_order.*` event | P2 |
+| WO-5 | Work order `status` is `open` (created), `assigned` (team created), `in_progress` (a repository started), `pr_opened` (every remaining repository has a PR), `done`, `failed` or `cancelled`; `slaState` is separate (`on_track`, `due_soon`, `breached`, `met`, `missed`). A work order is done when every repository is merged, not affected or skipped; cancelled by a security operator or service admin. When the team is torn down, `cancelled` stays `cancelled`; otherwise the work order is `failed` when repositories remain, else `done`. Each change publishes a `work_order.*` event | P2 |
 | WO-6 | Security operators and service admins see every work order; a team sees, read-only, those assigned to it and those touching a repository it owns | P2 |
+| WO-7 | Repository ownership from team configuration. A team lists the repositories it owns in its namespace configuration value `AFS_OWNED_REPOS` (comma- or whitespace-separated `host/owner/repo` or `host/owner/*`, case-insensitive), maintained by its team-admins like any configuration value (CFG-7). A work order repository given without an owner is assigned to the team whose entry matches best (exact over wildcard; deleted or deleting teams skipped). Several teams at the best match, or none, refuses the work order with `ValidationError` listing those repositories, so the caller names the owner. The resolved owners are shown on the work order and notified like explicit owners (D38) | P2 |
 
 ### 6.9 Interfaces
 
@@ -651,7 +654,7 @@ are not reversible; recovery is an import (CFG-5).
 | IF-2 | `afs` CLI: `afs <service> <operation>`, profiles, `--output json|table|text|yaml` (and `csv` on operations the contract marks *CSV*, D39), `--query`, pagination flags, `--cli-input-json`, `--generate-cli-skeleton`, AWS CLI exit codes | P0 |
 | IF-3 | `@afs/sdk` TypeScript SDK generated from the contract with ergonomic resource clients and async pagination | P0 |
 | IF-4 | Web console as specified in section 5, built on `@afs/sdk` with clean architecture, served as a static bundle from S3 and CloudFront per environment with runtime configuration from `/config.json` (D43) | P0 |
-| IF-5 | Gateway interface for agents, as the [gateway contract](docs/contracts/gateway-contract.md) defines: Bedrock Runtime compatible paths (`converse`, `converse-stream`, `invoke`, `invoke-with-response-stream`) and an Anthropic Messages compatible path, streaming included, authenticated by the pod's projected token, with zero change to the agent's container (D28) | P0 |
+| IF-5 | Gateway interface for agents, as the [gateway contract](docs/contracts/gateway-contract.md) defines: Bedrock Runtime compatible paths (`converse`, `converse-stream`, `invoke`, `invoke-with-response-stream`) and an Anthropic Messages compatible path, streaming included, with zero change to the agent's container. The gateway identifies the caller by source pod IP (mapped through the Kubernetes API and Cilium endpoint identity to namespace, ServiceAccount and agent or pool) and ignores the SigV4 `Authorization` header and `ANTHROPIC_API_KEY`; Cilium lets only team pods reach it, with per-endpoint identity and WireGuard transparent encryption, so the source cannot be spoofed. The projected token (`AFS_GATEWAY_TOKEN_FILE`) is optional defence in depth: when sent it must match the source pod, else `401` (D28, D57) | P0 |
 
 ### 6.10 External systems
 
@@ -686,7 +689,7 @@ it in, so spend can be rolled up the way the organization reports it, in AFS and
 
 | ID | Requirement | Pri |
 |---|---|---|
-| TAG-1 | **System tags.** `afs-team-id` and `afs-agent-id` are set by AFS on every resource and every Bedrock call it can attribute to a team or agent. Nobody configures, changes or removes them, and no other tag can use the `afs-` or `aws:` prefixes | P0 |
+| TAG-1 | **System tags.** AFS sets these and nobody configures, changes or removes them: `afs-team-id` and `afs-team-slug` on every team-owned AWS resource (team and dedicated roles, volumes, snapshots, inference profiles, secrets, queues, EFS access points, dedicated nodes); `afs-agent-id` and `afs-agent-name` on an agent's dedicated role, volume and snapshots and on its Bedrock calls; `afs-pool-id` and `afs-pool-name` on a pool's role, queue and EFS access point and on its Bedrock calls. Bedrock calls carry `afs-team-id` plus `afs-agent-id` or `afs-pool-id`. System tags count toward the 40-key limit of TAG-3. No other tag can use the `afs-` or `aws:` prefixes | P0 |
 | TAG-2 | **Service tags.** Service admins define tag keys that are either *fixed* (one value applied to every team, for example `environment = prod`) or *required* (every team gives its own value, optionally from an allowed list, for example `business-unit`). A required key can have a default for teams that existed before it. A new team cannot be created without a value for every required key that has no default, and a team cannot remove one. Teams missing a value are listed for service admins and shown as untagged in reports | P1 |
 | TAG-3 | **Team tags.** Team-admins add optional tags of their own (any key that is not a service key or reserved), and set the team's values for required keys. A team's effective tag set (system, service and team tags together) is at most 40 keys, which leaves room under AWS's limit of 50 per resource for the tags the EBS CSI driver and other AWS tooling add (D27, OQ-2). Viewers see all of a team's tags read-only | P1 |
 | TAG-4 | **Where tags go.** The reconciler applies a team's tags to its AWS resources (IAM roles, EBS volumes and snapshots, Bedrock application inference profiles, Secrets Manager secrets), and the team's tags plus `afs-agent-id` to each agent's resources. The gateway adds the agent's tags as request metadata to every Bedrock call, at most 16 pairs (Bedrock's limit): system tags first, then service fixed and required tags, then team tags in key order; T13 lists the keys that do not fit (D27). Each agent's pod gets them as `/etc/afs/tags.json` and the `AFS_TAGS` environment variable, so an agent may pass them to other services; AFS does not alter the agent's calls to external systems, whose traffic is attributed to the agent (RPT-6) and so to its tags | P1 |
@@ -717,7 +720,7 @@ The database refuses a value outside its range. This table and the database cont
 
 ### 6.14 User stories and acceptance criteria
 
-Product-level stories, US-1 to US-24. Each repository PRD breaks these into its own stories with acceptance criteria
+Product-level stories, US-1 to US-26. Each repository PRD breaks these into its own stories with acceptance criteria
 for its layer, citing the story ids below (for example `-restapi` RA-US-4 refines US-4). Acceptance
 criteria are written as Given / When / Then and are the basis of end-to-end tests in the dev
 environment.
@@ -744,8 +747,9 @@ team-admin or viewer, and issue short-lived API keys, so that access follows our
 pipelines can authenticate. *(ACC-2, ACC-3, ACC-4, T6)*
 - Given I am a team-admin, when I add a group binding, then members of that group who sign in through the
   team's provider get the role on their next request, and the change is audited.
-- Given I am a team-admin, when I try to grant `service_admin` or `security_operator`, then the request is
-  refused with `403`, by the API and by the database.
+- Given I am a team-admin, when I try to grant `service_admin` or `security_operator`, then the API
+  refuses it with `ValidationError` (team bindings take team roles only), and a direct insert into
+  `role_bindings` by a team caller is refused by the database with `42501`.
 - Given more than one sign-in provider, when I as team-admin change my team's provider to another enabled
   one, then group bindings use the new provider's groups from the next request; choosing a disabled
   provider is refused with `ValidationError` (ACC-1, D21).
@@ -802,7 +806,7 @@ or call to fetch them. *(SEC-3, SEC-4, SEC-6, CFG-7)*
 - Given a configuration value name `DB_PASSWORD` or `GITHUB_TOKEN`, then it is refused with
   `ValidationError` pointing to Secrets; given a name already used as an env var by one of the agent's
   secret bindings, then it is refused (CFG-7).
-- Given a namespace value that an agent links to, when I delete or rename it, then it is refused with
+- Given a namespace value that an agent links to, when I delete it, then it is refused with
   `409 Conflict` naming the agents (CFG-7).
 - Given a viewer, when they call `RotateSecret`, then they get `403` (SEC-4).
 
@@ -829,6 +833,8 @@ policy, so that the agent can work there without long-lived keys. *(AGT-6, AGT-1
   with a tooltip; `403` from the API).
 - Given a verified link, when the agent assumes the role, then the target account's CloudTrail shows the
   agent's role `afs-<agent id>` and session name set to the agent id (D51).
+- Given an agent with cross-account links, when I switch it back to the team's shared role, then it is
+  refused with `409 Conflict` naming the links; after the links are removed, the switch succeeds (AGT-6).
 
 #### E4 External systems
 
@@ -890,8 +896,10 @@ external traffic, so that I can manage cost and capacity. *(G7, RPT-1 to RPT-9, 
 **US-12 · Cost allocation tags.** As a service admin, I want every team to carry the tags our finance
 reporting needs, and every resource and Bedrock call tagged with team and agent ids automatically, so
 that spend rolls up by business unit, product or any other dimension. *(TAG-1 to TAG-7, S9, T13)*
-- Given any agent, then its IAM role, volume, snapshots and Bedrock calls carry `afs-team-id` and
-  `afs-agent-id` with no configuration by anyone, and no one can change or remove them.
+- Given any agent, then with no configuration by anyone the shared team role carries `afs-team-id`, a
+  dedicated role, the agent's volume and its snapshots carry `afs-team-id` and `afs-agent-id`, and its
+  Bedrock calls carry `afs-team-id` and `afs-agent-id` (a pool's calls `afs-pool-id`); no one can change
+  or remove them.
 - Given a fixed service tag `environment = prod`, then every team's resources carry it, and a team cannot
   override it.
 - When a team-admin adds `project = ledger-modernization`, then within 10 minutes the team's AWS
@@ -956,10 +964,17 @@ that tears itself down, so that experiments cannot outlive their budget. *(TEAM-
 
 **US-16 · CVE remediation.** As a security operator, I want to create a CVE work order and have a capped
 remediation team open PRs in affected repositories and notify owning teams against the SLA.
-*(WO-1 to WO-6, P3, P5, P6)*
+*(WO-1 to WO-7, P3, P5, P6)*
 - When I create a work order through the console, CLI, API or an EventBridge event, then within 5
   minutes a remediation team is created from the template with the cap as its lifetime budget and its
   pools start.
+- Given team A whose `AFS_OWNED_REPOS` is `github.com/acme/*` and team B with `github.com/acme/ledger`,
+  when I create a work order for `github.com/acme/ledger` and `github.com/acme/web` without owners, then
+  `ledger` is owned by B (exact wins) and `web` by A, and both teams are notified (WO-7).
+- Given two teams that both list `github.com/acme/web`, then the work order is refused with
+  `ValidationError` and `details.ambiguousRepos` naming both teams; given a repository no team lists,
+  then `ValidationError` with `details.unownedRepos`; naming `=team_…` or `=email` for it succeeds, and an
+  explicit owner always overrides the configuration value (D38).
 - Given an EventBridge event delivered twice, then one work order exists; given an open work order for
   CVE-2026-1234, then a second one for the same CVE is refused with `Conflict`.
 - When a pool opens a PR in an affected repository, then the repository shows *PR opened* with its link,
@@ -1015,7 +1030,7 @@ tools and AFS events sent to our channels, so that we see what our agents do whe
   there within 2 minutes, redacted (OPS-4); the destination's credentials are secret references only.
 - When I add a Slack channel subscribed to budget events, then *Send test* delivers a message, and the next
   `budget.threshold_crossed` arrives once; a failed delivery shows on the channel with the error.
-- Given a viewer, then T14 is read-only and `PutLogDestination` or `CreateNotificationChannel` returns
+- Given a viewer, then T14 is read-only and `CreateLogDestination` or `CreateNotificationChannel` returns
   `403`.
 
 **US-20 · History and restore.** As a team-admin, I want to see every change to my team and put it back
@@ -1029,14 +1044,17 @@ to an earlier revision, so that a bad change is quick to undo. *(CFG-3, CFG-6, T
 
 **US-21 · Service settings and identity providers.** As a service admin, I want to manage settings,
 sign-in providers, storage classes, agent templates and security tooling access in one place, so that the
-service is configured without database access. *(S10, §6.13, ACC-1, ACC-2, ACC-4, AGT-9, AGT-11)*
+service is configured without database access. *(S10, §6.13, ACC-1, ACC-2, ACC-4, AGT-9, AGT-11, OPS-5)*
 - When I set `billing.variance_alert_pct` to 150, then it is refused with `ValidationError` naming the
   range; any change to a setting is audited.
 - When I add an Entra ID provider and mark it the default, then the sign-in page offers both providers
   with Entra ID preselected; disabling a provider that a team uses is refused with `409 Conflict`.
 - When I create a service-level API key, then it holds only the security operator role, its secret is
-  shown once, and it can call work order operations, `ListSwarmTemplates`, `ListTeamDirectory` and
-  `GetMe` only.
+  shown once, and it can call work order operations, `ListSwarmTemplates`, `GetSwarmTemplate`,
+  `ListTeamDirectory` and `GetMe` only.
+- When I create a service-level email channel and name it in `work_orders.notification_channel_id`, then
+  outside work order contacts are emailed through it, deleting it is refused with `409 Conflict`, and a
+  team-admin choosing it for a report schedule gets `ValidationError` (OPS-5).
 - Given a team-admin or viewer, then S10 is hidden and every settings, provider, storage class, template
   and service key operation returns `403`, from the API and from the database (D35).
 
@@ -1065,12 +1083,45 @@ that I can unblock work without losing control. *(BUD-1, BUD-7, BUD-8, BUD-10, D
 - When I raise a team's ceiling to $8,000 until Friday, then the team-admin can set a budget up to $8,000;
   at expiry the override is cleared, a budget above the base ceiling is lowered to it, the team-admins are
   notified and `budget.ceiling_override_expired` is emitted.
-- Given a team-admin, when they set `ceilingOverrideUsd`, `maxBudgetUsd`, `quotas` or `onExhaust`, then
-  they get `403`, and the database refuses the same write (`42501`).
+- Given a team-admin, when they set `ceilingOverrideUsd`, `maxBudgetUsd`, `quotas` or `onExhaust: notify`,
+  then they get `403`, and the database refuses the same write (`42501`); a `PutBudget` with
+  `onExhaust: block`, or with the value unchanged, is accepted.
 - Given an ephemeral team, when anyone sets `onExhaust: notify`, then it is refused with
   `ValidationError`.
 - When I export showback for October grouped by `business-unit`, then the CSV totals equal the report's
   totals (BUD-7).
+
+**US-25 · Gateway for agents.** As an agent author, I want my agent's standard Bedrock or Anthropic SDK
+to reach models through AFS with no code change, so that every call is metered and capped. *(IF-5,
+BUD-2, BUD-4, SEC-6, D57)*
+- Given an agent using the AWS SDK's Bedrock Runtime client or the Anthropic SDK with only the
+  environment AFS sets, when it calls `Converse` or `messages.create` (streaming or not), then the call
+  succeeds through the gateway, is attributed to the agent, and the SDK's SigV4 signature or API key is
+  ignored.
+- Given a pod in another team's namespace, or any pod outside team namespaces, then Cilium denies its
+  connection to the gateway; given a projected token from a different pod than the source, then the
+  gateway returns `401 Unauthenticated`.
+- Given a request without `maxTokens`, then the reservation uses the model's `max_output_tokens`; a hold
+  not settled within 900 seconds (`gateway.reservation_ttl_seconds`) is released, and a late settlement
+  still adds the actual cost.
+- When a new month starts, then the first call of the month succeeds without any manual step and one
+  `budget.reset` event is emitted for the budget (BUD-4).
+- Given the budget is exhausted, then the call gets `402 BudgetExceeded` and the SDK does not retry it.
+
+**US-26 · Clients and conventions.** As an automation author, I want the API, CLI and SDK to behave
+predictably on retries, versions and errors, so that pipelines are safe to rerun. *(IF-1 to IF-4,
+D39 to D41, D43, D47)*
+- Given a `CreateAgent` with `Idempotency-Key` K, when it is retried with K and the same body within an
+  hour, then the first response is returned with `Idempotent-Replayed: true` and no second agent exists;
+  retried with K and a different body, then `409 Conflict` with `details.reason = idempotency_mismatch`.
+- Every API response carries `X-Afs-Contract-Version`; given a CLI built against an older minor, then it
+  works and prints one notice per session.
+- Given a browser origin not in `api.cors_origins`, then the preflight gets no
+  `Access-Control-Allow-Origin` and the browser blocks the call.
+- When I run `afs audit list-audit-events --output csv`, then the CSV has one header row across all
+  pages; `--output csv` on a non-CSV operation, or with `--query`, exits 252.
+- Given a service error, then the CLI prints the AWS-style message and exits 254; given a cached SSO
+  token known to be expired, then it exits 255 with the `afs sso login` hint without calling the API.
 
 ## 7. Non-functional requirements
 
@@ -1123,7 +1174,7 @@ provides or consumes. The three contracts are shared design, reviewed here and o
 | [`-cli` PRD](https://github.com/stainedhead/enterprise-agent-factory-service-cli/blob/main/enterprise-agent-factory-service-cli-PRD.md) | `afs` |
 | [`-website` PRD](https://github.com/stainedhead/enterprise-agent-factory-service-website/blob/main/enterprise-agent-factory-service-website-PRD.md) | `@afs/sdk` and the console |
 
-Story ids are traced across levels: product US-1 to US-24 → repository stories (`DB-US-n`, `RA-US-n`,
+Story ids are traced across levels: product US-1 to US-26 → repository stories (`DB-US-n`, `RA-US-n`,
 `CLI-US-n`, `WEB-US-n`) → specs and tests. Where a repository document and a contract disagree, the
 contract wins; where the solution design and a contract disagree, the contract wins.
 
@@ -1155,11 +1206,11 @@ contract wins; where the solution design and a contract disagree, the contract w
 |---|---|---|
 | M0 Foundations | Repos, CI, schema v1 (to 000013), OpenAPI skeleton, IF-1, auth middleware, `/v1/me`; spikes for OQ-1, OQ-2, OQ-6 | All gates green; isolation and RLS tests pass; spike results recorded |
 | M1 Teams & access | TEAM-1..5, TEAM-9 (suspend, resume, delete), ACC-1..3, CFG-1..3, IF-2..4 (CLI, SDK and console foundations, CORS and console hosting), reconciler for namespace/network/IAM; console S1–S3, S10 (settings, identity providers), T1, T6, T15 (history, without restore), V1; CLI `teams`, `members` | A service admin onboards a team end to end in dev; S1 spend tiles show *No spend data yet* |
-| M2 Agents & secrets | AGT-1..4, AGT-7, AGT-9, AGT-11, SEC-1..6, CFG-7, EXT-1, EXT-2, EXT-4..6, OPS-4 (redaction on every agent log stream); console T2–T4, T7, T9, T10, S7, S10 (storage classes, agent templates), V2; CLI `agents`, `secrets` | Agents run with bound secrets; a rotated secret rolls its agents; viewers cannot change anything (tested) |
+| M2 Agents & secrets | `-db` migration 000014: `agent_templates`; `export_bundles` (nullable `s3_uri`, `download_url`, `download_expires_at`, `size_bytes`). AGT-1..4, AGT-7, AGT-9, AGT-11, SEC-1..6, CFG-7, EXT-1, EXT-2, EXT-4..6, OPS-4 (redaction on every agent log stream); console T2–T4, T7, T9, T10, S7, S10 (storage classes, agent templates), V2; CLI `agents`, `secrets` | Agents run with bound secrets; a rotated secret rolls its agents; viewers cannot change anything (tested) |
 | M3 Spend control | BUD-1..5, BUD-10, OPS-2, RPT-1..5, RPT-7, TAG-1, IF-5; gateway and gateway contract; activity collector; console T5, S4, S8, T11, T12 | Load test proves the hard cap; `budget.threshold_crossed` emitted exactly once per threshold per period (delivery to channels arrives with OPS-3 in M4) |
-| M4 Production readiness | CFG-4, BUD-6/7/9, TAG-2..6, RPT-9, OPS-1/3, S9, T13, T14, ACC-4, AGT-5/6/10, TEAM-8, EXT-3, EXT-7, RPT-6, RPT-8, CFG-5/6, S5, S6, S11, T8, T15 restore | DR rebuild drill passes (RPO 5 min, RTO 1 h); alerts reach team channels within 2 minutes; security review signed off |
+| M4 Production readiness | CFG-4, BUD-6/7/9, TAG-2..6, RPT-9, OPS-1/3, OPS-5, S9, T13, T14, S10 (service notification channels), ACC-4, AGT-5/6/10, TEAM-8, EXT-3, EXT-7, RPT-6, RPT-8, CFG-5/6, S5, S6, S11, T8, T15 restore | DR rebuild drill passes (RPO 5 min, RTO 1 h); alerts reach team channels within 2 minutes; security review signed off |
 | M5 Budgeted workloads and swarms | TEAM-6, TEAM-7, TEAM-9 (teardown), BUD-8, AGT-8 (with the pool shared named role), ACC-5, TAG-7; P2, P4 screens | First POC team runs and tears itself down; a 20-worker pool runs under one identity |
-| M6 CVE remediation | WO-1..6, security operator role and keys, workload principal (D29), team directory (D38); P3, P5, P6 screens | One CVE remediated across repos within SLA, from an EventBridge event |
+| M6 CVE remediation | WO-1..7, security operator role and keys, workload principal (D29), team directory (D38); P3, P5, P6 screens | One CVE remediated across repos within SLA, from an EventBridge event |
 
 Feature complete is M0 to M6. The milestones order the build; nothing in them is deferred.
 
@@ -1167,8 +1218,8 @@ Feature complete is M0 to M6. The milestones order the build; nothing in them is
 
 ### 10.1 Decisions log
 
-Open questions answered by J on 2026-11-21 (D1 to D22), and decisions Claude made after the `review-prd`
-pass the same day under J's standing instruction to work out answers (D23 to D56, each for J's review).
+Open questions answered on 2026-11-21: D1 to D22 (J, except where marked Claude), and decisions Claude made after the `review-prd`
+pass the same day under J's standing instruction to work out answers (D23 to D57, each for J's review).
 Each is reflected in the requirements above and in the contracts.
 
 | # | Question | Decision | Where |
@@ -1200,8 +1251,8 @@ Each is reflected in the requirements above and in the contracts.
 | D25 | AWS resource names | IAM roles `afs-<id>` under path `/afs/<namespace>/`, SQS queues `afs-<team ulid>-<short hash>`; human names only in tags; Secrets Manager keeps the readable path (Claude, for J's review) | AGT-6, AGT-8, US-3 |
 | D26 | Agent identity under Pod Identity | The team (and dedicated agent or pool) is a tag on the role; the agent is identified by Pod Identity's own session tags; IAM conditions use `aws:PrincipalTag/kubernetes-namespace` (Claude, for J's review; spike OQ-1) | G4, AGT-3, AGT-10, US-14 |
 | D27 | Tag limits | Effective tag set at most 40 keys; at most 16 Bedrock `requestMetadata` pairs, in a fixed order, the rest listed on T13 (Claude, for J's review; spike OQ-2) | TAG-3, TAG-4, US-12 |
-| D28 | Gateway wire contract | New gateway contract: Bedrock Runtime and Anthropic Messages compatible paths, projected token, env vars in the pod, worst-case reservation, `402 BudgetExceeded` (Claude, for J's review) | BUD-2, IF-5; gateway contract; `-db` 000013 `models.max_output_tokens` |
-| D29 | Agents and pools calling `afs-api` | A projected token with audience `afs-api` makes a *workload* principal that may only report progress on its team's work orders and call `GetMe` (Claude, for J's review) | §4, WO-3, US-16; API contract §2, §3 |
+| D28 | Gateway wire contract | New gateway contract: Bedrock Runtime and Anthropic Messages compatible paths, caller identity by pod (D57), env vars in the pod, worst-case reservation, `402 BudgetExceeded` (Claude, for J's review) | BUD-2, IF-5; gateway contract; `-db` 000013 `models.max_output_tokens` |
+| D29 | Agents and pools calling `afs-api` | A projected token with audience `afs-api` makes a *workload* principal that may only report progress on its team's work orders and call `GetMe`; `afs-api` validates the token offline against the cluster's OIDC JWKS (issuer, audience `afs-api`), never with TokenReview, since it does not call Kubernetes (Claude, for J's review) | §4, WO-3, US-16; API contract §2, §3 |
 | D30 | Reconciler change detection | `pg_notify('afs_desired_state', '<table>:<team_id>:<id>')` triggers on every desired-state table, a 30 s generation poll as backstop, full resync every 10 min (Claude, for J's review) | CFG-2; `-db` 000013 |
 | D31 | Spend periods and stuck reservations | `afs.ensure_spend_counter` opens a period on demand; held reservations expire after 15 minutes and are released by the reconciler; `settle_reservation(id, budget, period, actual)` still adds the actual cost of a call that ran past the expiry (Claude, for J's review) | BUD-2, BUD-4; `-db` 000013 |
 | D32 | Handoff queues | One SQS inbox per receiving pool; `AFS_INBOX_QUEUE_URL` in the receiver, `AFS_HANDOFF_<TO_POOL>_QUEUE_URL` in each sender (Claude, for J's review) | AGT-8, US-17 |
@@ -1210,8 +1261,8 @@ Each is reflected in the requirements above and in the contracts.
 | D35 | Database hardening | Guards on ceilings, quotas, overrides and `team_models`; service-admin-only writes on settings and catalogs; `users` and `role_bindings` write rules; work orders read-only for teams, deleted only by security operators and service admins, the assigned team updating only progress columns; no `secretKey` in stored idempotent responses; `kind` change raises `23514` (Claude, for J's review) | BUD-1, US-2, US-15, US-21; `-db` 000013 |
 | D36 | Retention | Usage, activity and traffic partitions older than 13 months are dropped; audit kept online with no deletion (Claude, for J's review; OQ-4) | §7 Retention; `-db` 000013 |
 | D37 | Security operators and templates | Security operators hold `swarm-templates:read` to choose a template (Claude, for J's review) | §4, US-16, US-22 |
-| D38 | Work order owners | The CLI takes team ids or emails; the console resolves slugs through read-only `ListTeamDirectory` for security operators and service admins (Claude, for J's review) | §4, WO-1; API contract §4.10a |
-| D39 | CSV in the CLI | `--output csv` only on operations marked *CSV*; no `--query` with csv; pages concatenated under one header (Claude, for J's review) | IF-2 |
+| D38 | Work order owners | A team declares the repositories it owns in its namespace configuration value `AFS_OWNED_REPOS` (entries separated by commas or whitespace, each `host/owner/repo` or `host/owner/*`, case-insensitive). A work order repository names its owner explicitly (team id and/or email) or names none; with none, `afs-api` resolves it with `afs.resolve_repo_owners(host, repo)` (`-db` 000014), where an exact entry wins over a wildcard and deleted or deleting teams are skipped. Two or more teams at the best match, or no match, is `400 ValidationError` naming the repositories. An explicit owner always wins. The CLI's `--repos host/owner/repo` without `=` means resolve; `=team_…`, `=email` or both stay. The console pre-fills its owner picker from the resolution and still resolves slugs through read-only `ListTeamDirectory` (J, revised) | §4, WO-1, WO-7, US-16; API contract §4.2, §4.10a; `-db` 000014 |
+| D39 | CSV in the CLI | `--output csv` only on operations marked *CSV*; no `--query` with csv; pages concatenated under one header; with `text/csv` the next token comes in the `X-Afs-Next-Token` response header, which CORS exposes (Claude, for J's review) | IF-2; API contract §1 |
 | D40 | Safe updates in the CLI and SDK | `--if-match` (or a resource with `version`) is the safe mode; otherwise read then write with a notice; `428` maps to exit 254 (Claude, for J's review) | IF-2, IF-3 |
 | D41 | Expired SSO token in the CLI | Locally expired → exit 255 with a hint, no call; server `401` → exit 254; silent refresh when a refresh token exists (Claude, for J's review) | IF-2 |
 | D42 | Console sign-in and `can()` | Provider picker when several exist, deep links skip it; `can()` reads the per-team permissions from `GetMe` (Claude, for J's review) | ACC-1, ACC-3 |
@@ -1221,14 +1272,15 @@ Each is reflected in the requirements above and in the contracts.
 | D46 | Notification delivery | The reconciler renders each channel as an EventBridge rule and target (Claude, for J's review) | OPS-3 |
 | D47 | Contract version discovery | Every API response carries `X-Afs-Contract-Version: <semver>`; clients warn when the server's minor is newer than theirs (Claude, for J's review) | IF-1; API contract §1 |
 | D48 | CLI client for the device grant | `ListSignInProviders` returns each provider's public `cliClientId` beside the console client id (Claude, for J's review) | ACC-1; API contract §4.1 |
-| D49 | Export and import transport | Export is asynchronous (the reconciler writes S3 and stores a pre-signed link); import takes the bundle as the request body (up to 100 MB) and applies it one transaction per team, so `afs-api` never reads S3 (Claude, for J's review) | CFG-5, S11; API contract §4.11 |
+| D49 | Export and import transport | Export is asynchronous (the reconciler writes S3 and stores a pre-signed link); import takes the bundle as the request body (up to 100 MB) and applies it one transaction per team, so `afs-api` never reads S3; `-db` 000014 makes `export_bundles.s3_uri` nullable and adds `download_url`, `download_expires_at` and `size_bytes` (Claude, for J's review) | CFG-5, S11; API contract §4.11; `-db` 000014 |
 | D50 | Viewers and API keys | Viewers do not see team API keys; `api-keys:read` is team-admin and service admin only; API keys are a tab of T6 (Claude, for J's review) | §4, T6, V1, ACC-4, US-2 |
 | D51 | Cross-account session names | Each AWS profile sets `role_session_name` to the agent or pool id, so target-account CloudTrail names the agent without relying on transitive session tags (Claude, for J's review) | AGT-10, US-7, US-14 |
 | D52 | Idempotent replay of one-time secrets | For creates that return `secretKey`, the stored response omits it; a replay returns the key's metadata without `secretKey` and `Idempotent-Replayed: true` (Claude, for J's review) | ACC-4, IF-1; database contract §7.1 |
 | D53 | Team lifecycle semantics | The TEAM-9 table: suspend scales to zero and denies at the gateway, delete and teardown remove cluster and AWS resources, secrets get a 30-day recovery window, history is kept (Claude, for J's review) | TEAM-1, TEAM-9, US-23 |
-| D54 | Agent template catalog | Service admins curate templates and allowed digests (AGT-11); needs a `-db` table `agent_templates` after 000013 (Claude, for J's review) | AGT-2, AGT-11, S10 |
+| D54 | Agent template catalog | Service admins curate templates and allowed digests (AGT-11); in the `-db` table `agent_templates`, migration 000014 (Claude, for J's review) | AGT-2, AGT-11, S10; `-db` 000014 |
 | D55 | Ranges for the 000013 settings | `reports.idle_cpu_millicores` 1 to 4000, `egress.denied_spike_threshold` 1 to 100000, `gateway.reservation_ttl_seconds` 60 to 3600, `api.cors_origins` an array of `https://host[:port]` origins, as `-db` 000013 enforces (Claude, for J's review) | §6.13 |
 | D56 | Team directory permission | `ListTeamDirectory` needs `teams:read-directory`, held by service admins and security operators only (Claude, for J's review) | API contract §3 |
+| D57 | Gateway caller identity | The gateway identifies the calling pod by source pod IP (Kubernetes API and Cilium endpoint identity → namespace, ServiceAccount, agent or pool). Cilium allows only team pods to reach it, with per-endpoint identity and WireGuard transparent encryption. SigV4 `Authorization` and `ANTHROPIC_API_KEY` are ignored; `ANTHROPIC_API_KEY=afs-gateway` is set as a placeholder so SDKs start. The projected token is optional defence in depth and must match the source pod (`401` otherwise). The gateway CA is delivered through `AWS_CA_BUNDLE`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS` (Claude, for J's review) | SEC-6, IF-5, US-25, OQ-3; gateway contract §1, §3 |
 
 ### 10.2 Risks
 
@@ -1249,7 +1301,7 @@ Each has an owner, the milestone that needs the answer, and the default AFS buil
 |---|---|---|---|---|
 | OQ-1 | Which session tags does EKS Pod Identity set in the target EKS version, and do they carry through role chaining into linked accounts? | `-restapi` | M0 spike | Conditions on `aws:PrincipalTag/kubernetes-namespace`; agent attribution in linked accounts by role name and session name only (D51) |
 | OQ-2 | AWS tag limit per resource after the EBS CSI driver's own tags, and Bedrock's `requestMetadata` pair limit | `-restapi` | M0 spike | 40 effective tags, 16 metadata pairs (D27) |
-| OQ-3 | Do third-party agent images need an environment-only gateway credential instead of a token file? | J, platform | M3 | Token file only; images that cannot read a file use the Agentic Teammates runtime helper |
+| OQ-3 | Does any agent runtime need the token path (rather than pod identity alone) at the gateway? | J, platform | M3 | Pod identity by source IP for every runtime; the token is optional and checked only when sent (D57) |
 | OQ-4 | When to partition `audit_log` | `-db` | Review at 12 months or 50 GB | One table, kept online, no deletion |
 | OQ-5 | GitHub access for work order PR tracking: one GitHub App per organization or GitHub Enterprise Server tokens; rate-limit budget | J (enterprise GitHub setup) | M6 | One GitHub App per organization, 5,000 requests per hour per installation |
 | OQ-6 | Admission engine: ValidatingAdmissionPolicy or Kyverno | Platform | M0 | ValidatingAdmissionPolicy (built in) |

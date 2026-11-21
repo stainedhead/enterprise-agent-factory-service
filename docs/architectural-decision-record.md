@@ -10,7 +10,7 @@ Accepted, Proposed (needs review), Superseded.
   different toolchains, owners and release cadences.
 - Decision: docs-only root `enterprise-agent-factory-service` plus `-db`, `-restapi`, `-cli` and
   `-website`, cloned inside the root and git-ignored by it. No submodules. The TypeScript SDK lives in
-  `-website` as `packages/sdk` (a pnpm workspace package, publishable on its own). The reconciler, gateway
+  `-website` as `packages/sdk` (a Bun workspace package, publishable on its own; amended 2026-11-21, pnpm was replaced by Bun, website ADR-004). The reconciler, gateway
   and billing services live in `-restapi` with the API, because they share its domain, authorization and
   store packages.
 - Consequences: each child has its own AGENTS.md, CI and releases. `-restapi` imports `-db` as a Go module
@@ -106,7 +106,7 @@ Accepted, Proposed (needs review), Superseded.
   the organization. J also asked for a team-level list of the accounts a team may reach, with `*` for
   all accounts or specific accounts named.
 - Decision: an agent runs with its team's shared role or with a dedicated role
-  `afs/agents/<namespace>/<agent>`. A dedicated agent can be linked to roles in other organization
+  `/afs/<namespace>/afs-<agent id>` (path `/afs/<namespace>/`, name by immutable id; amended 2026-11-21 per root D25). A dedicated agent can be linked to roles in other organization
   accounts; each link carries a target role ARN, a profile name and an AFS-generated external ID, and the
   target account owner adds a trust policy AFS shows. Each team has an allowed-accounts filter of glob
   patterns over account ids and names, recommended to be set by service admins. The filter is enforced
@@ -231,12 +231,14 @@ Accepted, Proposed (needs review), Superseded.
 
 ## ADR-015 Answers to the PRD review: contracts, AWS limits, lifecycle and hardening
 
-- Status: Proposed (Claude, for J's review, 2026-11-21)
+- Status: Accepted (J, 2026-11-21); D38 revised by J: work order repositories without an explicit owner
+  are resolved from each team's `AFS_OWNED_REPOS` configuration value (`-db` 000014
+  `afs.resolve_repo_owners`)
 - Context: a `review-prd` pass over the root and the four repository PRDs found contradictions between
   documents (permissions, status words, error codes, event and environment names), behaviours AWS cannot
   deliver as written (IAM and SQS name limits, Pod Identity session tags, tag limits), no contract for
   the agent-to-gateway interface, and gaps in the schema's guards. Under J's standing instruction to
-  work out answers, Claude decided D23 to D56 (root PRD §10.1) and opened OQ-1 to OQ-9 (§10.3).
+  work out answers, Claude decided D23 to D57 (root PRD §10.1) and opened OQ-1 to OQ-9 (§10.3).
 - Decision:
   - **One source per fact.** The API contract is the only list of operations, CLI and SDK names,
     permissions, enums and events; the solution design and repository PRDs point to it. Status words
@@ -262,9 +264,14 @@ Accepted, Proposed (needs review), Superseded.
     replayed (D52).
   - **Schema.** `-db` 000013 (with tightened 000011 and 000012) guards ceilings, quotas, overrides,
     catalogs, settings, users, role bindings and work orders, adds spend periods and reservations, the
-    change feed, retention, `models.max_output_tokens` and four settings (D35, D45, D55). An
-    `agent_templates` table (D54) and `export_bundles` changes for D49 need a later migration.
-- Consequences: root PRD §4, §5, §6 (TEAM-9, AGT-11, BUD-10, IF-5, §6.13 settings, US-19 to US-24), §7,
-  §8.2, §9 and §10 updated; API contract v1.1.0; database contract at 000013; new gateway contract;
+    change feed, retention, `models.max_output_tokens` and four settings (D35, D45, D55). `-db` 000014
+    adds the `agent_templates` table (D54) and the `export_bundles` changes for D49 (nullable `s3_uri`,
+    `download_url`, `download_expires_at`, `size_bytes`).
+  - **Gateway caller identity (D57).** The gateway identifies the calling pod by source pod IP through
+    the Kubernetes API and Cilium endpoint identity; Cilium allows only team pods to reach it and
+    WireGuard encrypts node-to-node traffic. SDK credentials (SigV4, `ANTHROPIC_API_KEY`) are ignored;
+    the projected token is optional and must match the source pod.
+- Consequences: root PRD §4, §5, §6 (TEAM-9, AGT-11, BUD-10, IF-5, §6.13 settings, OPS-5), §7,
+  §8.2, §9 and §10 updated (US-19 to US-26); API contract v1.1.0; database contract at 000013; new gateway contract;
   solution design §3, §5, §7, §9 to §12 aligned. Repository PRDs follow in their own changes.
 

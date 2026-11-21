@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract v1.0.0, draft for implementation (2026-11-21); root PRD decision D28 |
+| **Status** | Contract v1.0.0, draft for implementation (2026-11-21); root PRD decisions D28 and D57 |
 | **Provider** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi) (`afs-gateway`) |
 | **Consumers** | Agents and pool workers in team namespaces; the Agentic Teammates runtime and its harnesses |
 | **Requirements** | [Root PRD](../../enterprise-agent-factory-service-initial-PRD.md) BUD-2, BUD-3, AGT-4, SEC-6, TAG-4, IF-5; [database contract](database-contract.md) §4.2 for the spend functions |
@@ -15,13 +15,14 @@ forwards the call to the team's Bedrock application inference profile, settles t
 records usage. Agents' own IAM roles never hold `bedrock:*`, so the gateway cannot be bypassed.
 
 This contract fixes what an agent may rely on, so that standard Bedrock and Anthropic SDKs work with
-**zero change to the agent's container** (SEC-6): the endpoint and credential arrive as environment
-variables and a file.
+**zero change to the agent's container** (SEC-6): the endpoint, a placeholder API key and the CA bundle
+arrive as environment variables and files, and the gateway knows the caller from its pod, not from a
+credential the SDK sends (D57).
 
 ## 2. Endpoints
 
 Base URL: `AFS_GATEWAY_URL` (in-cluster, `https://afs-gateway.afs-system.svc:8443`, TLS with the
-cluster's CA bundle mounted at `/var/run/secrets/afs/gateway/ca.crt`).
+gateway's CA bundle mounted at `/var/run/secrets/afs/gateway/ca.crt`, see §3).
 
 | Path | Compatible with | Streaming |
 |---|---|---|
@@ -38,17 +39,23 @@ Request and response bodies are passed through unchanged except that the gateway
 `requestMetadata` (§6) and may cap `maxTokens` (§4). Unsupported Bedrock operations (for example
 `ApplyGuardrail`, batch jobs) → `404 NotFound`.
 
-## 3. Authentication and delivery to the pod
+## 3. Caller identity and delivery to the pod
+
+The gateway identifies the calling pod by its **source pod IP**, never by a credential the agent's SDK
+sends (D57). This is what keeps standard SDKs working unchanged.
 
 | Item | Value |
 |---|---|
-| Credential | Projected ServiceAccount token, audience `afs-gateway`, lifetime 1 hour, rotated by the kubelet, file `/var/run/secrets/afs/gateway/token` |
-| Header | `Authorization: Bearer <token>`. For Bedrock SDKs that sign with SigV4, the gateway also accepts the token in `X-Afs-Gateway-Token` and ignores the signature |
-| Validation | Kubernetes TokenReview (cached for the token's remaining life, at most 5 minutes); yields namespace, ServiceAccount and pod name, hence team, agent or pool, and worker pod |
-| Environment | `AFS_GATEWAY_URL`; `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` = `AFS_GATEWAY_URL`; `ANTHROPIC_BASE_URL` = `AFS_GATEWAY_URL` + `/anthropic`; `AFS_GATEWAY_TOKEN_FILE` = the token path; `AFS_TAGS` (§6) |
+| Identity | Source pod IP, mapped to namespace, ServiceAccount and pod (hence team, agent or pool, and worker pod) through the Kubernetes API (pod watch, cached) and Cilium endpoint identity. An IP with no current team pod → `401 Unauthenticated` |
+| Anti-spoofing | Cilium network policy: only pods in team namespaces may reach the gateway; Cilium per-endpoint identity binds the IP to the pod; WireGuard transparent encryption is on between nodes, so a source IP cannot be forged on the wire |
+| Ignored headers | The SigV4 `Authorization` header that AWS SDKs add, and `x-api-key` / `ANTHROPIC_API_KEY` that Anthropic SDKs send, are ignored and never logged |
+| Optional token | Projected ServiceAccount token, audience `afs-gateway`, lifetime 1 hour, rotated by the kubelet, file `/var/run/secrets/afs/gateway/token` (`AFS_GATEWAY_TOKEN_FILE`), sent as `X-Afs-Gateway-Token: <token>` by runtimes that choose to. Defence in depth only: when present it is validated by TokenReview and must name the same pod as the source IP, else `401 Unauthenticated` |
+| TLS | The gateway's CA bundle is mounted at `/var/run/secrets/afs/gateway/ca.crt` and named in `AWS_CA_BUNDLE`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS`, so AWS, Python, Go and Node clients trust it |
+| Environment | `AFS_GATEWAY_URL`; `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` = `AFS_GATEWAY_URL`; `ANTHROPIC_BASE_URL` = `AFS_GATEWAY_URL` + `/anthropic`; `ANTHROPIC_API_KEY` = `afs-gateway` (a placeholder, not a secret, so SDKs that require a key start); `AFS_GATEWAY_TOKEN_FILE`; the four CA variables above; `AFS_TAGS` (§6) |
 
-Clients that cannot read a token file use the Agentic Teammates runtime helper, which reads the file
-and sets the header. Whether an environment-only credential is also needed is open question OQ-3.
+AWS SDKs still need credentials to sign; they find the pod's Pod Identity credentials, which have no
+Bedrock permission, and the gateway ignores the signature. Whether any agent runtime needs the token
+path is open question OQ-3 (needed by M3); the default is pod identity by source IP for every runtime.
 
 ## 4. Reservation math
 
@@ -100,7 +107,7 @@ the same `code`.
 | HTTP | `code` | When | Retry |
 |---|---|---|---|
 | 400 | `ValidationError` | Malformed request, unknown model id format | No |
-| 401 | `Unauthenticated` | Missing, expired or unknown token; a token from a deleted team's namespace | After refreshing the token file |
+| 401 | `Unauthenticated` | Source IP is not a current team pod (for example the team was deleted), or an optional token is invalid or names a different pod | No |
 | 402 | `BudgetExceeded` | The reservation does not fit under the cap; `details` has `budgetId`, `period`, `remainingUsd` | No. Not `429`, so SDKs do not retry it |
 | 403 | `AccessDenied` | Model not enabled for the team; team suspended (`details.reason = team_suspended`) | No |
 | 404 | `NotFound` | Unsupported path or operation | No |

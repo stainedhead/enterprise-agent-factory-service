@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract v1.1.0, draft for implementation (2026-11-21); revised after the `review-prd` pass (root PRD D23 to D56) |
+| **Status** | Contract v1.1.0, draft for implementation (2026-11-21); revised after the `review-prd` pass (root PRD D23 to D57) |
 | **Provider** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi) (`afs-api`) |
 | **Consumers** | [-cli](https://github.com/stainedhead/enterprise-agent-factory-service-cli) (`afs`), [-website](https://github.com/stainedhead/enterprise-agent-factory-service-website) (`@afs/sdk`, console) |
 | **Machine-readable form** | `-restapi/api/openapi.yaml` (OpenAPI 3.1). Built from this document; once an operation is in the YAML, the YAML wins and this document is updated to match in the same PR |
@@ -31,9 +31,9 @@ shapes, errors and events. A client never decides access; it reads `GET /v1/me` 
 | Request id | Every response has `X-Request-Id`; a client may send its own (≤ 64 chars). It appears in errors and audit |
 | Versioning | Additive changes (new optional field, new operation, new enum value documented as open) are minor. Removing or renaming a field, changing a type or making a field required is a new major path (`/v2`). Clients ignore unknown fields |
 | Rate limits | 429 `Throttled` with `Retry-After` seconds. Default 20 req/s per principal, burst 40 |
-| CSV | Report and list endpoints marked *CSV* also answer `Accept: text/csv`. The CLI's `--output csv` is valid only on those (D39) |
+| CSV | Report and list endpoints marked *CSV* also answer `Accept: text/csv`. A CSV body has no `nextToken` field, so the next page's token travels in the response header `X-Afs-Next-Token` (absent on the last page). The CLI's `--output csv` is valid only on those operations (D39) |
 | Contract version | Every response carries `X-Afs-Contract-Version: <semver>` (this document's version). A client built against an older minor keeps working and may print a notice once per session; a newer major is refused by path (`/v2`) (D47) |
-| CORS | `afs-api` answers CORS preflight and sets `Access-Control-Allow-Origin` only for origins listed in service setting `api.cors_origins` (default empty: no browser origin allowed). Allowed headers: `Authorization`, `Content-Type`, `If-Match`, `Idempotency-Key`, `X-Request-Id`; exposed headers: `ETag`, `X-Request-Id`, `Idempotent-Replayed`, `Retry-After`, `X-Afs-Contract-Version`. No credentials mode (tokens go in `Authorization`) (D43) |
+| CORS | `afs-api` answers CORS preflight and sets `Access-Control-Allow-Origin` only for origins listed in service setting `api.cors_origins` (default empty: no browser origin allowed). Allowed headers: `Authorization`, `Content-Type`, `If-Match`, `Idempotency-Key`, `X-Request-Id`; exposed headers: `ETag`, `X-Request-Id`, `Idempotent-Replayed`, `Retry-After`, `X-Afs-Contract-Version`, `X-Afs-Next-Token`. No credentials mode (tokens go in `Authorization`) (D43) |
 
 ### 1.1 Status object
 
@@ -61,7 +61,7 @@ consoles show it as *Budget blocked*. Other conditions in v1: `NamespaceReady`, 
 | CLI | OIDC device authorization grant (`afs sso login`) with the provider's public `cliClientId` from `ListSignInProviders` (D48) | Same; cached under `~/.afs/sso/cache` (0600) |
 | Pipelines | Team API key (`afsk_…` prefix), created once and shown once | `Authorization: Bearer afsk_<secret>` |
 | Security tooling | Service-level API key with the `security_operator` role (created by service admins) | `Authorization: Bearer afsk_<secret>` |
-| Agents and pools (workload) | Projected ServiceAccount token, audience `afs-api`, mounted at `/var/run/secrets/afs/api/token`, validated by TokenReview (D29) | `Authorization: Bearer <projected token>` |
+| Agents and pools (workload) | Projected ServiceAccount token, audience `afs-api`, mounted at `/var/run/secrets/afs/api/token`, validated offline against the cluster's OIDC issuer JWKS (issuer = the cluster's service account issuer, audience `afs-api`); `afs-api` never calls Kubernetes, so it does not use TokenReview (D29) | `Authorization: Bearer <projected token>` |
 
 The API validates IdP tokens against the provider's JWKS (any enabled service-level provider). The
 groups claim (`groupsClaim` of the provider) maps to group role bindings. For a team-scoped request, a
@@ -138,7 +138,7 @@ Columns: **Op** = OpenAPI `operationId`; **Perm** = permission (team-scoped unle
 **CLI** = `afs <service> <operation>`; **SDK** = `@afs/sdk` method; **Screen** = console screen in the
 root PRD §5.3. Every mutation writes the row, an audit record and an outbox event in one transaction.
 P = priority from the root PRD. One row per operation; the CLI and SDK columns are the complete lists
-(the CLI adds only `configure`, `sso login` and `sso logout`, which call no operation).
+(the CLI adds only `configure`, `sso login`, `sso logout` and `completion`, which call no operation).
 
 ### 4.1 Caller and sign-in
 
@@ -225,7 +225,7 @@ Agent spec fields (create and update): `name` (create only), `description`, `tem
 
 ### 4.4a Swarms: stages and pools
 
-Ephemeral teams only (`409 Conflict` on a persistent team). Pool names share the team's agent names.
+Ephemeral teams only (`409 Conflict` on a persistent team). `afs-api` checks the team's `kind` before the write and returns `409`, because the database's guard would otherwise raise `23514` (`ValidationError`). Pool names share the team's agent names.
 
 | Op | Method and path | Perm | CLI | SDK | Screen | P |
 |---|---|---|---|---|---|---|
@@ -395,10 +395,24 @@ Service-level notification channels (for example the outside-contact email chann
 `CreateWorkOrder` body: `cveId` (the `externalRef`, one open work order per CVE → `409 Conflict`),
 `severity` (`critical` \| `high` \| `medium` \| `low`), `title`, `slaDueAt`, `templateId`, optional
 `budgetUsd` (else the template's), and `repos[]` {`host`, `repo` (`owner/name`), `owningTeamId?`,
-`owningContact?` (email)}; each repository needs at least one owner. The CLI shorthand is
-`--repos host/owner/repo=<owner>[,<owner>]`, where an owner containing `@` is `owningContact` and one
-starting `team_` is `owningTeamId`; there is no slug lookup in the CLI. The console resolves slugs with
-`ListTeamDirectory` (D38). AFS creates the remediation team
+`owningContact?` (email)}. A repository may name its owner explicitly (team id, email, or both) or name
+none. With none, `afs-api` resolves the owner from the teams' namespace configuration value
+`AFS_OWNED_REPOS` through `afs.resolve_repo_owners(host, repo)`: an exact `host/owner/repo` entry wins
+over a `host/owner/*` wildcard, matching is case-insensitive, and deleted or deleting teams are skipped.
+An explicit owner always wins over the configuration value (D38). Errors, all refusing the whole request:
+
+| Case | Response |
+|---|---|
+| Two or more teams at the best match | `400 ValidationError`, `details.ambiguousRepos[{repo, teamIds[]}]` |
+| No team lists the repository and no owner is given | `400 ValidationError`, `details.unownedRepos[]`; the message tells the caller to give `=team_…` or `=email` |
+| An explicit `owningTeamId` that is unknown or deleted | `400 ValidationError`, `details.fields[]` |
+
+The `CreateWorkOrder` response gives each repository `ownerSource` (`explicit` \| `team_config`), which
+`afs-api` knows at create time; it is not stored, so `GetWorkOrder` and `ListWorkOrderRepos` show the
+resolved owners without it. The CLI shorthand is `--repos host/owner/repo[=<owner>[,<owner>]]`: without
+`=` the owner is resolved from team configuration; an owner containing `@` is `owningContact` and one
+starting `team_` is `owningTeamId`; there is no slug lookup in the CLI. The console pre-fills its owner
+picker from the same resolution (the error details above) and resolves slugs with `ListTeamDirectory`. AFS creates the remediation team
 from the template and returns the work order with `teamId` once assigned. The same work order can
 arrive as an EventBridge event `afs.work_order.requested` with `source_event_id`; duplicates are
 ignored (D22).
@@ -490,7 +504,7 @@ SwarmTemplate: {name, description, kind: cve_remediation|general, spec{stages[],
 WorkOrder:   {kind: cve_remediation|general, cveId?, severity, title, source†: api|eventbridge, templateId, budgetUsd, slaDueAt,
               status†: open|assigned|in_progress|pr_opened|done|failed|cancelled, teamId†?, assignedAt†?, completedAt†?,
               slaState†: on_track|due_soon|breached|met|missed, progress†{repos, prsOpen, prsMerged, notAffected, failedOrSkipped, remaining}}
-WorkOrderRepo: {host, repo, owningTeamId?, owningContact?, status: pending|in_progress|pr_opened|merged|not_affected|failed|skipped,
+WorkOrderRepo: {host, repo, owningTeamId?, owningContact?, ownerSource†? (CreateWorkOrder response only): explicit|team_config, status: pending|in_progress|pr_opened|merged|not_affected|failed|skipped,
               prUrl?, prNumber?, detail?, mergedAt†?, notifications†[{kind, recipient, sentAt}]}
 ReportSchedule: {name, report, query{}, cadence, channelId, format: csv, enabled, nextRunAt†, lastRunAt†, lastStatus†, lastError†}
 CostTagStatus: {key, seenInCur, firstSeenAt, lastSeenAt, awsStatus: active|inactive|unknown, checkedAt}
@@ -529,12 +543,13 @@ change; clients branch on `code` only. No error contains a secret value, token o
 | 428 | `PreconditionRequired` | `If-Match` missing on `PATCH`, `PUT` or `DELETE` of an existing resource | — |
 | 429 | `Throttled` | Rate limit; `Retry-After` | — |
 | 500 | `InternalError` | Anything else; logged with `requestId` | `40001` after retries, others |
+| 502 | `UpstreamError` | Returned by `afs-gateway` only, when Bedrock returns a server error; the reservation is released; retry with backoff | — |
 | 503 | `Unavailable` | Dependency down (database, Secrets Manager); safe to retry with backoff | — |
 
 CLI rendering: `An error occurred (<code>) when calling the <operationId> operation: <message>`, exit
 254. SDK: `AfsError` with `code`, `status`, `requestId`, `details`, and getters `isValidationError`,
 `isUnauthenticated`, `isAccessDenied`, `isNotFound`, `isConflict`, `isPreconditionFailed`,
-`isPreconditionRequired`, `isThrottled`, `isUnavailable` and `isInternalError`.
+`isPreconditionRequired`, `isThrottled`, `isUnavailable` and `isInternalError` (`BudgetExceeded` and `UpstreamError` come only from the gateway, so the SDK has no helper for them).
 
 Client handling:
 - **428.** Clients never rely on it: the CLI and SDK send `If-Match` on every `PATCH`, `PUT` and `DELETE`
