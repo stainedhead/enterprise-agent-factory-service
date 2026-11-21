@@ -50,8 +50,9 @@ Accepted, Proposed (needs review), Superseded.
   example a GitHub App installation) and audit trail. Replicas of one agent would share that identity,
   with no sensible way to split work between them.
 - Decision: no replica count. The reconciler renders each agent as a StatefulSet with exactly one
-  replica; pause scales it to zero. A team adds capacity by adding agents. Pools of interchangeable
-  workers belong to the phase 2 ephemeral-team design.
+  replica; pause scales it to zero. A team adds capacity by adding agents. The exception is the phase 2
+  swarm pool (AGT-8): its workers do similar work across many repositories, need no separate identities,
+  and share one swarm-level identity, secret set and budget, so a pool has a worker count.
 - Consequences: `agents.replicas` is dropped (db migration 000003); the console and CLI have no scale
   action. Every action in AWS, GitHub or the audit log maps to exactly one running agent.
 

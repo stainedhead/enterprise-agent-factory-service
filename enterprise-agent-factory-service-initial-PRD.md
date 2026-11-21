@@ -233,6 +233,13 @@ are used, so they can troubleshoot, but cannot create, rotate or bind them, and 
 hard cap, an expiry and the teardown rule, and shows an estimate of daily cost and when the cap would be
 reached.
 
+**Swarm pools (phase 2).** A swarm is the exception to one-agent-one-pod. Its workers do similar work
+across many repositories (for example the same dependency or CVE fix), so they do not need separate
+identities. A swarm pool is one definition with a worker count: every worker runs the same image and
+shares one swarm-level identity (one ServiceAccount, one IAM role, one set of secrets, one GitHub
+identity) and one lifetime budget. Audit and usage are attributed to the swarm, with the worker's pod
+name recorded for troubleshooting. Long-running team agents keep their own identities (AGT-7).
+
 ![Ephemeral team budget](docs/ui/14-admin-ephemeral-team.png)
 
 **P3 · Work orders (phase 3).** CVE work orders from the security team with affected repos, PR progress,
@@ -279,7 +286,8 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | AGT-4 | Agents have no direct Bedrock permission; model calls go through the gateway | P0 |
 | AGT-5 | External identities (GitHub App installation, bot accounts) are modeled per agent with credentials as secret references | P1 |
 | AGT-6 | Optional per-agent IAM role for least privilege | P1 |
-| AGT-7 | One agent is one identity and one pod (a StatefulSet with one replica, so the name, ServiceAccount, IAM session and audit trail stay stable). There is no replica count. A team scales by adding agents. Pools of interchangeable workers are a phase 2 concern of ephemeral teams | P0 |
+| AGT-7 | One agent is one identity and one pod (a StatefulSet with one replica, so the name, ServiceAccount, IAM session and audit trail stay stable). There is no replica count. A team scales by adding agents. Phase 2 swarm pools are the exception (AGT-8) | P0 |
+| AGT-8 | Swarm pools (ephemeral teams only): one definition with a worker count; all workers share one swarm-level identity, secrets and lifetime budget; usage and audit attributed to the swarm, with the worker pod recorded | P2 |
 
 ### 6.3 Secrets
 
@@ -387,7 +395,7 @@ the REST API contract in `-restapi/api/openapi.yaml`.
 | M2 Agents & secrets | AGT-1..4, AGT-7, SEC-1..3, SEC-5; console T2–T4, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
 | M3 Spend control | BUD-1..5, OPS-2; gateway; console T5, S4 | Load test proves the hard cap; alerts fire once per threshold |
 | M4 Production readiness | CFG-4, BUD-6/7, OPS-1/3, ACC-4, AGT-5/6, CFG-5/6, S5 | DR rebuild drill passes; security review signed off |
-| Phase 2 | TEAM-7, BUD-8, P2 screen | First POC team runs and tears itself down |
+| Phase 2 | TEAM-7, BUD-8, AGT-8, P2 screen | First POC team runs and tears itself down |
 | Phase 3 | WO-1/2, P3 screen | One CVE remediated across repos within SLA |
 
 ## 10. Risks and open questions
