@@ -47,6 +47,7 @@ AWS CLI conventions, and a TypeScript SDK for automation.
 | G3 | Model spend never exceeds a team's hard cap | Overspend bounded by one in-flight request per agent; verified by load test |
 | G4 | Every change and every agent action is attributable | 100% of mutations in the audit log; AWS calls carry team and agent session tags |
 | G5 | The environment is recoverable from configuration | Fresh cluster + restored DB converges to full state with no manual steps |
+| G7 | Spend, usage and agent activity are visible at service, team and agent level | Reports within 5 minutes of real time; every number exportable to CSV; idle agents identifiable at a glance |
 | G6 | One API, three clients, one access model | Every console action has a CLI operation and an SDK method; RBAC enforced only in the API |
 
 ### Non-goals (this release)
@@ -90,6 +91,8 @@ on another. Only service admins grant service admin.
 | External systems: see effective access per team and agent | ✓ | ✓ | ✓ |
 | Budget: set amount (≤ ceiling), thresholds | ✓ | ✓ | |
 | Usage, costs, reconciliation | ✓ | ✓ | ✓ |
+| Reports: all teams (service level) | ✓ | | |
+| Reports: own team and its agents, CSV export, scheduled reports | ✓ | ✓ | ✓ |
 | Audit and config revisions (own team) | ✓ | ✓ | ✓ |
 | Model catalog, pricing, service settings, export / import | ✓ | | |
 
@@ -202,6 +205,15 @@ teams may declare their own systems (EXT-1 to EXT-6).
 
 ![External systems catalog](docs/ui/19-admin-external-systems.png)
 
+**S8 · Reports and analytics.** The service-level report across every team: spend against the sum of
+budgets with forecast, calls and tokens, how many agents are working, idle, blocked or paused right now,
+utilization, daily cost by Bedrock model (with EKS compute), a team table (spend and budget, tokens,
+agents working, utilization, idle agents and denied egress) that opens each team's report, cost by
+model, and traffic to external systems with denied attempts. A notice says that spend with model
+providers other than Bedrock is not included (RPT-1 to RPT-8).
+
+![Reports and analytics](docs/ui/22-admin-reports.png)
+
 #### Team-admin
 
 **T1 · Team overview.** Identity of the environment (namespace, cluster, IAM role, cost center), reconcile
@@ -286,6 +298,21 @@ off at the team or service level show *Off above* and cannot be turned on. Team 
 (EXT-4).
 
 ![Agent external systems](docs/ui/21-ta-agent-external-systems.png)
+
+**T11 · Team reports.** Tabs for budget and usage, activity, models and external systems, with a time
+range (24 hours to 90 days, or custom), filters by agent and model, *Download CSV* and *Schedule report*.
+The first tab shows spend against budget with forecast, calls and tokens, utilization and idle time,
+daily cost by Bedrock model, an hourly activity heatmap per agent, and each agent's current state (with
+what it reports it is doing), utilization, how long it has been idle and its cost. Team viewers see the
+same reports (RPT-2 to RPT-6).
+
+![Team reports](docs/ui/23-ta-team-reports.png)
+
+**T12 · Agent usage.** The agent's *Usage* tab: cost, calls and tokens, utilization and the longest idle
+stretch, a timeline of the day in five-minute windows (working, partly working, idle), cost by model
+and traffic to external systems, including denied attempts and why they were denied (RPT-3 to RPT-7).
+
+![Agent usage](docs/ui/24-ta-agent-report.png)
 
 #### Team viewer
 
@@ -455,6 +482,19 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | EXT-6 | Category *LLM* marks model providers other than Bedrock (OpenAI, OpenRouter). Their calls bypass the AFS gateway, so they are **not metered, not counted in budgets and not stopped by hard caps**. They ship switched off; the catalog, team and agent pages show an *Unmetered* badge, and turning one on at the service level asks for confirmation. Budgets for these providers are out of scope for now (see non-goals) | P0 |
 | EXT-7 | A secret can name the external system it is a credential for. The reconciler does not deliver it to agents for which that system is off, and the secret's page shows the system. Every change to the catalog, a team's systems or an agent's systems is audited and versioned. The team's former egress allow-list becomes one team-declared system | P1 |
 
+### 6.11 Reporting and analytics
+
+| ID | Requirement | Pri |
+|---|---|---|
+| RPT-1 | Reports at three levels with the same measures: service (every team, service admins only), team (one namespace, its members) and agent. Every report has a time range (last 24 hours, 7, 30 or 90 days, month to date, or custom), filters (team, agent, model), grouping (by team, agent, model or day) and *Download CSV*. Team-admins and viewers see their own teams only | P0 |
+| RPT-2 | **Budget and spend:** spend against budget for the period with month-end forecast and projected cap date, per team and summed across the service; spend per agent; reconciliation status against AWS billing. Spend and tokens are near real time from the gateway (within 5 minutes) and reconciled daily with CUR; EKS compute and storage come from CUR split cost allocation | P0 |
+| RPT-3 | **Usage:** model calls, input, output and cache tokens, rejected calls (budget, model), cost per call and latency, per team, agent, model and day | P0 |
+| RPT-4 | **Cost by Bedrock model** at service, team and agent level, with calls, tokens, cost and share, plus EKS compute as its own line | P0 |
+| RPT-5 | **Agent activity:** every five minutes each running agent is recorded as *working* (it made a model call, reported itself busy, or used CPU above the idle threshold) or *idle*, or as paused, stopped, unhealthy or blocked by its budget. Reports show each agent's current state and what it reports it is doing, utilization (working share of running time) over the range, an hourly heatmap, a day timeline, how long an idle agent has been idle, and the longest idle stretches. The idle threshold is a service setting | P0 |
+| RPT-6 | **External systems traffic:** connections, bytes each way, and (where an egress proxy sees HTTP) requests and errors from each agent to each external system over time, at service, team and agent level. Denied attempts are reported with the reason (system off at the service, team or agent level, or a host in no system); they are a security signal and can alert team-admins and service admins | P1 |
+| RPT-7 | Model providers other than Bedrock are marked unmetered: their spend is not in any report, and their traffic shows under external systems | P0 |
+| RPT-8 | Scheduled reports: a saved report emailed or posted to a notification channel daily, weekly or monthly as CSV. Every report is also available through the API, CLI and SDK | P1 |
+
 ## 7. Non-functional requirements
 
 | Area | Requirement |
@@ -491,8 +531,8 @@ the REST API contract in `-restapi/api/openapi.yaml`.
 | M0 Foundations | Repos, CI, schema v1, OpenAPI skeleton, auth middleware, `/v1/me` | All gates green; isolation and RLS tests pass |
 | M1 Teams & access | TEAM-1..5, ACC-1..3, CFG-1..3, reconciler for namespace/network/IAM; console S1–S3, T1, T6, V1; CLI `teams`, `members` | A service admin onboards a team end to end in dev |
 | M2 Agents & secrets | AGT-1..4, AGT-7, AGT-9, SEC-1..3, SEC-5, CFG-7, EXT-1, EXT-2, EXT-4..6; console T2–T4, T7, T9, T10, S7, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
-| M3 Spend control | BUD-1..5, OPS-2; gateway; console T5, S4 | Load test proves the hard cap; alerts fire once per threshold |
-| M4 Production readiness | CFG-4, BUD-6/7, OPS-1/3, ACC-4, AGT-5/6/10, TEAM-8, EXT-3, EXT-7, CFG-5/6, S5, S6, T8 | DR rebuild drill passes; security review signed off |
+| M3 Spend control | BUD-1..5, OPS-2, RPT-1..5, RPT-7; gateway; activity collector; console T5, S4, S8, T11, T12 | Load test proves the hard cap; alerts fire once per threshold |
+| M4 Production readiness | CFG-4, BUD-6/7, OPS-1/3, ACC-4, AGT-5/6/10, TEAM-8, EXT-3, EXT-7, RPT-6, RPT-8, CFG-5/6, S5, S6, T8 | DR rebuild drill passes; security review signed off |
 | Phase 2 | TEAM-7, BUD-8, AGT-8 (with the pool shared named role), P2 screen | First POC team runs and tears itself down |
 | Phase 3 | WO-1/2, P3 screen | One CVE remediated across repos within SLA |
 
@@ -512,6 +552,7 @@ the REST API contract in `-restapi/api/openapi.yaml`.
 | R3 | Model price changes make estimates drift | FinOps | Daily reconciliation and variance alerts; price sync |
 | R4 | TypeScript 7 tooling maturity (no ESLint type-aware rules yet) | Web | Biome for lint, `tsc` 7 for types; revisit when typescript-eslint supports TS 7 |
 | R5 | Every allowed external system is a path for data to leave (for example posting to Slack) | Security | Narrow per agent (EXT-4), scope credentials per agent, log denied and allowed egress per pod, review team-declared systems in the audit log |
+| R6 | "Working" is inferred, so a busy agent that makes no model calls and uses little CPU can look idle | Platform | Agents report busy or idle on their status endpoint (Agentic Teammates contract); the CPU threshold is tunable; the definition is shown on every report |
 
 ## 11. Glossary
 

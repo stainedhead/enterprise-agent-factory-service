@@ -197,6 +197,8 @@ Role bindings can be granted to a user or to an IdP group (`subject_type = group
 | Set budget (≤ ceiling), thresholds | ✓ | ✓ | |
 | Set budget ceiling | ✓ | | |
 | View usage, cost, reconciliation | ✓ | ✓ | ✓ |
+| View service-wide reports (all teams) | ✓ | | |
+| View team and agent reports, export CSV, manage scheduled reports | ✓ | ✓ | ✓ |
 | Manage log destinations, notification channels | ✓ | ✓ | |
 | Issue team API keys | ✓ | ✓ | |
 | View audit log (team) | ✓ | ✓ | ✓ |
@@ -257,6 +259,10 @@ Reserve → invoke → settle, as in section 3.1. Thresholds emit `budget.thresh
 - Real-time view: from `spend_counters` and `usage_events` (seconds).
 - Daily reconciled view: from CUR via the ingestor, including EKS compute (split cost allocation by namespace) and any non-gateway spend.
 - Showback/chargeback export by cost center (CSV via API).
+- **Agent activity.** An activity collector in `afs-reconciler` writes one `agent_activity` row per running agent every five minutes. It combines the window's `usage_events` (model calls, tokens, cost), the agent's status endpoint (the Agentic Teammates runtime reports busy or idle and a short note of what it is doing), pod CPU and memory from the metrics API, and the pod's phase. *Working* = any model call, a busy report, or CPU above `reports.idle_cpu_millicores` (service setting, default 50). Paused, stopped, unhealthy and budget-blocked agents are recorded as such. `agent_activity_daily` gives time in state and utilization; `agent_activity_current` gives the current state and `idle_since`.
+- **External traffic.** A traffic collector reads Cilium Hubble flow logs (L3/L4 flows with the DNS name each connection was for, and the policy verdict) and writes `external_traffic` rows per agent, host and verdict every five minutes, matched to the agent's external systems. Where an egress proxy terminates HTTP for a system, it adds request and error counts. Denied flows record the reason (system off at service, team or agent level, or not in the catalog), and a spike in denials raises an `egress.denied_spike` event.
+- **Report API.** `GET /v1/reports/{usage|costs|activity|traffic}` (service admins, all teams) and `GET /v1/teams/{teamId}/reports/{…}` and `GET /v1/teams/{teamId}/agents/{agentId}/reports/{…}` take `from`, `to`, `groupBy` (team, agent, model, system, day, hour) and filters, and return JSON or CSV (`Accept: text/csv`). Queries read the daily views for ranges over two days and the five-minute tables otherwise. Scheduled reports are stored per team and delivered through notification channels.
+- Activity and traffic tables are partitioned by month (`afs.ensure_activity_partition`, `afs.ensure_traffic_partition`); five-minute rows are kept 13 months, daily rollups indefinitely.
 
 ## 8. Desired state, versioning and portability
 
@@ -308,6 +314,9 @@ POST   /v1/teams/{teamId}/secrets/{secretId}:rotate
 GET/PUT /v1/teams/{teamId}/budget
 GET    /v1/teams/{teamId}/usage?from&to&groupBy=agent|model|day
 GET    /v1/teams/{teamId}/costs?from&to               reconciled daily costs
+GET    /v1/reports/{usage|costs|activity|traffic}?from&to&groupBy&teamId&agentId&modelId   (service admin)
+GET    /v1/teams/{teamId}/reports/{usage|costs|activity|traffic}   GET …/agents/{agentId}/reports/{…}
+GET    /v1/teams/{teamId}/report-schedules   POST, PATCH, DELETE
 GET    /v1/teams/{teamId}/log-destinations   POST, PATCH, DELETE
 GET    /v1/teams/{teamId}/notification-channels   POST, PATCH, DELETE
 GET    /v1/teams/{teamId}/api-keys     POST, DELETE
