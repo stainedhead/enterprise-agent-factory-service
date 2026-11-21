@@ -210,9 +210,10 @@ Accepted, Proposed (needs review), Superseded.
     `api.idempotency_key_ttl_seconds`, *Claude*: made a setting rather than a constant).
   - **Agent sign-ins** to external systems go to logs only (team log delivery); no table, not in the
     console.
-  - **Ephemeral teams and budgeted POCs.** Teams carry `lifecycle` (`long_running` | `ephemeral`),
-    `expires_at`, `teardown_on_budget_exhausted` and an optional lifetime budget; the reconciler tears
-    them down when due.
+  - **Ephemeral teams and budgeted POCs.** Teams carry `kind` (`persistent` | `ephemeral`), `expires_at`,
+    `teardown_rule` (`at_expiry` | `at_cap_or_expiry` | `at_work_complete`) and a lifetime budget; the
+    reconciler tears them down when due. (Amended 2026-11-21 to the names in the schema and the API
+    contract.)
   - **Swarms.** An ephemeral team holds ordered stages; each stage holds pools; each pool has one
     identity and a worker count rendered as a Deployment. Pools hand work to other pools through SQS
     queues delivered as environment variables (*Claude*).
@@ -225,5 +226,45 @@ Accepted, Proposed (needs review), Superseded.
     only (*Claude*).
 - Consequences: db migrations 000011 and 000012. New permissions and operations in the API contract;
   new CLI services (`pools`, `swarm-templates`, `work-orders`) and console screens 27–29.
-  `role_bindings` stays without RLS (read through the API's own checks). Decisions D13–D21 in the root
-  PRD record the detail.
+  `role_bindings` stays without RLS (read through the API's own checks; superseded by ADR-015, which adds
+  RLS and guards in `-db` 000013). Decisions D13 to D22 in the root PRD record the detail.
+
+## ADR-015 Answers to the PRD review: contracts, AWS limits, lifecycle and hardening
+
+- Status: Proposed (Claude, for J's review, 2026-11-21)
+- Context: a `review-prd` pass over the root and the four repository PRDs found contradictions between
+  documents (permissions, status words, error codes, event and environment names), behaviours AWS cannot
+  deliver as written (IAM and SQS name limits, Pod Identity session tags, tag limits), no contract for
+  the agent-to-gateway interface, and gaps in the schema's guards. Under J's standing instruction to
+  work out answers, Claude decided D23 to D56 (root PRD §10.1) and opened OQ-1 to OQ-9 (§10.3).
+- Decision:
+  - **One source per fact.** The API contract is the only list of operations, CLI and SDK names,
+    permissions, enums and events; the solution design and repository PRDs point to it. Status words
+    are the contract's `phase` and `state`; budget exhaustion is the condition `BudgetExhausted` (D24).
+  - **Permissions.** Report schedules for team-admins and service admins only (D23); viewers do not see
+    API keys (D50); security operators also list templates and the team directory, and get `403` on every
+    team route (D37, D38, D56); agents and pools call `afs-api` as workload principals that only report
+    work order progress (D29).
+  - **AWS within its limits.** Roles and queues named by id (D25); team and agent attribution through
+    role tags, Pod Identity's own session tags and `role_session_name` (D26, D51); at most 40 tags per
+    resource and 16 Bedrock metadata pairs (D27).
+  - **Gateway contract.** A third shared contract: Bedrock Runtime and Anthropic Messages compatible
+    paths, projected-token authentication, environment delivered to pods, worst-case reservation with
+    held reservations that expire, `402 BudgetExceeded` (D28, D31).
+  - **Budgets.** Temporary ceiling overrides with an expiry (D34, root D5); notify-only exhaustion for
+    persistent teams by service admins only (D33).
+  - **Platform behaviour.** Change feed by `pg_notify` plus polling (D30); one SQS inbox per receiving
+    pool (D32); notification channels rendered as EventBridge rules (D46); 13-month retention for usage,
+    activity and traffic, audit kept (D36); team lifecycle table for suspend, delete and teardown (D53);
+    asynchronous export to S3 by the reconciler, import as a request body (D49).
+  - **Clients.** CSV output, safe updates, expired tokens (D39 to D41); console sign-in, hosting, CORS and
+    search (D42 to D44); contract version header and CLI client id (D47, D48); one-time secrets never
+    replayed (D52).
+  - **Schema.** `-db` 000013 (with tightened 000011 and 000012) guards ceilings, quotas, overrides,
+    catalogs, settings, users, role bindings and work orders, adds spend periods and reservations, the
+    change feed, retention, `models.max_output_tokens` and four settings (D35, D45, D55). An
+    `agent_templates` table (D54) and `export_bundles` changes for D49 need a later migration.
+- Consequences: root PRD §4, §5, §6 (TEAM-9, AGT-11, BUD-10, IF-5, §6.13 settings, US-19 to US-24), §7,
+  §8.2, §9 and §10 updated; API contract v1.1.0; database contract at 000013; new gateway contract;
+  solution design §3, §5, §7, §9 to §12 aligned. Repository PRDs follow in their own changes.
+
