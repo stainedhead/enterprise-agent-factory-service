@@ -77,6 +77,8 @@ on another. Only service admins grant service admin.
 | Members and API keys | ✓ | ✓ (team roles only) | |
 | Secrets: create, rotate, bind | ✓ | ✓ | |
 | Secrets: see names, references, usage | ✓ | ✓ | ✓ |
+| Configuration values (namespace and agent): create, edit, delete | ✓ | ✓ | |
+| Configuration values: see names, values, sources | ✓ | ✓ | ✓ |
 | Budget: set amount (≤ ceiling), thresholds | ✓ | ✓ | |
 | Usage, costs, reconciliation | ✓ | ✓ | ✓ |
 | Audit and config revisions (own team) | ✓ | ✓ | ✓ |
@@ -193,7 +195,10 @@ persistent volume (size, storage class, on-delete rule, snapshot schedule and la
 files. There is no replicas field: each agent is a single pod with its own ServiceAccount and IAM identity.
 The *Persistent storage* section sets the agent's volume for memory, configuration and work in progress:
 size, storage class (from the classes a service admin offers), what happens to the volume when the agent
-is deleted, and snapshot backups (AGT-9).
+is deleted, and snapshot backups (AGT-9). The *Configuration values* section lists the agent's non-secret
+settings. For each name the team-admin either types an agent value or picks *Use namespace value*, which
+is offered only when the namespace has a value of that name; the effective value is shown beside it
+(CFG-7).
 Binding lists only the team's shared secrets and this agent's own secrets. The side panel shows the
 equivalent CLI command.
 
@@ -218,6 +223,12 @@ compute (daily from CUR), and spend by agent.
 team viewer on their own team; API keys for pipelines are on the second tab.
 
 ![Members and access](docs/ui/11-ta-members.png)
+
+**T7 · Configuration values.** The namespace's non-secret values (name, value, description, how many agents
+use each) and, below, every agent value with its source (*Namespace* or *Agent value*) and effective value.
+Changing a namespace value restarts the agents that use it. Team viewers see the same page read-only.
+
+![Configuration values](docs/ui/16-ta-config-values.png)
 
 #### Team viewer
 
@@ -344,6 +355,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | CFG-4 | PITR backups and cross-region/cross-account snapshot copies | P0 |
 | CFG-5 | Export a versioned, checksummed bundle (no secret values); import with ARN/account mapping and dry-run plan. Agent volumes are carried as their settings plus the latest snapshot reference; import can restore an agent's volume from that snapshot once it is shared or copied to the target account | P1 |
 | CFG-6 | Restore a team to a previous revision | P1 |
+| CFG-7 | Non-secret configuration values at two levels: the team's namespace (shared by its agents) and the agent. Each agent value is either its own literal value or a link to the namespace value with the same name (the link is offered only when that value exists). Team-admins manage both levels; viewers see names, values and sources read-only. Values are delivered to the agent's pod as environment variables and as files under `/etc/afs/config`, through a ConfigMap the reconciler owns (manual edits are reverted). Changing a value restarts the agents that use it. A linked namespace value cannot be deleted or renamed until no agent links to it. Names are `UPPER_SNAKE`; names that look like credentials (`*_PASSWORD`, `*_TOKEN`, `*_API_KEY` and similar) are refused with a pointer to Secrets, and a name cannot reuse an environment variable already used by the agent's secrets. Configuration values are included in export bundles | P0 |
 
 ### 6.7 Delivery and notifications
 
@@ -404,7 +416,7 @@ the REST API contract in `-restapi/api/openapi.yaml`.
 |---|---|---|
 | M0 Foundations | Repos, CI, schema v1, OpenAPI skeleton, auth middleware, `/v1/me` | All gates green; isolation and RLS tests pass |
 | M1 Teams & access | TEAM-1..5, ACC-1..3, CFG-1..3, reconciler for namespace/network/IAM; console S1–S3, T1, T6, V1; CLI `teams`, `members` | A service admin onboards a team end to end in dev |
-| M2 Agents & secrets | AGT-1..4, AGT-7, AGT-9, SEC-1..3, SEC-5; console T2–T4, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
+| M2 Agents & secrets | AGT-1..4, AGT-7, AGT-9, SEC-1..3, SEC-5, CFG-7; console T2–T4, T7, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
 | M3 Spend control | BUD-1..5, OPS-2; gateway; console T5, S4 | Load test proves the hard cap; alerts fire once per threshold |
 | M4 Production readiness | CFG-4, BUD-6/7, OPS-1/3, ACC-4, AGT-5/6, CFG-5/6, S5 | DR rebuild drill passes; security review signed off |
 | Phase 2 | TEAM-7, BUD-8, AGT-8, P2 screen | First POC team runs and tears itself down |
