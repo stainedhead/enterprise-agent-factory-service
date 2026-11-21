@@ -99,3 +99,23 @@ Accepted, Proposed (needs review), Superseded.
   is folded into agent values.
 - Consequences: one mechanism for non-secret settings, kept apart from secrets. A service-wide level
   can be added later in the same shape if needed.
+
+## ADR-009 Dedicated agent IAM roles and cross-account role links
+
+- Status: Proposed (from J's PRD review, 2026-11-21)
+- Context: agents need clear AWS identities and, for some work, access to roles in other accounts of
+  the organization. J also asked for a team-level list of the accounts a team may reach, with `*` for
+  all accounts or specific accounts named.
+- Decision: an agent runs with its team's shared role or with a dedicated role
+  `afs/agents/<namespace>/<agent>`. A dedicated agent can be linked to roles in other organization
+  accounts; each link carries a target role ARN, a profile name and an AFS-generated external ID, and the
+  target account owner adds a trust policy AFS shows. Each team has an allowed-accounts filter of glob
+  patterns over account ids and names, recommended to be set by service admins. The filter is enforced
+  in the API, in the database by trigger and in the team's IAM permissions boundary. The reconciler
+  mirrors AWS Organizations, grants `sts:AssumeRole` per link, writes an AWS config file with one profile
+  per link, and verifies each link by assuming it. Phase 2 swarm pools can use one shared named role
+  across several accounts.
+- Consequences: globs rather than regular expressions, so the same filter works in SQL and IAM.
+  Cross-account access needs one manual step in each target account (the trust policy), and links stay
+  *Pending trust* until it is done. An agent with links cannot switch back to the shared team role.
+  Export bundles carry links and filters; import maps account ids and re-verifies.

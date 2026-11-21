@@ -79,6 +79,9 @@ on another. Only service admins grant service admin.
 | Secrets: see names, references, usage | ✓ | ✓ | ✓ |
 | Configuration values (namespace and agent): create, edit, delete | ✓ | ✓ | |
 | Configuration values: see names, values, sources | ✓ | ✓ | ✓ |
+| Team's allowed AWS accounts: set the filter | ✓ | | |
+| Agent IAM identity and cross-account roles: add, remove, verify | ✓ | ✓ | |
+| Allowed accounts, agent roles, link status, trust policies: see | ✓ | ✓ | ✓ |
 | Budget: set amount (≤ ceiling), thresholds | ✓ | ✓ | |
 | Usage, costs, reconciliation | ✓ | ✓ | ✓ |
 | Audit and config revisions (own team) | ✓ | ✓ | ✓ |
@@ -174,6 +177,15 @@ correction, filterable by team, actor, action and outcome, downloadable as CSV.
 
 ![Audit log](docs/ui/05-admin-audit.png)
 
+**S6 · Team AWS account access.** On a team's detail page, the *AWS account access* tab holds the team's
+allowed-accounts filter: glob patterns over AWS Organizations account ids and names (`*` for every
+account, `444455556666` for one, `payments-*` for a group by name). Below it, the organization accounts
+that currently match, which pattern matched, and how many agent links point at each. Narrowing the filter
+disables links that fall outside it. Team-admins see the filter on their agents' AWS access tab but cannot
+change it (TEAM-8).
+
+![Team AWS account access](docs/ui/18-admin-team-aws-accounts.png)
+
 #### Team-admin
 
 **T1 · Team overview.** Identity of the environment (namespace, cluster, IAM role, cost center), reconcile
@@ -198,7 +210,8 @@ size, storage class (from the classes a service admin offers), what happens to t
 is deleted, and snapshot backups (AGT-9). The *Configuration values* section lists the agent's non-secret
 settings. For each name the team-admin either types an agent value or picks *Use namespace value*, which
 is offered only when the namespace has a value of that name; the effective value is shown beside it
-(CFG-7).
+(CFG-7). The *AWS identity* section chooses the team's shared role or a dedicated role for this agent;
+cross-account roles need a dedicated role and are added after creation (AGT-6, AGT-10).
 Binding lists only the team's shared secrets and this agent's own secrets. The side panel shows the
 equivalent CLI command.
 
@@ -230,6 +243,18 @@ Changing a namespace value restarts the agents that use it. Team viewers see the
 
 ![Configuration values](docs/ui/16-ta-config-values.png)
 
+**T8 · Agent AWS access, with add-role dialog.** The agent's *Secrets & identity* tab shows its AWS
+identity (shared team role or a dedicated role, the role ARN and the Pod Identity association) and the
+accounts the team may use. Below it, *Cross-account roles* lists the roles in other organization accounts
+the agent may assume: the profile name the agent uses, the account, the role ARN, the link status
+(*Pending trust*, *Verified*, *Failed* or *Disabled*) and when it was last verified. *Add cross-account
+role* offers only accounts inside the team's filter, takes the target role ARN, a profile name and a
+maximum session length, and shows the trust policy (with the external ID AFS generated) for the target
+account's owner to add to that role. *Verify now* assumes each role and updates the status. Team viewers
+see the identity, links and trust policies read-only (AGT-6, AGT-10).
+
+![Agent AWS access](docs/ui/17-ta-agent-aws-access.png)
+
 #### Team viewer
 
 **V1 · Team overview, read-only.** The same page as T1 with an information banner. *Edit*, *Actions* and
@@ -260,7 +285,10 @@ each other. Audit and usage are attributed to the pool, with the worker's pod na
 troubleshooting. Long-running team agents stay one identity, one pod (AGT-7). Storage for a pool is
 chosen per pool: an ephemeral scratch volume per worker (the default, deleted with the worker), and
 optionally one shared read-write volume for the pool (EFS) for shared memory or caches. Pool workers do
-not get individual persistent volumes.
+not get individual persistent volumes. For AWS access, a pool can optionally use a **shared named role**
+in one or many organization accounts: one role name (for example `afs-cve-remediation`) deployed to
+every target account, typically by a CloudFormation StackSet, that the pool's workers assume through
+one profile per account. The accounts still have to be inside the team's allowed-accounts filter.
 
 ![Ephemeral team budget](docs/ui/14-admin-ephemeral-team.png)
 
@@ -297,6 +325,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | TEAM-5 | Team status shows reconcile phase, observed generation and conditions | P0 |
 | TEAM-6 | Optional isolation tier assigns a dedicated node pool | P1 |
 | TEAM-7 | Ephemeral teams require an expiry and lifetime budget, and are torn down automatically | P2 |
+| TEAM-8 | Each team has an allowed-accounts filter: the organization accounts its agents may assume roles in, as glob patterns (`*` and `?`) over AWS account ids and names, with `*` for all accounts. Empty (the default) means none. AFS mirrors the AWS Organizations account list hourly so names resolve to ids; suspended or closing accounts never match. The filter is enforced in the API, in the database, and in the team's IAM permissions boundary (`sts:AssumeRole` only on `arn:aws:iam::<matching-account>:role/*`). Narrowing it disables links outside it. *Recommendation, to confirm:* service admins set the filter and team-admins choose targets within it | P1 |
 
 ### 6.2 Agents and identity
 
@@ -307,10 +336,11 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | AGT-3 | Each agent gets its own ServiceAccount; AWS access via EKS Pod Identity with session tags `afs-team-id`, `afs-agent-id` | P0 |
 | AGT-4 | Agents have no direct Bedrock permission; model calls go through the gateway | P0 |
 | AGT-5 | External identities (GitHub App installation, bot accounts) are modeled per agent with credentials as secret references | P1 |
-| AGT-6 | Optional per-agent IAM role for least privilege | P1 |
+| AGT-6 | Each agent runs either with its team's shared IAM role (the default) or with a dedicated IAM role of its own (`afs/agents/<namespace>/<agent>`, mapped by Pod Identity, carrying the team's permissions boundary). Team-admins choose this when creating or editing the agent. A dedicated role is required for cross-account roles (AGT-10); an agent with links cannot switch back to the shared role until they are removed | P1 |
 | AGT-7 | One agent is one identity and one pod (a StatefulSet with one replica, so the name, ServiceAccount, IAM session and audit trail stay stable). There is no replica count. A team scales by adding agents. Phase 2 swarm pools are the exception (AGT-8) | P0 |
-| AGT-8 | Swarms (ephemeral teams) hold several pools that work together. Each pool has its own identity, secrets and a worker count; its workers share that identity. Pools can be grouped into stages. The swarm has one lifetime budget; usage and audit are attributed to the pool, with the worker pod recorded | P2 |
+| AGT-8 | Swarms (ephemeral teams) hold several pools that work together. Each pool has its own identity, secrets and a worker count; its workers share that identity. Pools can be grouped into stages. The swarm has one lifetime budget; usage and audit are attributed to the pool, with the worker pod recorded. A pool can optionally use a shared named role in one or many organization accounts (inside the team's allowed accounts) | P2 |
 | AGT-9 | Every agent has one persistent volume (encrypted EBS gp3 by default, through a StatefulSet volume claim) mounted at `/var/lib/agent` for memory, configuration and work in progress. It survives restarts, pauses, image upgrades and reschedules. Team-admins set size (1 to 1000 GiB, default 20, grow only), storage class (from the service admin's list, fixed after creation), on-delete rule (snapshot then delete by default, delete, or retain) and snapshot schedule (off, daily or weekly, keeping 1 to 90). Viewers see the settings and snapshot history read-only. Volume usage counts toward the team's storage quota, and EBS cost is attributed to the team by tag | P0 |
+| AGT-10 | An agent with a dedicated role can be linked to roles in other accounts of the organization, inside the team's allowed accounts (TEAM-8). Each link has the target role ARN, a profile name, a maximum session (15 minutes to 12 hours) and an external ID that AFS generates. AFS shows the trust policy for the target account's owner to add (principal: the agent's role; conditions: the external ID and the `afs-team-id` session tag). The reconciler grants the agent's role `sts:AssumeRole` on the target, writes an AWS config file into the pod with one profile per link (`role_arn`, `external_id`, `credential_source`), verifies each link by assuming it (on creation, daily and on demand) and records *Pending trust*, *Verified*, *Failed* or *Disabled*. A link's role ARN and external ID cannot change; replace the link instead. Team-admins add and remove links; viewers see them read-only. Assumed sessions keep the `afs-team-id` and `afs-agent-id` tags, so CloudTrail in the target account shows the agent | P1 |
 
 ### 6.3 Secrets
 
@@ -353,7 +383,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | CFG-2 | Reconciler applies desired state at startup and continuously; manual drift is reverted and audited | P0 |
 | CFG-3 | Every change is versioned (config revisions) and every mutation is audited (append-only) | P0 |
 | CFG-4 | PITR backups and cross-region/cross-account snapshot copies | P0 |
-| CFG-5 | Export a versioned, checksummed bundle (no secret values); import with ARN/account mapping and dry-run plan. Agent volumes are carried as their settings plus the latest snapshot reference; import can restore an agent's volume from that snapshot once it is shared or copied to the target account | P1 |
+| CFG-5 | Export a versioned, checksummed bundle (no secret values); import with ARN/account mapping and dry-run plan. Agent volumes are carried as their settings plus the latest snapshot reference; import can restore an agent's volume from that snapshot once it is shared or copied to the target account. Teams' allowed-accounts filters and agents' identity settings and cross-account links (with their external IDs) are exported; import maps account ids and re-verifies every link | P1 |
 | CFG-6 | Restore a team to a previous revision | P1 |
 | CFG-7 | Non-secret configuration values at two levels: the team's namespace (shared by its agents) and the agent. Each agent value is either its own literal value or a link to the namespace value with the same name (the link is offered only when that value exists). Team-admins manage both levels; viewers see names, values and sources read-only. Values are delivered to the agent's pod as environment variables and as files under `/etc/afs/config`, through a ConfigMap the reconciler owns (manual edits are reverted). Changing a value restarts the agents that use it. A linked namespace value cannot be deleted or renamed until no agent links to it. Names are `UPPER_SNAKE`; names that look like credentials (`*_PASSWORD`, `*_TOKEN`, `*_API_KEY` and similar) are refused with a pointer to Secrets, and a name cannot reuse an environment variable already used by the agent's secrets. Configuration values are included in export bundles | P0 |
 
@@ -418,8 +448,8 @@ the REST API contract in `-restapi/api/openapi.yaml`.
 | M1 Teams & access | TEAM-1..5, ACC-1..3, CFG-1..3, reconciler for namespace/network/IAM; console S1–S3, T1, T6, V1; CLI `teams`, `members` | A service admin onboards a team end to end in dev |
 | M2 Agents & secrets | AGT-1..4, AGT-7, AGT-9, SEC-1..3, SEC-5, CFG-7; console T2–T4, T7, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
 | M3 Spend control | BUD-1..5, OPS-2; gateway; console T5, S4 | Load test proves the hard cap; alerts fire once per threshold |
-| M4 Production readiness | CFG-4, BUD-6/7, OPS-1/3, ACC-4, AGT-5/6, CFG-5/6, S5 | DR rebuild drill passes; security review signed off |
-| Phase 2 | TEAM-7, BUD-8, AGT-8, P2 screen | First POC team runs and tears itself down |
+| M4 Production readiness | CFG-4, BUD-6/7, OPS-1/3, ACC-4, AGT-5/6/10, TEAM-8, CFG-5/6, S5, S6, T8 | DR rebuild drill passes; security review signed off |
+| Phase 2 | TEAM-7, BUD-8, AGT-8 (with the pool shared named role), P2 screen | First POC team runs and tears itself down |
 | Phase 3 | WO-1/2, P3 screen | One CVE remediated across repos within SLA |
 
 ## 10. Risks and open questions
@@ -431,6 +461,7 @@ the REST API contract in `-restapi/api/openapi.yaml`.
 | Q3 | Agentic Teammates interface: CRD or Helm chart? | Agentic Teammates | Reconciler renders whichever; confirm before M2 |
 | Q4 | One shared cluster per environment, or per business unit? | J | Shared to start; `cluster_id` on teams allows split later |
 | Q5 | Who may raise a ceiling during an incident (break-glass)? | J | Service admins only, audited, with an expiry |
+| Q6 | Who sets a team's allowed AWS accounts? | J | Service admins (the guardrail); team-admins pick targets inside it (TEAM-8) |
 | R1 | Namespace isolation shares the kernel | Security | Isolation tier with dedicated nodes for regulated work; gVisor/Kata later |
 | R2 | Gateway is on the critical path for every model call | Platform | Multi-AZ, fail closed, latency SLO, load tested in M3 |
 | R3 | Model price changes make estimates drift | FinOps | Daily reconciliation and variance alerts; price sync |

@@ -448,6 +448,9 @@ page("08-ta-create-agent", "ta", team_nav("agents", "ta"), f"""
 <div class="field"><label>Storage class</label><div class="hint">Offered by your service admins. Fixed after creation.</div><div class="input">gp3 · general purpose SSD, encrypted ▾</div></div>
 <div class="field"><label>When the agent is deleted</label><div class="input">Take a final snapshot, then delete the volume ▾</div></div>
 <div class="field"><label>Snapshot backups</label><div class="input">Daily, keep 7 ▾</div></div></div></div></div>
+<div class="card"><div class="ch"><div><h2>AWS identity</h2><div class="sub">A dedicated role gives this agent its own IAM identity, and is required for roles in other accounts. Add cross-account roles after the agent is created.</div></div></div><div class="cb"><div class="grid g2">
+<div class="field"><label>IAM identity</label><div class="input">Dedicated role for this agent ▾</div></div>
+<div class="field"><label>Role name</label><div class="hint">Set by Agent Factory</div><div class="input ro mono small">afs/agents/afs-t-payments-factory/security-patcher</div></div></div></div></div>
 <div class="card"><div class="ch"><div><h2>Configuration values</h2><div class="sub">Non-secret settings, delivered as environment variables and as files under <span class="mono">/etc/afs/config</span>. Use the namespace value to share one setting across the team's agents. Secrets belong under Secrets.</div></div><span class="btn sm">Add value</span></div>
 <table><tr><th>Name</th><th>Source</th><th>Value</th><th></th></tr>
 <tr><td class="mono">LOG_LEVEL</td><td><div class="input" style="margin:0">Use namespace value ▾</div></td><td><span class="mono">info</span> <span class="muted small">from namespace</span></td><td><a>Remove</a></td></tr>
@@ -460,7 +463,7 @@ page("08-ta-create-agent", "ta", team_nav("agents", "ta"), f"""
 <div style="display:flex;justify-content:flex-end;gap:8px"><span class="btn" style="border:0">Cancel</span><span class="btn">Preview CLI command</span><span class="btn p">Create agent</span></div>
 </div>
 <div style="width:360px"><div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb">
-<div class="code">afs agents create-agent \\<br>&nbsp; --team-id team_01JD3Z… \\<br>&nbsp; --name security-patcher \\<br>&nbsp; --template hermes-dev \\<br>&nbsp; --model-id claude-sonnet \\<br>&nbsp; --storage SizeGiB=20,StorageClass=gp3,\\<br>&nbsp;&nbsp;&nbsp; OnDelete=snapshot_then_delete,\\<br>&nbsp;&nbsp;&nbsp; Snapshots=daily,Keep=7 \\<br>&nbsp; --config-values file://config.json \\<br>&nbsp; --secret-bindings file://bindings.json</div>
+<div class="code">afs agents create-agent \\<br>&nbsp; --team-id team_01JD3Z… \\<br>&nbsp; --name security-patcher \\<br>&nbsp; --template hermes-dev \\<br>&nbsp; --model-id claude-sonnet \\<br>&nbsp; --storage SizeGiB=20,StorageClass=gp3,\\<br>&nbsp;&nbsp;&nbsp; OnDelete=snapshot_then_delete,\\<br>&nbsp;&nbsp;&nbsp; Snapshots=daily,Keep=7 \\<br>&nbsp; --iam-identity dedicated \\<br>&nbsp; --config-values file://config.json \\<br>&nbsp; --secret-bindings file://bindings.json</div>
 <div class="small muted" style="margin-top:8px">Every console action maps to one CLI operation and one REST call.</div></div></div></div>
 </div>
 """)
@@ -591,6 +594,55 @@ page("16-ta-config-values", "ta", team_nav("config", "ta"), f"""
 <tr><td><a>incident-scribe</a></td><td class="mono">JIRA_PROJECT</td><td><span class="badge b-per" style="white-space:nowrap">Namespace</span></td><td class="mono">PAY</td></tr>
 <tr><td><a>incident-scribe</a></td><td class="mono">PAGER_SERVICE</td><td><span class="badge b-blue" style="white-space:nowrap">Agent value</span></td><td class="mono">payments-core</td></tr>
 </table></div>
+""")
+
+aws_modal = """<div class="modalwrap"><div class="modal" style="width:720px"><div class="mh">Add cross-account role<span class="muted">✕</span></div><div class="mb">
+<div class="grid g2"><div class="field"><label>Account</label><div class="hint">Organization accounts inside this team's allowed-accounts filter</div><div class="input">payments-prod · 444455556666 ▾</div></div>
+<div class="field"><label>Profile name</label><div class="hint">The agent uses <span class="mono">--profile</span> with this name</div><div class="input mono">prod-deployer</div></div></div>
+<div class="grid g2"><div class="field"><label>Role ARN in that account</label><div class="input mono small">arn:aws:iam::444455556666:role/afs/payments-deployer</div></div>
+<div class="field"><label>Maximum session</label><div class="input">1 hour ▾</div></div></div>
+<div class="field"><label>Trust policy for the target role</label><div class="hint">The owner of account 444455556666 adds this to the role. Agent Factory checks the link by assuming the role, and shows <i>Verified</i> once it works.</div>
+<div class="code" style="font-size:11.5px;line-height:1.45">{<br>&nbsp; "Effect": "Allow",<br>&nbsp; "Principal": { "AWS": "arn:aws:iam::111122223333:role/afs/agents/afs-t-payments-factory/reviewer-bot" },<br>&nbsp; "Action": [ "sts:AssumeRole", "sts:TagSession" ],<br>&nbsp; "Condition": {<br>&nbsp;&nbsp;&nbsp; "StringEquals": { "sts:ExternalId": "afs-7Hq2Lx9TzR4mWc8VbN3k",<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; "aws:PrincipalTag/afs-team-id": "team_01JD3Z…" }<br>&nbsp; }<br>}</div>
+<div style="margin-top:8px"><span class="btn sm">Copy policy</span></div></div>
+</div><div class="mf"><span class="btn" style="border:0">Cancel</span><span class="btn p">Add role</span></div></div></div>"""
+
+page("17-ta-agent-aws-access", "ta", team_nav("agents", "ta"), f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › <a>Agents</a> › reviewer-bot</div>
+<div class="hdr"><div><h1>reviewer-bot</h1><div class="desc">{st('ok','Running')} · claude-opus · omp-review</div></div><div class="btns"><span class="btn">Restart</span><span class="btn">Pause</span><span class="btn p">Edit</span></div></div>
+<div class="tabs"><span>Details</span><span>Configuration</span><span class="on">Secrets & identity</span><span>Usage</span><span>Logs</span><span>Revisions</span></div>
+<div class="card"><div class="ch"><div><h2>AWS identity <span class="info">Info</span></h2><div class="sub">Who this agent is in AWS. Calls carry session tags <span class="mono">afs-team-id</span> and <span class="mono">afs-agent-id</span>, so CloudTrail shows the agent.</div></div></div><div class="cb"><div class="grid g3">
+<div class="kv"><div class="k">IAM identity</div><div class="v">Dedicated role for this agent</div></div>
+<div class="kv"><div class="k">Role</div><div class="v mono small">arn:aws:iam::111122223333:role/afs/agents/afs-t-payments-factory/reviewer-bot</div></div>
+<div class="kv"><div class="k">Pod Identity association</div><div class="v">{st('ok','Active')}</div></div>
+<div class="kv"><div class="k">Accounts this team may use</div><div class="v"><span class="mono">payments-*</span>, <span class="mono">777788889999</span> <span class="muted small">· set by service admins</span></div></div></div></div></div>
+<div class="card"><div class="ch"><div><h2>Cross-account roles <span class="cnt">(3)</span></h2><div class="sub">Roles in other organization accounts this agent may assume. They appear as AWS profiles in the agent's config file.</div></div>
+<div class="btns"><span class="btn dd">Actions</span><span class="btn">Verify now</span><span class="btn p">Add cross-account role</span></div></div>
+<table><tr><th></th><th>Profile</th><th>Account</th><th>Role ARN</th><th>Status</th><th>Last verified</th><th></th></tr>
+<tr><td><span class="cb2"></span></td><td class="mono">prod-reader</td><td>payments-prod<br><span class="muted small mono">444455556666</span></td><td class="mono small">arn:aws:iam::444455556666:role/afs/payments-reader</td><td>{st('ok','Verified')}</td><td>Today 06:00</td><td><a>Trust policy</a></td></tr>
+<tr><td><span class="cb2"></span></td><td class="mono">shared-tools</td><td>shared-tools<br><span class="muted small mono">777788889999</span></td><td class="mono small">arn:aws:iam::777788889999:role/afs/artifact-reader</td><td>{st('ok','Verified')}</td><td>Today 06:00</td><td><a>Trust policy</a></td></tr>
+<tr><td><span class="cb2"></span></td><td class="mono">prod-deployer</td><td>payments-prod<br><span class="muted small mono">444455556666</span></td><td class="mono small">arn:aws:iam::444455556666:role/afs/payments-deployer</td><td>{st('pend','Pending trust')}</td><td>—</td><td><a>Trust policy</a></td></tr>
+</table></div>
+""", modal=aws_modal)
+
+page("18-admin-team-aws-accounts", "admin", admin_nav("teams"), f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>Teams</a> › <a>payments-factory</a> › AWS account access</div>
+<div class="hdr"><div><h1>payments-factory</h1><div class="desc">{st('ok','Active')} · namespace afs-t-payments-factory</div></div><div class="btns"><span class="btn">Suspend</span><span class="btn p">Edit</span></div></div>
+<div class="tabs"><span>Details</span><span>Members</span><span>Budget</span><span class="on">AWS account access</span><span>Audit</span></div>
+<div class="card"><div class="ch"><div><h2>Allowed accounts <span class="info">Info</span></h2>
+<div class="sub">Organization accounts this team's agents may assume roles in. Patterns match account ids or names; <span class="mono">*</span> and <span class="mono">?</span> are wildcards, and <span class="mono">*</span> alone means every account. Team-admins see this list but cannot change it.</div></div>
+<div class="btns"><span class="btn p">Save changes</span></div></div><div class="cb">
+<div class="field"><label>Patterns</label><div class="hint">One per line. Up to 50.</div>
+<div class="input mono" style="height:auto;line-height:1.7">payments-*<br>777788889999</div></div>
+<div class="alert"><span class="ic">ⓘ</span><div class="small">Enforced three times: the API refuses links outside the filter, the database rejects them, and the team's IAM permissions boundary only allows <span class="mono">sts:AssumeRole</span> into matching accounts. Narrowing the filter disables links that fall outside it.</div></div>
+</div></div>
+<div class="card"><div class="ch"><div><h2>Matching organization accounts <span class="cnt">(3)</span></h2>
+<div class="sub">From AWS Organizations, refreshed hourly. Suspended accounts never match.</div></div></div>
+<table><tr><th>Account</th><th>Name</th><th>Matched by</th><th>Agent links</th><th>Verified</th><th>Status</th></tr>
+<tr><td class="mono">444455556666</td><td>payments-prod</td><td class="mono">payments-*</td><td>2</td><td>1 of 2</td><td>{st('ok','Active')}</td></tr>
+<tr><td class="mono">555566667777</td><td>payments-staging</td><td class="mono">payments-*</td><td>0</td><td>—</td><td>{st('ok','Active')}</td></tr>
+<tr><td class="mono">777788889999</td><td>shared-tools</td><td class="mono">777788889999</td><td>1</td><td>1 of 1</td><td>{st('ok','Active')}</td></tr>
+</table></div>
+<div class="card"><div class="cb"><div class="k small muted">Equivalent CLI</div><div class="code">afs teams update-team --team-id team_01JD3Z… --allowed-aws-accounts "payments-*" 777788889999</div></div></div>
 """)
 
 page("12-tv-team-overview", "tv", team_nav("overview", "tv"), team_overview("tv"))

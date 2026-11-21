@@ -114,7 +114,9 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 - One StatefulSet with exactly one replica per agent (stable name, ServiceAccount and IAM session). There is no replica count: a team scales by adding agents.
 - One ConfigMap per agent (`agent-<name>-config`) holding its resolved configuration values (`afs.agent_config_resolved`), loaded with `envFrom` and mounted read-only at `/etc/afs/config` (one file per name). A change to a namespace value re-renders every ConfigMap that links to it and rolls those agents (a pod-template hash annotation), because environment variables only change on restart. A ConfigMap edited by hand is restored.
 - One persistent volume per agent from the StatefulSet's `volumeClaimTemplate` (EBS CSI, encrypted, `WaitForFirstConsumer`, tagged `afs-team-id` and `afs-agent-id`), mounted at `/var/lib/agent`. The StatefulSet's PVC retention policy is `Retain` for both scale-down and delete, so pausing or re-creating the StatefulSet never loses data; the reconciler alone deletes a volume, following the agent's on-delete rule. Snapshots are EBS snapshots through CSI `VolumeSnapshot`, taken on the agent's schedule, pruned to its retention count, and recorded in `agent_volume_snapshots`. The team's `ResourceQuota` includes `requests.storage`.
-- IAM role `afs-team-<id>` with an ABAC policy scoped by `aws:PrincipalTag/afs-team-id`.
+- IAM role `afs-team-<id>` with an ABAC policy scoped by `aws:PrincipalTag/afs-team-id`, and a permissions boundary `afs-team-<id>-boundary` that allows `sts:AssumeRole` and `sts:TagSession` only on `arn:aws:iam::<account>:role/*` for the organization accounts matching the team's allowed-accounts filter. The boundary is re-rendered when the filter or the organization account list changes.
+- A dedicated IAM role `afs/agents/<namespace>/<agent>` for each agent whose `iam_identity` is `dedicated`, with the team's boundary attached and its own Pod Identity association. For each of the agent's cross-account links, an inline statement grants `sts:AssumeRole` and `sts:TagSession` on that exact role ARN. A Secret-free AWS config file (`agent-<name>-aws`) is mounted at `/etc/afs/aws/config` with `AWS_CONFIG_FILE` set, holding one profile per link (`role_arn`, `external_id`, `credential_source = EcsContainer`, `duration_seconds`), so the agent runs `aws --profile <name>` or the SDK equivalent.
+- The AWS Organizations account list, mirrored hourly into `org_aws_accounts` (id, name, status). Each link is verified by assuming its role with the agent's identity on creation, daily and on demand; the result (`pending_trust`, `verified`, `failed`) is written to `agent_role_links`. Links whose account falls outside the filter or is suspended are set to `disabled` and removed from the agent's grants and profile file.
 - Bedrock application inference profile per (team, model) with cost allocation tags.
 - ExternalSecret (External Secrets Operator) objects that project referenced Secrets Manager entries into the namespace.
 - Agent workloads rendered from the Agentic Teammates CRD/Helm chart.
@@ -186,6 +188,9 @@ Role bindings can be granted to a user or to an IdP group (`subject_type = group
 | Create / rotate / delete secrets, bind to agents | ✓ | ✓ | |
 | View secret metadata (never values) | ✓ | ✓ | ✓ |
 | Manage agent identities | ✓ | ✓ | |
+| Set a team's allowed AWS accounts | ✓ | | |
+| Add / remove / verify agent cross-account role links | ✓ | ✓ | |
+| View allowed accounts, role links, trust policies | ✓ | ✓ | ✓ |
 | Set budget (≤ ceiling), thresholds | ✓ | ✓ | |
 | Set budget ceiling | ✓ | | |
 | View usage, cost, reconciliation | ✓ | ✓ | ✓ |
@@ -202,7 +207,20 @@ Each action is a named permission (e.g. `agents:write`, `secrets:read-metadata`)
 Each agent gets a Kubernetes ServiceAccount `agent-<name>` in its team namespace. Identities are modeled explicitly in `agent_identities`:
 
 - `k8s_service_account` (always), used for gateway authentication.
-- `aws_iam_role` via EKS Pod Identity. Default: shared team role. Option: per-agent role for least privilege (session tag `afs-agent-id`).
+- `aws_iam_role` via EKS Pod Identity. Default: the shared team role (`agents.iam_identity = 'team_shared'`). Option: a dedicated role `afs/agents/<namespace>/<agent>` (`'dedicated'`), with the team's permissions boundary, for least privilege and for cross-account access.
+- Cross-account role links (`agent_role_links`, dedicated agents only): a target role ARN in another organization account, a profile name, a maximum session and an AFS-generated external ID. The account must match the team's allowed-accounts filter (`teams.allowed_aws_accounts`, glob patterns over account ids and names; `*` for every account), which service admins set. The filter is enforced three times: in the API, in the database (`afs.account_allowed`, by trigger) and in IAM (the team's permissions boundary). AFS shows the target account owner this trust policy:
+
+  ```json
+  {
+    "Effect": "Allow",
+    "Principal": { "AWS": "arn:aws:iam::<afs-account>:role/afs/agents/<namespace>/<agent>" },
+    "Action": ["sts:AssumeRole", "sts:TagSession"],
+    "Condition": { "StringEquals": { "sts:ExternalId": "<external-id>", "aws:PrincipalTag/afs-team-id": "<team-id>" } }
+  }
+  ```
+
+  Glob patterns, not regular expressions, because IAM policies match ARNs with wildcards only, so the same pattern can be checked in SQL and rendered into the boundary.
+- Phase 2 swarm pools can use a shared named role: one role name deployed to one or many organization accounts (typically by a CloudFormation StackSet) that trusts the pool's role, with one profile per account. The same filter applies.
 - `github_app` installation or other external identity (e.g. a bot account in Jira), credentials held as a referenced secret.
 
 Agent actions in AWS carry session tags `afs-team-id`, `afs-agent-id`, so CloudTrail attributes every call to an agent.
@@ -243,7 +261,7 @@ Reserve → invoke → settle, as in section 3.1. Thresholds emit `budget.thresh
 - `config_revisions`: a trigger snapshots every change to versioned tables (who, when, full JSON), giving history and rollback ("restore revision N").
 - `audit_log`: append-only (UPDATE/DELETE revoked from the app role and blocked by trigger).
 - **Backups:** RDS automated backups with PITR, daily snapshot copied cross-region and cross-account (AWS Backup vault with vault lock).
-- **Export bundle:** `POST /v1/exports` produces a versioned, SHA-256-checksummed JSON (or YAML) document with `schemaVersion`, all teams, agents (including volume settings and configuration values), namespace configuration values, members, bindings, budgets, configuration, secret *references* and each agent's latest volume *snapshot reference*. Import can restore volumes from those snapshots once they are shared with or copied to the target account and region. Stored in S3 and downloadable.
+- **Export bundle:** `POST /v1/exports` produces a versioned, SHA-256-checksummed JSON (or YAML) document with `schemaVersion`, all teams, agents (including volume settings and configuration values), namespace configuration values, agent IAM identity and cross-account links with their external IDs, each team's allowed-accounts filter, members, bindings, budgets, configuration, secret *references* and each agent's latest volume *snapshot reference*. Import can restore volumes from those snapshots once they are shared with or copied to the target account and region. Stored in S3 and downloadable.
 - **Import:** `POST /v1/imports` with a mapping file (old account id → new, ARN rewrites, cluster id), dry-run by default, showing a plan (create/update/skip) before apply. Secrets must already exist (replicated via Secrets Manager multi-region replication or recreated) in the target account.
 - **Restart behavior:** the reconciler's startup full-reconcile re-applies everything. A brand-new cluster plus a restored DB converges to the full environment with no manual steps.
 
@@ -395,3 +413,4 @@ enterprise-agent-factory-service/              docs-only root: PRD, this design,
 | Secrets | Secrets Manager refs + ESO | Store encrypted values in DB | Keeps AFS out of the secret blast radius |
 | CLI language | Go | Python (like AWS CLI) | Single static binary, shares API types |
 | Network policy | Cilium (recommended) | VPC CNI network policy | FQDN egress rules for SaaS endpoints |
+| Cross-account access | Dedicated agent role + role links with external IDs, inside a per-team glob filter | Shared team role trusted by every target account | Least privilege per agent, CloudTrail attribution in the target account, and a guardrail central teams control |
