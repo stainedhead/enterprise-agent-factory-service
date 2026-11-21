@@ -54,6 +54,9 @@ AWS CLI conventions, and a TypeScript SDK for automation.
 - Building the agent runtime itself (Agentic Teammates owns images and harnesses).
 - Multi-enterprise or external customers. This is single-enterprise, internal.
 - Chargeback invoicing. AFS produces showback data by cost center; finance systems do the rest.
+- Budgets for model providers other than Bedrock. OpenAI, OpenRouter and similar providers can be allowed
+  as external systems (EXT-6), but their calls are not metered, counted in team budgets or stopped by hard
+  caps (J, 2026-11-21).
 - Running ephemeral swarms and CVE work orders end to end (designed now, built in phases 2 and 3).
 
 ## 4. Users and roles
@@ -82,6 +85,9 @@ on another. Only service admins grant service admin.
 | Team's allowed AWS accounts: set the filter | ✓ | | |
 | Agent IAM identity and cross-account roles: add, remove, verify | ✓ | ✓ | |
 | Allowed accounts, agent roles, link status, trust policies: see | ✓ | ✓ | ✓ |
+| External systems catalog: add custom systems, turn systems off for all teams, allow teams to declare their own | ✓ | | |
+| External systems: turn off for the team or an agent; declare team systems (when allowed) | ✓ | ✓ | |
+| External systems: see effective access per team and agent | ✓ | ✓ | ✓ |
 | Budget: set amount (≤ ceiling), thresholds | ✓ | ✓ | |
 | Usage, costs, reconciliation | ✓ | ✓ | ✓ |
 | Audit and config revisions (own team) | ✓ | ✓ | ✓ |
@@ -126,12 +132,12 @@ Service admin (global navigation)            Team context (team-admin / team vie
 │  ├─ Budgets & ceilings                      ├─ Configuration
 │  ├─ Cost reconciliation                     │  ├─ Secrets
 │  └─ Audit log                               │  ├─ Agent identities
-└─ Platform                                   │  ├─ Network egress
+└─ Platform                                   │  ├─ External systems
    ├─ Model catalog & pricing                 │  ├─ Models
    ├─ Agent templates                         │  ├─ Log delivery
-   ├─ Service settings                        │  └─ Notifications
-   └─ Export & import                         ├─ Cost
-                                              │  └─ Budget & usage
+   ├─ External systems                        │  └─ Notifications
+   ├─ Service settings                        ├─ Cost
+   └─ Export & import                         │  └─ Budget & usage
                                               └─ History
                                                  ├─ Activity & audit
                                                  └─ Config revisions
@@ -185,6 +191,16 @@ disables links that fall outside it. Team-admins see the filter on their agents'
 change it (TEAM-8).
 
 ![Team AWS account access](docs/ui/18-admin-team-aws-accounts.png)
+
+**S7 · External systems catalog.** The outside services agents may reach. It ships with Atlassian (Jira
+and Confluence), GitHub, Microsoft Outlook, Microsoft Teams, Microsoft Azure, Google, Slack, Okta, OpenAI
+and OpenRouter, and service admins add custom systems (for example an internal artifact registry). Each
+entry lists its endpoints and a service-level switch: off means off for every team. OpenAI and OpenRouter
+carry an *Unmetered* badge and a notice: their calls bypass the gateway, so they are not counted in
+budgets or stopped by hard caps, and they ship switched off. Below the catalog, service admins choose which
+teams may declare their own systems (EXT-1 to EXT-6).
+
+![External systems catalog](docs/ui/19-admin-external-systems.png)
 
 #### Team-admin
 
@@ -255,6 +271,22 @@ see the identity, links and trust policies read-only (AGT-6, AGT-10).
 
 ![Agent AWS access](docs/ui/17-ta-agent-aws-access.png)
 
+**T9 · External systems, with declare dialog.** Every system the team can use: catalog systems (on unless
+the team turns them off) and the team's own declared systems, with endpoints, how many agents have access
+and the secrets that are credentials for each. Systems switched off by service admins show as *Off for all
+teams* and cannot be turned on. When service admins allow it, *Declare system* adds a team system with
+name, category, endpoints, owner, documentation and purpose, so the team's dependencies are written down
+and controlled. Team viewers see this page read-only (EXT-2, EXT-3).
+
+![External systems, team](docs/ui/20-ta-external-systems.png)
+
+**T10 · Agent external systems.** The agent's *External systems* tab shows its effective access: each
+system the team has on, with a switch to turn it off for this agent and a note saying why. Systems turned
+off at the team or service level show *Off above* and cannot be turned on. Team viewers see it read-only
+(EXT-4).
+
+![Agent external systems](docs/ui/21-ta-agent-external-systems.png)
+
 #### Team viewer
 
 **V1 · Team overview, read-only.** The same page as T1 with an information banner. *Edit*, *Actions* and
@@ -301,7 +333,7 @@ owning teams to notify, SLA due date and the remediation team assigned.
 
 | Flow | Role | Steps |
 |---|---|---|
-| Onboard a team | Service admin | Teams → Create team → details, guardrails → models & egress → budget → first team-admin → review → team appears `Reconciling`, then `Ready` |
+| Onboard a team | Service admin | Teams → Create team → details, guardrails → models & external systems → budget → first team-admin → review → team appears `Reconciling`, then `Ready` |
 | Stand up agents | Team-admin | Secrets → Create secret → Agents → Create agent → bind secrets → status `Running` |
 | Respond to budget alert | Team-admin | Alert (Slack/email) → Budget & usage → see top agents → pause an agent, or raise budget up to ceiling |
 | Hard cap reached | System → team-admin | Gateway blocks calls → agents receive `BudgetExceeded` → team shows `Blocked (cap)` → team-admin asks service admin for a higher ceiling or waits for reset |
@@ -320,7 +352,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 |---|---|---|
 | TEAM-1 | Service admins create, update, suspend, resume and delete teams | P0 |
 | TEAM-2 | Each team gets one namespace `afs-t-<name>` with Pod Security `restricted`, ResourceQuota and LimitRange | P0 |
-| TEAM-3 | Default-deny NetworkPolicy for ingress and egress; allow DNS, the LLM gateway and the team's egress allow-list only | P0 |
+| TEAM-3 | Default-deny NetworkPolicy for ingress and egress; allow DNS, the LLM gateway and, per agent, the endpoints of the external systems that agent may use (EXT-5) only | P0 |
 | TEAM-4 | Admission policy blocks teams from altering their own isolation (NetworkPolicies, LoadBalancer/NodePort Services, hostNetwork, privileged pods) | P0 |
 | TEAM-5 | Team status shows reconcile phase, observed generation and conditions | P0 |
 | TEAM-6 | Optional isolation tier assigns a dedicated node pool | P1 |
@@ -383,7 +415,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | CFG-2 | Reconciler applies desired state at startup and continuously; manual drift is reverted and audited | P0 |
 | CFG-3 | Every change is versioned (config revisions) and every mutation is audited (append-only) | P0 |
 | CFG-4 | PITR backups and cross-region/cross-account snapshot copies | P0 |
-| CFG-5 | Export a versioned, checksummed bundle (no secret values); import with ARN/account mapping and dry-run plan. Agent volumes are carried as their settings plus the latest snapshot reference; import can restore an agent's volume from that snapshot once it is shared or copied to the target account. Teams' allowed-accounts filters and agents' identity settings and cross-account links (with their external IDs) are exported; import maps account ids and re-verifies every link | P1 |
+| CFG-5 | Export a versioned, checksummed bundle (no secret values); import with ARN/account mapping and dry-run plan. Agent volumes are carried as their settings plus the latest snapshot reference; import can restore an agent's volume from that snapshot once it is shared or copied to the target account. Teams' allowed-accounts filters and agents' identity settings and cross-account links (with their external IDs) are exported; import maps account ids and re-verifies every link. The external systems catalog, team-declared systems and team and agent opt-outs are exported too | P1 |
 | CFG-6 | Restore a team to a previous revision | P1 |
 | CFG-7 | Non-secret configuration values at two levels: the team's namespace (shared by its agents) and the agent. Each agent value is either its own literal value or a link to the namespace value with the same name (the link is offered only when that value exists). Team-admins manage both levels; viewers see names, values and sources read-only. Values are delivered to the agent's pod as environment variables and as files under `/etc/afs/config`, through a ConfigMap the reconciler owns (manual edits are reverted). Changing a value restarts the agents that use it. A linked namespace value cannot be deleted or renamed until no agent links to it. Names are `UPPER_SNAKE`; names that look like credentials (`*_PASSWORD`, `*_TOKEN`, `*_API_KEY` and similar) are refused with a pointer to Secrets, and a name cannot reuse an environment variable already used by the agent's secrets. Configuration values are included in export bundles | P0 |
 
@@ -410,6 +442,18 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | IF-2 | `afs` CLI: `afs <service> <operation>`, profiles, `--output json|table|text|yaml`, `--query`, pagination flags, `--cli-input-json`, `--generate-cli-skeleton`, AWS CLI exit codes | P0 |
 | IF-3 | `@afs/sdk` TypeScript SDK generated from the contract with ergonomic resource clients and async pagination | P0 |
 | IF-4 | Web console as specified in section 5, built on `@afs/sdk` with clean architecture | P0 |
+
+### 6.10 External systems
+
+| ID | Requirement | Pri |
+|---|---|---|
+| EXT-1 | A service-level catalog of external systems agents may reach. Each entry has a name, category, description, documentation link and endpoints (host or `*.domain`, optional port). AFS ships built-in entries for Atlassian (Jira and Confluence), GitHub, Microsoft Outlook, Microsoft Teams, Microsoft Azure, Google, Slack, Okta, OpenAI and OpenRouter. Service admins add custom entries for services not in the list, edit endpoints, and switch any entry off for every team. Built-in entries can be switched off but not deleted | P0 |
+| EXT-2 | Teams inherit every system that is on at the service level, on by default. Team-admins switch systems off for the whole team. A team cannot switch on what the service level has off | P0 |
+| EXT-3 | Service admins choose, per team, whether the team may declare its own systems (default: not allowed). A team-declared system needs an owner and a purpose, may have documentation, applies to that team only, and cannot reuse the name of a catalog entry. This is how teams declare, document and control the services their work depends on | P1 |
+| EXT-4 | Agents inherit their team's systems, on by default. Team-admins switch systems off for one agent. Each level can only narrow the one above; the effective access of every agent, and which level turned a system off, is visible to team viewers read-only | P0 |
+| EXT-5 | Enforced in the network: the reconciler renders the endpoints of the systems each agent may use into that agent's egress policy (FQDN rules, default deny). A change takes effect without restarting the agent. Hosts shared by two systems (for example `graph.microsoft.com` for Outlook and Teams) stay reachable while either is on; finer control comes from the credentials the agent holds | P0 |
+| EXT-6 | Category *LLM* marks model providers other than Bedrock (OpenAI, OpenRouter). Their calls bypass the AFS gateway, so they are **not metered, not counted in budgets and not stopped by hard caps**. They ship switched off; the catalog, team and agent pages show an *Unmetered* badge, and turning one on at the service level asks for confirmation. Budgets for these providers are out of scope for now (see non-goals) | P0 |
+| EXT-7 | A secret can name the external system it is a credential for. The reconciler does not deliver it to agents for which that system is off, and the secret's page shows the system. Every change to the catalog, a team's systems or an agent's systems is audited and versioned. The team's former egress allow-list becomes one team-declared system | P1 |
 
 ## 7. Non-functional requirements
 
@@ -446,9 +490,9 @@ the REST API contract in `-restapi/api/openapi.yaml`.
 |---|---|---|
 | M0 Foundations | Repos, CI, schema v1, OpenAPI skeleton, auth middleware, `/v1/me` | All gates green; isolation and RLS tests pass |
 | M1 Teams & access | TEAM-1..5, ACC-1..3, CFG-1..3, reconciler for namespace/network/IAM; console S1–S3, T1, T6, V1; CLI `teams`, `members` | A service admin onboards a team end to end in dev |
-| M2 Agents & secrets | AGT-1..4, AGT-7, AGT-9, SEC-1..3, SEC-5, CFG-7; console T2–T4, T7, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
+| M2 Agents & secrets | AGT-1..4, AGT-7, AGT-9, SEC-1..3, SEC-5, CFG-7, EXT-1, EXT-2, EXT-4..6; console T2–T4, T7, T9, T10, S7, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
 | M3 Spend control | BUD-1..5, OPS-2; gateway; console T5, S4 | Load test proves the hard cap; alerts fire once per threshold |
-| M4 Production readiness | CFG-4, BUD-6/7, OPS-1/3, ACC-4, AGT-5/6/10, TEAM-8, CFG-5/6, S5, S6, T8 | DR rebuild drill passes; security review signed off |
+| M4 Production readiness | CFG-4, BUD-6/7, OPS-1/3, ACC-4, AGT-5/6/10, TEAM-8, EXT-3, EXT-7, CFG-5/6, S5, S6, T8 | DR rebuild drill passes; security review signed off |
 | Phase 2 | TEAM-7, BUD-8, AGT-8 (with the pool shared named role), P2 screen | First POC team runs and tears itself down |
 | Phase 3 | WO-1/2, P3 screen | One CVE remediated across repos within SLA |
 
@@ -462,10 +506,12 @@ the REST API contract in `-restapi/api/openapi.yaml`.
 | Q4 | One shared cluster per environment, or per business unit? | J | Shared to start; `cluster_id` on teams allows split later |
 | Q5 | Who may raise a ceiling during an incident (break-glass)? | J | Service admins only, audited, with an expiry |
 | Q6 | Who sets a team's allowed AWS accounts? | J | Service admins (the guardrail); team-admins pick targets inside it (TEAM-8) |
+| Q7 | Should OpenAI and OpenRouter ship switched off at the service level? | J | Yes: they bypass metering and caps (EXT-6), so a service admin turns them on deliberately |
 | R1 | Namespace isolation shares the kernel | Security | Isolation tier with dedicated nodes for regulated work; gVisor/Kata later |
 | R2 | Gateway is on the critical path for every model call | Platform | Multi-AZ, fail closed, latency SLO, load tested in M3 |
 | R3 | Model price changes make estimates drift | FinOps | Daily reconciliation and variance alerts; price sync |
 | R4 | TypeScript 7 tooling maturity (no ESLint type-aware rules yet) | Web | Biome for lint, `tsc` 7 for types; revisit when typescript-eslint supports TS 7 |
+| R5 | Every allowed external system is a path for data to leave (for example posting to Slack) | Security | Narrow per agent (EXT-4), scope credentials per agent, log denied and allowed egress per pod, review team-declared systems in the audit log |
 
 ## 11. Glossary
 

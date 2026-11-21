@@ -84,6 +84,10 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 .alert.warn{border-color:var(--warn-line);background:var(--warn-bg);color:var(--text)}
 .alert.err{border-color:var(--red);background:var(--err-bg);color:var(--text)}
 .alert .ic{font-weight:700}
+.tg{display:inline-block;width:34px;height:18px;border-radius:9px;background:#9aa5b1;position:relative;vertical-align:middle}
+.tg:after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff}
+.tg.on{background:var(--blue)}.tg.on:after{left:18px}.tg.dis{opacity:.45}
+.b-warn{color:var(--amber);border-color:var(--amber)}
 .alert.warn .ic{color:var(--amber)}.alert .ic{color:var(--blue)}.alert.err .ic{color:var(--red)}
 .tabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin-bottom:18px}
 .tabs span{padding:8px 16px;font-weight:700;color:var(--muted)}
@@ -132,7 +136,7 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <div class="search">Search teams, agents, secrets, work orders  [Alt+S]</div><div class="sp"></div>
 <span class="item">us-east-1 · prod</span><span class="item">🔔</span><span class="pill admin">Service admin</span>
 <span class="item">Priya Raman ▾</span></header>
-<div class="shell"><nav class="side"><h4>Agent Factory</h4><div class="grp">Service</div><a class="">Dashboard</a><a class="">Teams</a><a class="">Work orders</a><div class="grp">Governance</div><a class="">Budgets & ceilings</a><a class="">Cost reconciliation</a><a class="on">Audit log</a><div class="grp">Platform</div><a class="">Model catalog & pricing</a><a class="">Agent templates</a><a class="">Service settings</a><a class="">Export & import</a><hr><a class="dim">Documentation ↗</a><a class="dim">CLI reference ↗</a></nav><main class="main">
+<div class="shell"><nav class="side"><h4>Agent Factory</h4><div class="grp">Service</div><a class="">Dashboard</a><a class="">Teams</a><a class="">Work orders</a><div class="grp">Governance</div><a class="">Budgets & ceilings</a><a class="">Cost reconciliation</a><a class="on">Audit log</a><div class="grp">Platform</div><a class="">Model catalog & pricing</a><a class="">Agent templates</a><a class="">External systems</a><a class="">Service settings</a><a class="">Export & import</a><hr><a class="dim">Documentation ↗</a><a class="dim">CLI reference ↗</a></nav><main class="main">
 <div class="crumbs"><a>Agent Factory</a> › Audit log</div>
 <div class="card"><div class="ch"><div><h2>Audit events <span class="cnt">(1,000+)</span> <span class="info">Info</span></h2>
 <div class="sub">Append-only. Every API call that changes state, every denied call and every drift correction.</div></div>
