@@ -83,7 +83,9 @@ on another. Only service admins grant service admin.
 | Secrets: see names, references, usage | ✓ | ✓ | ✓ |
 | Configuration values (namespace and agent): create, edit, delete | ✓ | ✓ | |
 | Configuration values: see names, values, sources | ✓ | ✓ | ✓ |
-| Team's allowed AWS accounts: set the filter | ✓ | | |
+| Team's allowed AWS accounts: set the filter | ✓ | ✓ (when the team may manage it) | |
+| Let a team manage its own AWS accounts or declare external systems | ✓ | | |
+| Identity providers (Okta, Entra ID) for the service or a team | ✓ | | |
 | Agent IAM identity and cross-account roles: add, remove, verify | ✓ | ✓ | |
 | Allowed accounts, agent roles, link status, trust policies: see | ✓ | ✓ | ✓ |
 | External systems catalog: add custom systems, turn systems off for all teams, allow teams to declare their own | ✓ | | |
@@ -157,8 +159,7 @@ The mockups below are high-fidelity wireframes for review. Data is illustrative.
 
 **S1 · Service dashboard.** Fleet at a glance: team and agent counts, month-to-date spend against total
 budget, reconciler health, teams needing attention (budget pressure, expiring ephemeral teams, degraded
-agents, hard-cap blocks, reverted drift), top spenders, and a banner when daily CUR reconciliation finds
-variance over threshold.
+agents, hard-cap blocks, reverted drift) and top spenders.
 
 ![Service admin dashboard](docs/ui/01-admin-dashboard.png)
 
@@ -176,8 +177,8 @@ and isolation tier.
 ![Create team wizard](docs/ui/03-admin-create-team.png)
 
 **S4 · Model catalog and pricing.** Bedrock models teams may enable, with effective-dated prices that the
-gateway uses for real-time spend reservation. Prices sync from the AWS Price List and can be adjusted
-when reconciliation shows variance.
+gateway uses for real-time spend reservation. Service admins maintain the prices the organization has
+agreed; there is no automatic price sync (decision D10).
 
 ![Model catalog](docs/ui/04-admin-models.png)
 
@@ -190,8 +191,8 @@ correction, filterable by team, actor, action and outcome, downloadable as CSV.
 allowed-accounts filter: glob patterns over AWS Organizations account ids and names (`*` for every
 account, `444455556666` for one, `payments-*` for a group by name). Below it, the organization accounts
 that currently match, which pattern matched, and how many agent links point at each. Narrowing the filter
-disables links that fall outside it. Team-admins see the filter on their agents' AWS access tab but cannot
-change it (TEAM-8).
+disables links that fall outside it. A *Team manages its own accounts* switch lets the team's admins edit
+the filter themselves; while it is off, only service admins can, and team-admins see it read-only (TEAM-8).
 
 ![Team AWS account access](docs/ui/18-admin-team-aws-accounts.png)
 
@@ -384,7 +385,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | TEAM-5 | Team status shows reconcile phase, observed generation and conditions | P0 |
 | TEAM-6 | Optional isolation tier assigns a dedicated node pool | P1 |
 | TEAM-7 | Ephemeral teams require an expiry and lifetime budget, and are torn down automatically | P2 |
-| TEAM-8 | Each team has an allowed-accounts filter: the organization accounts its agents may assume roles in, as glob patterns (`*` and `?`) over AWS account ids and names, with `*` for all accounts. Empty (the default) means none. AFS mirrors the AWS Organizations account list hourly so names resolve to ids; suspended or closing accounts never match. The filter is enforced in the API, in the database, and in the team's IAM permissions boundary (`sts:AssumeRole` only on `arn:aws:iam::<matching-account>:role/*`). Narrowing it disables links outside it. *Recommendation, to confirm:* service admins set the filter and team-admins choose targets within it | P1 |
+| TEAM-8 | Each team has an allowed-accounts filter: the organization accounts its agents may assume roles in, as glob patterns (`*` and `?`) over AWS account ids and names, with `*` for all accounts. Empty (the default) means none. AFS mirrors the AWS Organizations account list hourly so names resolve to ids; suspended or closing accounts never match. The filter is enforced in the API, in the database, and in the team's IAM permissions boundary (`sts:AssumeRole` only on `arn:aws:iam::<matching-account>:role/*`). Narrowing it disables links outside it. Service admins decide per team whether the team manages its own filter: when it does, its team-admins set it; when it does not, service admins set it (D6). Team-admins choose link targets within it either way | P1 |
 
 ### 6.2 Agents and identity
 
@@ -420,7 +421,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | BUD-3 | IAM explicit deny on the team's Bedrock role when the cap is reached (backstop), removed on reset or increase | P0 |
 | BUD-4 | Alerts at configurable thresholds (default 50/80/100%), once per period per threshold | P0 |
 | BUD-5 | Usage by agent, model and day in near real time | P0 |
-| BUD-6 | Daily CUR reconciliation of Bedrock (by inference-profile tag), EKS compute (split cost allocation by namespace) and agent volumes and snapshots (by `afs-team-id` tag); variance alerts over 3% | P1 |
+| BUD-6 | Daily CUR reconciliation of Bedrock (by inference-profile tag), EKS compute (split cost allocation by namespace) and agent volumes and snapshots (by `afs-team-id` tag), reported alongside the gateway's figures. No variance alerting or price-drift management: the organization and teams manage model pricing outside AFS (D10) | P1 |
 | BUD-7 | Showback export by cost center | P1 |
 | BUD-8 | Lifetime budgets with expiry for ephemeral teams | P2 |
 
@@ -428,7 +429,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 
 | ID | Requirement | Pri |
 |---|---|---|
-| ACC-1 | SSO via the enterprise OIDC IdP: auth code + PKCE (web), device code (CLI) | P0 |
+| ACC-1 | SSO via OIDC: auth code + PKCE (web), device code (CLI). Okta (the default) and Microsoft Entra ID are both supported. Service admins configure the service's providers (one is the default) and can add a provider for one team, whose people then sign in to that team through it; group role bindings name the provider the group comes from. Client secrets are Secrets Manager references | P0 |
 | ACC-2 | Roles service admin, team-admin, team viewer, bound to users or IdP groups, per team | P0 |
 | ACC-3 | RBAC enforced in the REST API on every operation; `GET /v1/me` returns effective permissions for client UX | P0 |
 | ACC-4 | Team API keys (team-admin or viewer, max 90 days, hashed, shown once) | P1 |
@@ -453,6 +454,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | OPS-1 | Per-team log delivery to CloudWatch, S3, OTLP, Splunk HEC or Datadog | P1 |
 | OPS-2 | Events (team, agent, budget, drift, work order) published to EventBridge via a transactional outbox | P0 |
 | OPS-3 | Notification channels per team: Slack, email, webhook, Jira | P1 |
+| OPS-4 | Credential hygiene in logs: agent logs and external-traffic records pass through a redaction step before storage or delivery. Values that look like passwords, tokens or keys (and the values of the agent's own bound secrets) are replaced by a stable token (`[redacted:<hash prefix>]`), so repeats can be correlated without exposing the value. Agent sign-ins to external systems (connections to a system's sign-in endpoints) are logged as login events with the agent, system and time | P0 |
 
 ### 6.8 Work orders (phase 3)
 
@@ -536,23 +538,35 @@ the REST API contract in `-restapi/api/openapi.yaml`.
 | Phase 2 | TEAM-7, BUD-8, AGT-8 (with the pool shared named role), P2 screen | First POC team runs and tears itself down |
 | Phase 3 | WO-1/2, P3 screen | One CVE remediated across repos within SLA |
 
-## 10. Risks and open questions
+## 10. Decisions and risks
 
-| # | Item | Owner | Proposed answer |
+### 10.1 Decisions log
+
+Open questions answered by J on 2026-11-21. Each is reflected in the requirements above.
+
+| # | Question | Decision | Where |
 |---|---|---|---|
-| Q1 | Which IdP: Entra ID or Okta? Groups claim available? | J | Assume OIDC with groups claim; both supported |
-| Q2 | Network policy engine: VPC CNI or Cilium (FQDN egress)? | Platform | Cilium, for FQDN rules to SaaS endpoints |
-| Q3 | Agentic Teammates interface: CRD or Helm chart? | Agentic Teammates | Reconciler renders whichever; confirm before M2 |
-| Q4 | One shared cluster per environment, or per business unit? | J | Shared to start; `cluster_id` on teams allows split later |
-| Q5 | Who may raise a ceiling during an incident (break-glass)? | J | Service admins only, audited, with an expiry |
-| Q6 | Who sets a team's allowed AWS accounts? | J | Service admins (the guardrail); team-admins pick targets inside it (TEAM-8) |
-| Q7 | Should OpenAI and OpenRouter ship switched off at the service level? | J | Yes: they bypass metering and caps (EXT-6), so a service admin turns them on deliberately |
-| R1 | Namespace isolation shares the kernel | Security | Isolation tier with dedicated nodes for regulated work; gVisor/Kata later |
-| R2 | Gateway is on the critical path for every model call | Platform | Multi-AZ, fail closed, latency SLO, load tested in M3 |
-| R3 | Model price changes make estimates drift | FinOps | Daily reconciliation and variance alerts; price sync |
-| R4 | TypeScript 7 tooling maturity (no ESLint type-aware rules yet) | Web | Biome for lint, `tsc` 7 for types; revisit when typescript-eslint supports TS 7 |
-| R5 | Every allowed external system is a path for data to leave (for example posting to Slack) | Security | Narrow per agent (EXT-4), scope credentials per agent, log denied and allowed egress per pod, review team-declared systems in the audit log |
-| R6 | "Working" is inferred, so a busy agent that makes no model calls and uses little CPU can look idle | Platform | Agents report busy or idle on their status endpoint (Agentic Teammates contract); the CPU threshold is tunable; the definition is shown on every report |
+| D1 (Q1) | Which IdP? | Both Okta and Microsoft Entra ID, configurable at service level and per team. Okta is the default | ACC-1; schema `identity_providers` (000009) |
+| D2 (Q2) | Network policy engine? | Cilium, for FQDN egress rules | TEAM-3, EXT-5 |
+| D3 (Q3) | Agentic Teammates interface? | Kubernetes CRD. The reconciler renders the Agentic Teammates custom resources | Solution design §3.1 |
+| D4 (Q4) | Cluster topology? | One shared EKS cluster per environment (dev, stage, prod); `cluster_id` on teams allows a split later | Solution design §2.3 |
+| D5 (Q5) | Who may raise a ceiling during an incident? | Service admins only, audited, with an expiry | BUD-1 |
+| D6 (Q6) | Who sets a team's allowed AWS accounts? | Team management of the filter is optional per team. When service admins allow it, the team's admins set it; otherwise service admins must | TEAM-8, S6; schema `teams.may_manage_aws_accounts` (000009) |
+| D7 (Q7) | Ship OpenAI and OpenRouter switched off? | Yes | EXT-6 |
+| D8 | TypeScript runtime | Use Bun as the runtime (install, scripts, tests, dev server) where it is available, with Node.js 22 as the fallback | Solution design §12 |
+| D9 (R5) | Credentials for external systems | Credentials are per agent through Secrets, not a separate per-system enablement. Log agents' sign-ins to external systems, and redact (tokenize) passwords and other credentials wherever they appear in logs | OPS-4, SEC-3 |
+| D10 (R3) | Model price drift | The organization and teams manage model pricing outside AFS. No automatic price sync, variance alerting or price-drift management; CUR figures are shown beside gateway figures for reference | S4, BUD-6 |
+
+### 10.2 Risks
+
+| # | Risk | Owner | Response |
+|---|---|---|---|
+| R1 | Namespace isolation shares the kernel | Security | **Accepted** (J). Isolation tier with dedicated nodes for regulated work; gVisor/Kata later |
+| R2 | Gateway is on the critical path for every model call | Platform | **Accepted** (J). Multi-AZ, fail closed, latency SLO, load tested in M3 |
+| R3 | Model price changes make estimates drift | FinOps | **Closed** by D10: pricing is managed outside AFS |
+| R4 | TypeScript 7 tooling maturity (no ESLint type-aware rules yet) | Web | **Accepted** (J). Biome for lint, `tsc` 7 for types; revisit when typescript-eslint supports TS 7 |
+| R5 | Every allowed external system is a path for data to leave (for example posting to Slack) | Security | Narrow per agent (EXT-4); credentials per agent through Secrets (D9); log sign-ins and egress per pod; redact credentials in logs (OPS-4); review team-declared systems in the audit log |
+| R6 | "Working" is inferred, so a busy agent that makes no model calls and uses little CPU can look idle | Platform | Open. Agents report busy or idle on their status endpoint (Agentic Teammates contract); the CPU threshold is tunable; the definition is shown on every report |
 
 ## 11. Glossary
 

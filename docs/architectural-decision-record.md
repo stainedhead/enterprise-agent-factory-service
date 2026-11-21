@@ -156,3 +156,15 @@ Accepted, Proposed (needs review), Superseded.
   definition is shown with every report and agents are asked to report their own state. Spend with
   non-Bedrock model providers is not reported.
 
+## ADR-012 Answers to the PRD open questions
+
+- Status: Accepted (J, 2026-11-21)
+- Context: the PRD listed open questions Q1 to Q7 and risks R1 to R5.
+- Decision: Okta (default) and Entra ID at service and team level; Cilium; Agentic Teammates CRDs; one
+  shared cluster per environment; break-glass ceilings by service admins; teams manage their own AWS
+  account filter only when service admins allow it; non-Bedrock LLMs ship off; Bun as the TypeScript
+  runtime where available; credentials per agent through Secrets with sign-ins logged and credentials
+  redacted from logs; no model price-drift management. R1, R2 and R4 accepted.
+- Consequences: schema 000009 adds `identity_providers` and `teams.may_manage_aws_accounts`. The website
+  toolchain moves to Bun in its own change. BUD-6 loses variance alerts. See PRD §10.1 for the full log.
+
