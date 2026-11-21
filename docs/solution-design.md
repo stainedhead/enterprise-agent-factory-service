@@ -44,7 +44,7 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 | F6 | Budgets per team with alert thresholds and a hard cap enforced in near real time | J |
 | F7 | Budget and usage reporting: real time from the gateway, reconciled daily against CUR, including EKS compute | J |
 | F8 | Log delivery configuration per team (CloudWatch, S3, OTLP, Splunk/Datadog via HEC/API) | J |
-| F9 | Team configuration (allowed models, egress allow-list, resource quotas) and non-secret configuration values at namespace and agent level | J |
+| F9 | Team configuration (allowed models, external systems, resource quotas) and non-secret configuration values at namespace and agent level | J |
 | F10 | Three roles: service admin, team-admin, team viewer. Enforced in API, respected by CLI and web | J |
 | F11 | Desired state stored in RDS PostgreSQL, versioned and audited. Exportable as a portable bundle and importable in another account or cluster | J |
 | F12 | Reconciler applies stored state on startup and continuously, recovering from failure and reverting manual drift | J |
@@ -109,7 +109,7 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 
 - Namespace `afs-t-<slug>` with labels `afs.io/team-id`, Pod Security Admission `restricted`.
 - `ResourceQuota`, `LimitRange`.
-- `NetworkPolicy` default deny all ingress/egress, then allow DNS, allow egress to `afs-llm-gateway`, allow egress to the team's egress allow-list (FQDN rules with Cilium, or via an egress proxy).
+- `NetworkPolicy` default deny all ingress/egress, then allow DNS and egress to `afs-llm-gateway`. Per agent, a `CiliumNetworkPolicy` (selected by the `afs.io/agent-id` pod label) allows `toFQDNs` egress to the endpoints of every external system in `agent_external_access` with `disabled_at IS NULL` (service catalog entries that are on, minus team and agent opt-outs, plus the team's declared systems). Ports default to 443. Policy changes apply to running pods without a restart. Denied egress is logged through Hubble. Secrets whose `external_system_id` is off for an agent are left out of that agent's ExternalSecret.
 - ServiceAccounts per agent, EKS Pod Identity associations to the team's IAM role.
 - One StatefulSet with exactly one replica per agent (stable name, ServiceAccount and IAM session). There is no replica count: a team scales by adding agents.
 - One ConfigMap per agent (`agent-<name>-config`) holding its resolved configuration values (`afs.agent_config_resolved`), loaded with `envFrom` and mounted read-only at `/etc/afs/config` (one file per name). A change to a namespace value re-renders every ConfigMap that links to it and rolls those agents (a pod-template hash annotation), because environment variables only change on restart. A ConfigMap edited by hand is restored.
@@ -146,7 +146,7 @@ At higher scale the spend counters move to ElastiCache (Redis/Valkey) with Postg
 
 | Layer | Control |
 |---|---|
-| Network | Namespace per team. Default-deny `NetworkPolicy` for ingress and egress. Only DNS, gateway and explicit egress allow-list. No cross-namespace traffic. Admission policy (Kyverno or ValidatingAdmissionPolicy) blocks teams from creating their own NetworkPolicies, Services of type LoadBalancer/NodePort, or hostNetwork pods |
+| Network | Namespace per team. Default-deny `NetworkPolicy` for ingress and egress. Only DNS, gateway and the endpoints of the external systems each agent may use (service catalog → team → agent, each level only narrowing). No cross-namespace traffic. Admission policy (Kyverno or ValidatingAdmissionPolicy) blocks teams from creating their own NetworkPolicies, Services of type LoadBalancer/NodePort, or hostNetwork pods |
 | Compute | Pod Security Admission `restricted`. ResourceQuota/LimitRange. Optional dedicated Karpenter NodePool per sensitivity tier (taints + tolerations) for teams needing node-level isolation |
 | Kubernetes API | Agents' service accounts get no Kubernetes RBAC by default (`automountServiceAccountToken: false` except the projected gateway token). Humans have no kubectl access by default; team viewers can optionally get read-only via EKS access entries scoped to their namespace |
 | AWS IAM | One IAM role per team, ABAC by `afs-team-id` tag. Secrets, S3 prefixes, log groups and inference profiles are all tagged with the team id, and the policy only matches its own tag |
@@ -178,7 +178,10 @@ Role bindings can be granted to a user or to an IdP group (`subject_type = group
 | Action | service_admin | team_admin | team_viewer |
 |---|:-:|:-:|:-:|
 | Create / delete team | ✓ | | |
-| Update team settings, quotas, egress | ✓ | ✓ | |
+| Update team settings, quotas | ✓ | ✓ | |
+| External systems catalog: custom systems, service-level switch, allow a team to declare systems | ✓ | | |
+| External systems: turn off for team or agent; declare team systems when allowed | ✓ | ✓ | |
+| View effective external system access | ✓ | ✓ | ✓ |
 | Suspend / resume team | ✓ | ✓ | |
 | View team, status, events | ✓ | ✓ | ✓ |
 | Create / update / delete agents, scale, restart | ✓ | ✓ | |
@@ -261,7 +264,7 @@ Reserve → invoke → settle, as in section 3.1. Thresholds emit `budget.thresh
 - `config_revisions`: a trigger snapshots every change to versioned tables (who, when, full JSON), giving history and rollback ("restore revision N").
 - `audit_log`: append-only (UPDATE/DELETE revoked from the app role and blocked by trigger).
 - **Backups:** RDS automated backups with PITR, daily snapshot copied cross-region and cross-account (AWS Backup vault with vault lock).
-- **Export bundle:** `POST /v1/exports` produces a versioned, SHA-256-checksummed JSON (or YAML) document with `schemaVersion`, all teams, agents (including volume settings and configuration values), namespace configuration values, agent IAM identity and cross-account links with their external IDs, each team's allowed-accounts filter, members, bindings, budgets, configuration, secret *references* and each agent's latest volume *snapshot reference*. Import can restore volumes from those snapshots once they are shared with or copied to the target account and region. Stored in S3 and downloadable.
+- **Export bundle:** `POST /v1/exports` produces a versioned, SHA-256-checksummed JSON (or YAML) document with `schemaVersion`, all teams, agents (including volume settings and configuration values), namespace configuration values, agent IAM identity and cross-account links with their external IDs, each team's allowed-accounts filter, the external systems catalog, team-declared systems and opt-outs, members, bindings, budgets, configuration, secret *references* and each agent's latest volume *snapshot reference*. Import can restore volumes from those snapshots once they are shared with or copied to the target account and region. Stored in S3 and downloadable.
 - **Import:** `POST /v1/imports` with a mapping file (old account id → new, ARN rewrites, cluster id), dry-run by default, showing a plan (create/update/skip) before apply. Secrets must already exist (replicated via Secrets Manager multi-region replication or recreated) in the target account.
 - **Restart behavior:** the reconciler's startup full-reconcile re-applies everything. A brand-new cluster plus a restored DB converges to the full environment with no manual steps.
 
@@ -413,4 +416,5 @@ enterprise-agent-factory-service/              docs-only root: PRD, this design,
 | Secrets | Secrets Manager refs + ESO | Store encrypted values in DB | Keeps AFS out of the secret blast radius |
 | CLI language | Go | Python (like AWS CLI) | Single static binary, shares API types |
 | Network policy | Cilium (recommended) | VPC CNI network policy | FQDN egress rules for SaaS endpoints |
+| Egress control | External systems catalog with service → team → agent opt-outs, rendered as per-agent FQDN policy | Free-form host allow-list per team | Named, documented, centrally governed services; per-agent least privilege; one place to see who can reach what |
 | Cross-account access | Dedicated agent role + role links with external IDs, inside a per-team glob filter | Shared team role trusted by every target account | Least privilege per agent, CloudTrail attribution in the target account, and a guardrail central teams control |

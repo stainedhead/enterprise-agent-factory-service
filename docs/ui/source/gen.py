@@ -92,6 +92,10 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 .alert.warn{border-color:var(--warn-line);background:var(--warn-bg);color:var(--text)}
 .alert.err{border-color:var(--red);background:var(--err-bg);color:var(--text)}
 .alert .ic{font-weight:700}
+.tg{display:inline-block;width:34px;height:18px;border-radius:9px;background:#9aa5b1;position:relative;vertical-align:middle}
+.tg:after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff}
+.tg.on{background:var(--blue)}.tg.on:after{left:18px}.tg.dis{opacity:.45}
+.b-warn{color:var(--amber);border-color:var(--amber)}
 .alert.warn .ic{color:var(--amber)}.alert .ic{color:var(--blue)}.alert.err .ic{color:var(--red)}
 .tabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin-bottom:18px}
 .tabs span{padding:8px 16px;font-weight:700;color:var(--muted)}
@@ -151,7 +155,7 @@ def admin_nav(on):
         ("grp", "Governance"), ("budgets", "Budgets & ceilings"), ("costs", "Cost reconciliation"),
         ("audit", "Audit log"),
         ("grp", "Platform"), ("models", "Model catalog & pricing"), ("templates", "Agent templates"),
-        ("settings", "Service settings"), ("export", "Export & import"),
+        ("external", "External systems"), ("settings", "Service settings"), ("export", "Export & import"),
     ]
     return nav("Agent Factory", items, on)
 
@@ -160,7 +164,7 @@ def team_nav(on, role):
     items = [
         ("grp", "Team"), ("overview", "Overview"), ("agents", "Agents"), ("members", "Members & access"),
         ("grp", "Configuration"), ("secrets", "Secrets"), ("config", "Configuration values"), ("identities", "Agent identities"),
-        ("network", "Network egress"), ("models", "Models"), ("logs", "Log delivery"),
+        ("network", "External systems"), ("models", "Models"), ("logs", "Log delivery"),
         ("notify", "Notifications"),
         ("grp", "Cost"), ("budget", "Budget & usage"),
         ("grp", "History"), ("activity", "Activity & audit"), ("revisions", "Config revisions"),
@@ -643,6 +647,101 @@ page("18-admin-team-aws-accounts", "admin", admin_nav("teams"), f"""
 <tr><td class="mono">777788889999</td><td>shared-tools</td><td class="mono">777788889999</td><td>1</td><td>1 of 1</td><td>{st('ok','Active')}</td></tr>
 </table></div>
 <div class="card"><div class="cb"><div class="k small muted">Equivalent CLI</div><div class="code">afs teams update-team --team-id team_01JD3Z… --allowed-aws-accounts "payments-*" 777788889999</div></div></div>
+""")
+
+def tg(on, dis=False):
+    return f'<span class="tg{" on" if on else ""}{" dis" if dis else ""}"></span>'
+
+CAT = [('Atlassian (Jira and Confluence)', 'Developer tools', '*.atlassian.net, api.atlassian.com +1', True, 14, 'Built in'), ('GitHub', 'Developer tools', 'github.com, api.github.com +2', True, 18, 'Built in'), ('Microsoft Outlook', 'Email', 'graph.microsoft.com, outlook.office365.com +1', True, 9, 'Built in'), ('Microsoft Teams', 'Collaboration', 'graph.microsoft.com +2', True, 11, 'Built in'), ('Microsoft Azure', 'Cloud', 'management.azure.com +2', True, 3, 'Built in'), ('Google Workspace and Cloud', 'Cloud', '*.googleapis.com, accounts.google.com', True, 5, 'Built in'), ('Slack', 'Collaboration', 'slack.com, *.slack.com', True, 12, 'Built in'), ('Okta', 'Identity', '*.okta.com, *.oktapreview.com', True, 4, 'Built in'), ('OpenAI', 'LLM · not Bedrock', 'api.openai.com', False, 0, 'Built in'), ('OpenRouter', 'LLM · not Bedrock', 'openrouter.ai', False, 0, 'Built in'), ('Internal artifact registry', 'Developer tools', 'nexus.corp.example:8443', True, 16, 'Custom')]
+
+def catrow(n, c, e, on, teams, src):
+    unm = ' <span class="badge b-warn" style="white-space:nowrap">Unmetered</span>' if "LLM" in c else ""
+    state = st('ok','On for all teams') if on else st('pend','Off for all teams')
+    return f'<tr><td><span class="cb2"></span></td><td><a>{n}</a>{unm}</td><td>{c}</td><td class="mono small">{e}</td><td>{src}</td><td>{teams if on else "—"}</td><td>{tg(on)} {state}</td></tr>'
+
+
+page("19-admin-external-systems", "admin", admin_nav("external"), f"""
+<div class="crumbs"><a>Agent Factory</a> › External systems</div>
+<div class="alert warn"><span class="ic">⚠</span><div><b>Model providers other than Bedrock are not metered.</b> Calls to OpenAI or OpenRouter go straight from the agent to the provider. They do not pass through the Agent Factory gateway, are not counted in team budgets and are not stopped by hard caps. Turn them on only where the team pays and controls that spend another way.</div></div>
+<div class="card"><div class="ch"><div><h2>Service catalog <span class="cnt">(11)</span> <span class="info">Info</span></h2>
+<div class="sub">Outside services agents may reach. Every team gets each system that is on here, on by default; team-admins and agents can only turn systems off. Each system's endpoints become the agents' network egress rules.</div></div>
+<div class="btns"><span class="btn dd">Actions</span><span class="btn p">Add custom system</span></div></div>
+<div class="tools"><div class="filter">🔍 Find systems</div><div class="pager">‹ <b>1</b> › ⚙</div></div>
+<table><tr><th></th><th>System</th><th>Category</th><th>Endpoints</th><th>Source</th><th>Teams using</th><th>Service level</th></tr>
+{"".join(catrow(*r) for r in CAT)}
+</table></div>
+<div class="card"><div class="ch"><div><h2>Team-declared systems</h2><div class="sub">Teams you allow can add systems they depend on, with an owner, a purpose and documentation. Those systems apply to that team only.</div></div><div class="btns"><span class="btn">Manage per team</span></div></div><div class="cb"><div class="grid g3">
+<div class="kv"><div class="k">Teams allowed to declare systems</div><div class="v">3 of 12 · payments-factory, search-relevance, data-platform</div></div>
+<div class="kv"><div class="k">Systems declared</div><div class="v">7 across 3 teams</div></div>
+<div class="kv"><div class="k">Default for new teams</div><div class="v">Not allowed</div></div></div></div></div>
+""")
+
+TEAMSYS = [
+ ("GitHub", "Service catalog", "github.com, api.github.com +2", True, False, "6 of 6", "github-bot-key"),
+ ("Atlassian (Jira and Confluence)", "Service catalog", "*.atlassian.net +2", True, False, "5 of 6", "jira-api-token"),
+ ("Slack", "Service catalog", "slack.com, *.slack.com", True, False, "4 of 6", "slack-bot-token"),
+ ("Microsoft Outlook", "Service catalog", "graph.microsoft.com +2", False, False, "—", "—"),
+ ("Microsoft Azure", "Service catalog", "management.azure.com +2", False, False, "—", "—"),
+ ("OpenAI", "Service catalog", "api.openai.com", False, True, "—", "—"),
+ ("PagerDuty", "Team-declared", "api.pagerduty.com, events.pagerduty.com", True, False, "1 of 6", "pagerduty-token"),
+]
+def teamrow(n, src, e, on, svcoff, used, cred):
+    if svcoff:
+        state = f'{tg(False, True)} {st("pend","Off for all teams")}'
+    else:
+        state = f'{tg(on)} {st("ok","On") if on else st("pend","Off for this team")}'
+    badge = '<span class="badge b-blue" style="white-space:nowrap">Team-declared</span>' if src == "Team-declared" else '<span class="badge b-per" style="white-space:nowrap">Service catalog</span>'
+    unm = ' <span class="badge b-warn">Unmetered</span>' if n == "OpenAI" else ""
+    return f'<tr><td><a>{n}</a>{unm}</td><td>{badge}</td><td class="mono small">{e}</td><td>{used}</td><td class="mono small">{cred}</td><td>{state}</td></tr>'
+
+declare_modal = """<div class="modalwrap"><div class="modal" style="width:680px"><div class="mh">Declare an external system<span class="muted">✕</span></div><div class="mb">
+<div class="grid g2"><div class="field"><label>Name</label><div class="input">PagerDuty</div></div>
+<div class="field"><label>Category</label><div class="input">Other ▾</div></div></div>
+<div class="field"><label>Endpoints</label><div class="hint">Hosts the agents may reach, one per line. <span class="mono">*.domain</span> and <span class="mono">:port</span> are allowed; port 443 by default.</div><div class="input mono" style="height:auto;line-height:1.7">api.pagerduty.com<br>events.pagerduty.com</div></div>
+<div class="grid g2"><div class="field"><label>Owner</label><div class="hint">Who answers for this dependency</div><div class="input">payments-sre</div></div>
+<div class="field"><label>Documentation</label><div class="input mono small">https://developer.pagerduty.com/api-reference</div></div></div>
+<div class="field"><label>Purpose</label><div class="input">Agents open and resolve incidents for payments services</div></div>
+<div class="field"><label>Agents</label><div class="hint">On for every agent in the team by default. Turn it off per agent on the agent's page.</div></div>
+</div><div class="mf"><span class="btn" style="border:0">Cancel</span><span class="btn p">Declare system</span></div></div></div>"""
+
+page("20-ta-external-systems", "ta", team_nav("network", "ta"), f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › External systems</div>
+<div class="card"><div class="ch"><div><h2>External systems <span class="cnt">(12)</span> <span class="info">Info</span></h2>
+<div class="sub">Services this team's agents may reach. Systems from the service catalog are on unless you turn them off here; agents can be narrowed further on their own page. Turning a system off removes its endpoints from the agents' egress rules and stops delivering the secrets that belong to it.</div></div>
+<div class="btns"><span class="btn dd">Actions</span><span class="btn p">Declare system</span></div></div>
+<div class="tools"><div class="filter">🔍 Find systems</div><div class="pager">‹ <b>1</b> 2 › ⚙</div></div>
+<table><tr><th>System</th><th>Source</th><th>Endpoints</th><th>Agents with access</th><th>Credentials</th><th>This team</th></tr>
+{"".join(teamrow(*r) for r in TEAMSYS)}
+</table></div>
+""", modal=declare_modal)
+
+AGSYS = [
+ ("GitHub", "Service catalog", True, "", "github-bot-key"),
+ ("Atlassian (Jira and Confluence)", "Service catalog", True, "", "jira-api-token"),
+ ("Slack", "Service catalog", False, "Turned off for this agent by marcus.chen: reviews post to GitHub only", "—"),
+ ("PagerDuty", "Team-declared", False, "Turned off for this agent", "—"),
+ ("Google Workspace and Cloud", "Service catalog", True, "", "—"),
+ ("Microsoft Outlook", "Service catalog", None, "Off for this team", "—"),
+ ("OpenAI", "Service catalog", None, "Off for all teams (service admins)", "—"),
+]
+def agrow(n, src, on, note, cred):
+    if on is None:
+        state = f'{tg(False, True)} {st("pend","Off above")}'
+    else:
+        state = f'{tg(on)} {st("ok","On") if on else st("pend","Off")}'
+    return f'<tr><td>{n}</td><td class="small">{src}</td><td>{state}</td><td class="small muted">{note}</td><td class="mono small">{cred}</td></tr>'
+
+page("21-ta-agent-external-systems", "ta", team_nav("agents", "ta"), f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › <a>Agents</a> › reviewer-bot</div>
+<div class="hdr"><div><h1>reviewer-bot</h1><div class="desc">{st('ok','Running')} · claude-opus · omp-review</div></div><div class="btns"><span class="btn">Restart</span><span class="btn">Pause</span><span class="btn p">Edit</span></div></div>
+<div class="tabs"><span>Details</span><span>Configuration</span><span>Secrets & identity</span><span class="on">External systems</span><span>Usage</span><span>Logs</span><span>Revisions</span></div>
+<div class="card"><div class="ch"><div><h2>External systems <span class="cnt">(5 of 12 on)</span> <span class="info">Info</span></h2>
+<div class="sub">What this agent can reach. It gets every system its team has on; turn off the ones it does not need. Systems turned off above (by the team or the service) cannot be turned on here.</div></div>
+<div class="btns"><span class="btn">View egress rules</span><span class="btn p">Save changes</span></div></div>
+<table><tr><th>System</th><th>Source</th><th>This agent</th><th>Note</th><th>Credentials delivered</th></tr>
+{"".join(agrow(*r) for r in AGSYS)}
+</table></div>
+<div class="alert"><span class="ic">ⓘ</span><div class="small">Egress is enforced by the network policy for this agent's pod: DNS, the Agent Factory LLM gateway, and the endpoints of the systems that are on. Everything else is blocked and logged.</div></div>
 """)
 
 page("12-tv-team-overview", "tv", team_nav("overview", "tv"), team_overview("tv"))

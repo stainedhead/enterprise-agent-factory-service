@@ -119,3 +119,23 @@ Accepted, Proposed (needs review), Superseded.
   Cross-account access needs one manual step in each target account (the trust policy), and links stay
   *Pending trust* until it is done. An agent with links cannot switch back to the shared team role.
   Export bundles carry links and filters; import maps account ids and re-verifies.
+
+## ADR-010 External systems catalog with service, team and agent levels
+
+- Status: Proposed (from J's PRD review, 2026-11-21)
+- Context: agents reach outside services (Atlassian, GitHub, Microsoft 365, Google, Slack, Okta, other
+  model providers). J asked for a list that service admins can switch off for every team, that teams and
+  agents inherit (on by default) and can only narrow, that service admins can extend with new endpoints,
+  and that teams can add to when allowed, so they declare and document what their work depends on.
+- Decision: one table of external systems. Service-level entries (built-in or custom) are written by
+  service admins; team-declared entries need the team's `may_add_external_systems` right (set by service
+  admins), an owner and a purpose. Default-on opt-out rows switch a system off for a team or an agent.
+  The view `agent_external_access` gives each agent's effective access and the level that turned a system
+  off. The reconciler renders each agent's allowed endpoints into a per-agent Cilium FQDN policy and
+  withholds secrets tied to systems that are off. The free-form `team_egress_rules` table is folded in as
+  one team-declared system per team. Non-Bedrock model providers ship switched off and are marked
+  unmetered: their calls bypass the gateway, and budgets for them are out of scope (J, 2026-11-21).
+- Consequences: one mechanism for egress, visible to viewers and audited. Network enforcement is per host,
+  so systems that share a host (Outlook and Teams on `graph.microsoft.com`) cannot be separated by the
+  network alone; credentials scope them. Enabling OpenAI or OpenRouter creates spend AFS does not see.
+
