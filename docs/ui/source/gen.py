@@ -92,6 +92,23 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 .alert.warn{border-color:var(--warn-line);background:var(--warn-bg);color:var(--text)}
 .alert.err{border-color:var(--red);background:var(--err-bg);color:var(--text)}
 .alert .ic{font-weight:700}
+.rbar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg span{padding:5px 12px;font-size:13px;border-right:1px solid var(--line)}.seg span:last-child{border-right:0}
+.seg span.on{background:var(--blue);color:#fff;font-weight:700}
+.sb{display:flex;align-items:flex-end;gap:5px;height:170px;border-bottom:1px solid var(--line);padding-top:8px}
+.sb .c{flex:1;display:flex;flex-direction:column-reverse}
+.sb .c i{display:block}
+.lg{display:flex;gap:16px;font-size:12.5px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
+.lg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.hm{display:grid;grid-template-columns:150px repeat(24,1fr);gap:2px;font-size:11.5px;align-items:center}
+.hm b{font-weight:400;color:var(--muted);text-align:center}
+.hm .n{font-size:12.5px;white-space:nowrap;overflow:hidden}
+.hm i{display:block;height:18px;border-radius:2px}
+.strip{display:flex;height:22px;border-radius:4px;overflow:hidden}
+.strip i{display:block;height:100%}
+.kpi .big{font-size:26px}
+.num{text-align:right;font-variant-numeric:tabular-nums}
 .tg{display:inline-block;width:34px;height:18px;border-radius:9px;background:#9aa5b1;position:relative;vertical-align:middle}
 .tg:after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff}
 .tg.on{background:var(--blue)}.tg.on:after{left:18px}.tg.dis{opacity:.45}
@@ -152,7 +169,7 @@ USER = {"admin": "Priya Raman", "ta": "Marcus Chen", "tv": "Dana Ortiz"}
 def admin_nav(on):
     items = [
         ("grp", "Service"), ("dash", "Dashboard"), ("teams", "Teams"), ("wo", "Work orders"),
-        ("grp", "Governance"), ("budgets", "Budgets & ceilings"), ("costs", "Cost reconciliation"),
+        ("grp", "Governance"), ("budgets", "Budgets & ceilings"), ("reports", "Reports & analytics"), ("costs", "Cost reconciliation"),
         ("audit", "Audit log"),
         ("grp", "Platform"), ("models", "Model catalog & pricing"), ("templates", "Agent templates"),
         ("external", "External systems"), ("settings", "Service settings"), ("export", "Export & import"),
@@ -166,7 +183,7 @@ def team_nav(on, role):
         ("grp", "Configuration"), ("secrets", "Secrets"), ("config", "Configuration values"), ("identities", "Agent identities"),
         ("network", "External systems"), ("models", "Models"), ("logs", "Log delivery"),
         ("notify", "Notifications"),
-        ("grp", "Cost"), ("budget", "Budget & usage"),
+        ("grp", "Cost"), ("budget", "Budget & usage"), ("reports", "Reports"),
         ("grp", "History"), ("activity", "Activity & audit"), ("revisions", "Config revisions"),
     ]
     if role == "ta":
@@ -742,6 +759,158 @@ page("21-ta-agent-external-systems", "ta", team_nav("agents", "ta"), f"""
 {"".join(agrow(*r) for r in AGSYS)}
 </table></div>
 <div class="alert"><span class="ic">ⓘ</span><div class="small">Egress is enforced by the network policy for this agent's pod: DNS, the Agent Factory LLM gateway, and the endpoints of the systems that are on. Everything else is blocked and logged.</div></div>
+""")
+
+
+MODELS = [("Claude Opus", "#3f51b5"), ("Claude Sonnet", "#688ae8"), ("Claude Haiku", "#9ab4f0"), ("Nova Pro", "#c33d69"), ("EKS compute", "#b0bec5")]
+def stacked(days, scale):
+    import math
+    cols = []
+    for i in range(days):
+        w = 0.55 + 0.45 * math.sin(i / 2.3) ** 2 + (0.25 if i % 7 in (5, 6) else 0) * -1
+        parts = [w * 0.42, w * 0.33, w * 0.08, w * 0.05, 0.12]
+        cols.append('<div class="c">' + "".join(f'<i style="height:{int(v*scale)}px;background:{c}"></i>' for v, (_, c) in zip(parts, MODELS)) + '</div>')
+    return '<div class="sb">' + "".join(cols) + '</div><div class="lg">' + "".join(f'<span><i style="background:{c}"></i>{n}</span>' for n, c in MODELS) + '<span>Nov 1 → Nov 20 · daily</span></div>'
+
+def heat(rows):
+    out = ['<div class="hm"><span></span>' + "".join(f"<b>{h:02d}</b>" if h % 3 == 0 else "<b></b>" for h in range(24))]
+    for name, pattern in rows:
+        cells = []
+        for h in range(24):
+            v = pattern(h)
+            col = {0: "#eef1f4", 1: "#c6d4f6", 2: "#7d9de9", 3: "#2f5fd0", -1: "#d5d8dc"}[v]
+            cells.append(f'<i style="background:{col}"></i>')
+        out.append(f'<span class="n">{name}</span>' + "".join(cells))
+    out.append('</div><div class="lg"><span><i style="background:#2f5fd0"></i>Working most of the hour</span><span><i style="background:#7d9de9"></i>Working part</span><span><i style="background:#c6d4f6"></i>Mostly idle</span><span><i style="background:#eef1f4;border:1px solid #ccc"></i>Idle</span><span><i style="background:#d5d8dc"></i>Paused</span><span>Today, hourly (UTC)</span></div>')
+    return "".join(out)
+
+def rangebar(extra=""):
+    return f'<div class="rbar"><div class="seg"><span>24 h</span><span>7 d</span><span class="on">Month to date</span><span>30 d</span><span>90 d</span><span>Custom</span></div>{extra}<span class="sel">Model: all ▾</span><span class="sel">Group by: model ▾</span><span style="flex:1"></span><span class="btn">Download CSV</span><span class="btn">Schedule report</span></div>'
+
+TEAMS_R = [
+ ("payments-factory", 31880, 40000, 18.4, "11 of 12", 64, "2 (avg 3.1 h)", 1),
+ ("search-relevance", 22410, 30000, 12.1, "7 of 9", 58, "2 (avg 5.4 h)", 0),
+ ("mobile-platform", 15000, 15000, 9.8, "0 of 8", 0, "— (blocked by cap)", 0),
+ ("data-platform", 9120, 20000, 6.2, "5 of 10", 41, "5 (avg 9.8 h)", 4),
+ ("cve-2026-41873-swarm", 1830, 5000, 2.4, "24 of 24", 92, "0", 0),
+]
+def team_rows():
+    out = []
+    for n, sp, bud, tok, act, util, idle, den in TEAMS_R:
+        pct = round(100 * sp / bud)
+        cls = "r" if pct >= 100 else ("w" if pct >= 80 else "")
+        den_s = f'<span class="warn">{den}</span>' if den else "0"
+        out.append(f'<tr><td><a>{n}</a></td><td class="num">${sp:,}</td><td style="min-width:150px">{bar(pct, cls)}<span class="small muted">{pct}% of ${bud:,}</span></td><td class="num">{tok} B</td><td>{act}</td><td class="num">{util}%</td><td>{idle}</td><td class="num">{den_s}</td></tr>')
+    return "".join(out)
+
+page("22-admin-reports", "admin", admin_nav("reports"), f"""
+<div class="crumbs"><a>Agent Factory</a> › Reports & analytics</div>
+<div class="hdr"><div><h1>Reports & analytics <span class="info">Info</span></h1><div class="desc">Every team. Spend and tokens from the gateway in near real time, reconciled daily with AWS billing (CUR); compute from EKS split cost allocation.</div></div></div>
+{rangebar('<span class="sel">Team: all ▾</span>')}
+<div class="grid g4 kpi">
+<div class="card"><div class="cb"><div class="k small muted">Spend, month to date</div><div class="big">$80,240</div>{bar(70)}<div class="small muted" style="margin-top:6px">70% of $114,000 total budgets · forecast $118,900</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Model calls · tokens</div><div class="big">1.92 M</div><div class="small muted">48.9 B tokens · 71% input, 9% cache reads</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Agents now</div><div class="big">47 working</div><div class="small muted">9 idle · 8 blocked by cap · 3 paused</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Utilization, month to date</div><div class="big">61%</div><div class="small muted">of running time spent working · 22 agents idle over 4 h today</div></div></div>
+</div>
+<div class="card"><div class="ch"><h2>Daily cost by Bedrock model</h2><span class="sel">Show: cost ▾</span></div><div class="cb">{stacked(20, 120)}</div></div>
+<div class="card"><div class="ch"><div><h2>Teams <span class="cnt">(12)</span></h2><div class="sub">Select a team to open its report. Denied = blocked connections to external systems this month.</div></div></div>
+<table><tr><th>Team</th><th class="num">Spend</th><th>Budget</th><th class="num">Tokens</th><th>Working now</th><th class="num">Utilization</th><th>Idle over 1 h</th><th class="num">Denied egress</th></tr>{team_rows()}</table></div>
+<div class="grid g2">
+<div class="card"><div class="ch"><h2>Cost by Bedrock model</h2></div><table><tr><th>Model</th><th class="num">Calls</th><th class="num">Input tok</th><th class="num">Output tok</th><th class="num">Cost</th><th class="num">Share</th></tr>
+<tr><td>Claude Opus</td><td class="num">412 K</td><td class="num">9.8 B</td><td class="num">1.9 B</td><td class="num">$34,110</td><td class="num">43%</td></tr>
+<tr><td>Claude Sonnet</td><td class="num">1.08 M</td><td class="num">24.1 B</td><td class="num">4.2 B</td><td class="num">$26,920</td><td class="num">34%</td></tr>
+<tr><td>Claude Haiku</td><td class="num">380 K</td><td class="num">6.7 B</td><td class="num">1.1 B</td><td class="num">$6,410</td><td class="num">8%</td></tr>
+<tr><td>Amazon Nova Pro</td><td class="num">48 K</td><td class="num">0.9 B</td><td class="num">0.2 B</td><td class="num">$3,980</td><td class="num">5%</td></tr>
+<tr><td class="muted">EKS compute and storage</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">$8,820</td><td class="num">11%</td></tr></table></div>
+<div class="card"><div class="ch"><div><h2>External systems traffic</h2><div class="sub">Connections this month, all teams</div></div></div><table><tr><th>System</th><th class="num">Connections</th><th class="num">Data out / in</th><th class="num">Errors</th><th class="num">Denied</th></tr>
+<tr><td>GitHub</td><td class="num">1.24 M</td><td class="num">38 / 412 GB</td><td class="num">0.4%</td><td class="num">0</td></tr>
+<tr><td>Atlassian (Jira and Confluence)</td><td class="num">310 K</td><td class="num">4 / 61 GB</td><td class="num">1.1%</td><td class="num">12</td></tr>
+<tr><td>Slack</td><td class="num">96 K</td><td class="num">1 / 3 GB</td><td class="num">0.2%</td><td class="num">31</td></tr>
+<tr><td>OpenAI <span class="badge b-warn">Unmetered</span></td><td class="num">0</td><td class="num">—</td><td class="num">—</td><td class="num"><span class="warn">118</span></td></tr>
+<tr><td class="muted">Hosts in no system</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num"><span class="warn">402</span> <a class="small">Review</a></td></tr></table></div>
+</div>
+<div class="alert warn"><span class="ic">⚠</span><div class="small">Spend with model providers other than Bedrock (OpenAI, OpenRouter) is not metered and does not appear in these figures. Their traffic does appear under External systems.</div></div>
+""")
+
+AG = [("reviewer-bot", "Working", "ok", "reviewing PR #482", 78, "—", 12980, "Claude Opus"),
+      ("ledger-maintainer", "Working", "ok", "migrating ledger tests", 71, "—", 9410, "Claude Sonnet"),
+      ("test-gap-finder", "Idle", "pend", "", 44, "3 h 10 min", 5760, "Claude Sonnet"),
+      ("dependency-updater", "Idle", "pend", "", 22, "11 h 40 min", 2120, "Claude Haiku"),
+      ("incident-scribe", "Paused", "pend", "", 0, "—", 1610, "Claude Haiku"),
+      ("release-notes-bot", "Working", "ok", "drafting 2026.11.3 notes", 35, "—", 980, "Claude Sonnet")]
+def ag_rows():
+    out = []
+    for n, stt, k, note, util, idle, cost, model in AG:
+        note_s = f'<div class="small muted">{note}</div>' if note else ""
+        out.append(f'<tr><td><a>{n}</a></td><td>{st(k, stt)}{note_s}</td><td style="min-width:120px">{bar(util)}<span class="small muted">{util}%</span></td><td>{idle}</td><td>{model}</td><td class="num">${cost:,}</td></tr>')
+    return "".join(out)
+
+def pat(kind):
+    def f(h):
+        if kind == "busy": return 3 if 7 <= h <= 21 else (2 if h in (6, 22) else 1)
+        if kind == "office": return 3 if 9 <= h <= 17 else 0
+        if kind == "burst": return 3 if h in (2, 3, 14) else (1 if h in (4, 15) else 0)
+        if kind == "nightly": return 3 if h in (1, 2) else 0
+        if kind == "paused": return -1
+        return 2 if 10 <= h <= 16 else 0
+    return f
+
+page("23-ta-team-reports", "ta", team_nav("reports", "ta"), f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › Reports</div>
+<div class="hdr"><div><h1>Reports <span class="info">Info</span></h1><div class="desc">payments-factory · namespace afs-t-payments-factory</div></div></div>
+<div class="tabs"><span class="on">Budget & usage</span><span>Activity</span><span>Models</span><span>External systems</span></div>
+{rangebar('<span class="sel">Agent: all ▾</span>')}
+<div class="grid g4 kpi">
+<div class="card"><div class="cb"><div class="k small muted">Spend vs budget</div><div class="big">$31,880</div>{bar(80,'w')}<div class="small muted" style="margin-top:6px">80% of $40,000 · forecast to cap Nov 27</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Calls · tokens</div><div class="big">412 K</div><div class="small muted">18.4 B tokens · cost per call $0.077</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Utilization</div><div class="big">64%</div><div class="small muted">3 working now · 2 idle · 1 paused</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Idle time today</div><div class="big">14.9 h</div><div class="small muted">across 6 agents · longest 11 h 40 min</div></div></div>
+</div>
+<div class="grid g2">
+<div class="card"><div class="ch"><h2>Daily cost by model</h2></div><div class="cb">{stacked(20, 95)}</div></div>
+<div class="card"><div class="ch"><h2>Activity today</h2><span class="sel">Agents: all ▾</span></div><div class="cb">{heat([("reviewer-bot", pat("busy")), ("ledger-maintainer", pat("office")), ("test-gap-finder", pat("burst")), ("dependency-updater", pat("nightly")), ("incident-scribe", pat("paused")), ("release-notes-bot", pat("x"))])}</div></div>
+</div>
+<div class="card"><div class="ch"><div><h2>Agents <span class="cnt">(6)</span></h2><div class="sub">Working: the agent made a model call, reported itself busy, or used CPU above the idle threshold in the window.</div></div></div>
+<table><tr><th>Agent</th><th>Now</th><th>Utilization</th><th>Idle for</th><th>Top model</th><th class="num">Cost</th></tr>{ag_rows()}</table></div>
+""")
+
+TR = [("GitHub", "Service catalog", "8,210", "1.9 / 22.4 GB", "0.3%", "0", ""),
+      ("Atlassian (Jira and Confluence)", "Service catalog", "1,340", "0.2 / 3.1 GB", "1.4%", "0", ""),
+      ("Slack", "Service catalog", "—", "—", "—", "6", "Off for this agent"),
+      ("Google Workspace and Cloud", "Service catalog", "212", "0.1 / 0.4 GB", "0%", "0", ""),
+      ("api.openai.com", "OpenAI", "—", "—", "—", "14", "Off at service level"),
+      ("paste.example", "No system", "—", "—", "—", "3", "Not in the catalog")]
+def tr_rows():
+    out = []
+    for n, src, c, b, e, d, why in TR:
+        d_s = f'<span class="warn">{d}</span>' if d != "0" else d
+        out.append(f'<tr><td>{n}</td><td class="small">{src}</td><td class="num">{c}</td><td class="num">{b}</td><td class="num">{e}</td><td class="num">{d_s}</td><td class="small muted">{why}</td></tr>')
+    return "".join(out)
+
+def strip():
+    segs = [("#eef1f4", 6), ("#2f5fd0", 4), ("#eef1f4", 1), ("#2f5fd0", 9), ("#7d9de9", 1), ("#eef1f4", 2), ("#2f5fd0", 1)]
+    return '<div class="strip">' + "".join(f'<i style="width:{w/24*100:.2f}%;background:{c}"></i>' for c, w in segs) + '</div><div class="lg"><span>00:00</span><span style="flex:1"></span><span>06:00</span><span style="flex:1"></span><span>12:00</span><span style="flex:1"></span><span>18:00</span><span style="flex:1"></span><span>24:00</span></div>'
+
+page("24-ta-agent-report", "ta", team_nav("agents", "ta"), f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › <a>Agents</a> › reviewer-bot</div>
+<div class="hdr"><div><h1>reviewer-bot</h1><div class="desc">{st('ok','Working')} · reviewing PR #482 · claude-opus</div></div><div class="btns"><span class="btn">Download CSV</span><span class="btn">Pause</span><span class="btn p">Edit</span></div></div>
+<div class="tabs"><span>Details</span><span>Configuration</span><span>Secrets & identity</span><span>External systems</span><span class="on">Usage</span><span>Logs</span><span>Revisions</span></div>
+<div class="grid g4 kpi">
+<div class="card"><div class="cb"><div class="k small muted">Cost, month to date</div><div class="big">$12,980</div><div class="small muted">41% of the team's spend</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Calls · tokens</div><div class="big">96 K</div><div class="small muted">410 M in · 91 M out · 38% cache reads</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Utilization, 7 days</div><div class="big">78%</div><div class="small muted">working 131 h · idle 37 h</div></div></div>
+<div class="card"><div class="cb"><div class="k small muted">Longest idle, 7 days</div><div class="big">5 h 15 min</div><div class="small muted">Nov 16, 01:00 → 06:15 UTC</div></div></div>
+</div>
+<div class="card"><div class="ch"><h2>Activity today</h2><span class="sel">Day: Nov 20 ▾</span></div><div class="cb">{strip()}<div class="lg"><span><i style="background:#2f5fd0"></i>Working</span><span><i style="background:#7d9de9"></i>Partly working</span><span><i style="background:#eef1f4;border:1px solid #ccc"></i>Idle</span><span>Five-minute windows</span></div></div></div>
+<div class="grid" style="grid-template-columns:2fr 3fr">
+<div class="card"><div class="ch"><h2>Cost by model</h2></div><table><tr><th>Model</th><th class="num">Calls</th><th class="num">Tokens</th><th class="num">Cost</th></tr>
+<tr><td>Claude Opus</td><td class="num">71 K</td><td class="num">402 M</td><td class="num">$11,240</td></tr>
+<tr><td>Claude Haiku</td><td class="num">25 K</td><td class="num">99 M</td><td class="num">$410</td></tr>
+<tr><td class="muted">EKS compute and storage</td><td class="num">—</td><td class="num">—</td><td class="num">$1,330</td></tr></table></div>
+<div class="card"><div class="ch"><div><h2>External systems traffic</h2><div class="sub">Connections this month. Denied attempts are listed with the reason.</div></div></div>
+<table><tr><th>System or host</th><th>Source</th><th class="num">Conns</th><th class="num">Out / in</th><th class="num">Errors</th><th class="num">Denied</th><th>Why denied</th></tr>{tr_rows()}</table></div>
+</div>
 """)
 
 page("12-tv-team-overview", "tv", team_nav("overview", "tv"), team_overview("tv"))

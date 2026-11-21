@@ -84,6 +84,23 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 .alert.warn{border-color:var(--warn-line);background:var(--warn-bg);color:var(--text)}
 .alert.err{border-color:var(--red);background:var(--err-bg);color:var(--text)}
 .alert .ic{font-weight:700}
+.rbar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg span{padding:5px 12px;font-size:13px;border-right:1px solid var(--line)}.seg span:last-child{border-right:0}
+.seg span.on{background:var(--blue);color:#fff;font-weight:700}
+.sb{display:flex;align-items:flex-end;gap:5px;height:170px;border-bottom:1px solid var(--line);padding-top:8px}
+.sb .c{flex:1;display:flex;flex-direction:column-reverse}
+.sb .c i{display:block}
+.lg{display:flex;gap:16px;font-size:12.5px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
+.lg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.hm{display:grid;grid-template-columns:150px repeat(24,1fr);gap:2px;font-size:11.5px;align-items:center}
+.hm b{font-weight:400;color:var(--muted);text-align:center}
+.hm .n{font-size:12.5px;white-space:nowrap;overflow:hidden}
+.hm i{display:block;height:18px;border-radius:2px}
+.strip{display:flex;height:22px;border-radius:4px;overflow:hidden}
+.strip i{display:block;height:100%}
+.kpi .big{font-size:26px}
+.num{text-align:right;font-variant-numeric:tabular-nums}
 .tg{display:inline-block;width:34px;height:18px;border-radius:9px;background:#9aa5b1;position:relative;vertical-align:middle}
 .tg:after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff}
 .tg.on{background:var(--blue)}.tg.on:after{left:18px}.tg.dis{opacity:.45}
@@ -136,7 +153,7 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <div class="search">Search teams, agents, secrets, work orders  [Alt+S]</div><div class="sp"></div>
 <span class="item">us-east-1 · prod</span><span class="item">🔔</span><span class="pill admin">Service admin</span>
 <span class="item">Priya Raman ▾</span></header>
-<div class="shell"><nav class="side"><h4>Agent Factory</h4><div class="grp">Service</div><a class="">Dashboard</a><a class="on">Teams</a><a class="">Work orders</a><div class="grp">Governance</div><a class="">Budgets & ceilings</a><a class="">Cost reconciliation</a><a class="">Audit log</a><div class="grp">Platform</div><a class="">Model catalog & pricing</a><a class="">Agent templates</a><a class="">External systems</a><a class="">Service settings</a><a class="">Export & import</a><hr><a class="dim">Documentation ↗</a><a class="dim">CLI reference ↗</a></nav><main class="main">
+<div class="shell"><nav class="side"><h4>Agent Factory</h4><div class="grp">Service</div><a class="">Dashboard</a><a class="on">Teams</a><a class="">Work orders</a><div class="grp">Governance</div><a class="">Budgets & ceilings</a><a class="">Reports & analytics</a><a class="">Cost reconciliation</a><a class="">Audit log</a><div class="grp">Platform</div><a class="">Model catalog & pricing</a><a class="">Agent templates</a><a class="">External systems</a><a class="">Service settings</a><a class="">Export & import</a><hr><a class="dim">Documentation ↗</a><a class="dim">CLI reference ↗</a></nav><main class="main">
 <div class="crumbs"><a>Agent Factory</a> › <a>Teams</a> › Create team</div>
 <div class="wiz"><div class="steps">
 <div><div class="n">Step 1</div><b>Team details</b></div>

@@ -139,3 +139,20 @@ Accepted, Proposed (needs review), Superseded.
   so systems that share a host (Outlook and Teams on `graph.microsoft.com`) cannot be separated by the
   network alone; credentials scope them. Enabling OpenAI or OpenRouter creates spend AFS does not see.
 
+## ADR-011 Reporting from metering, activity samples and flow logs
+
+- Status: Proposed (from J's PRD review, 2026-11-21)
+- Context: J wants reporting at service, team and agent level on budget and usage, cost by Bedrock
+  model, whether agents are working or idle, and traffic to external services.
+- Decision: spend, tokens and calls come from the gateway's ledger (near real time) and the daily
+  `cost_daily` rollups, reconciled with CUR; compute from CUR split cost allocation. Agent activity is
+  sampled every five minutes into `agent_activity` by the reconciler, from model calls, the agent's
+  own busy/idle report and CPU. External traffic is aggregated every five minutes from Cilium flow logs
+  into `external_traffic`, with allowed and denied verdicts and reasons. All three are queried through
+  one report API at the three levels, with CSV export, and kept in PostgreSQL (monthly partitions,
+  13 months of five-minute data).
+- Consequences: no separate analytics store to run while volumes are modest; if they grow, the same
+  tables can be exported to S3 and Athena without changing the API. "Working" is an inference, so the
+  definition is shown with every report and agents are asked to report their own state. Spend with
+  non-Bedrock model providers is not reported.
+
