@@ -701,7 +701,7 @@ it in, so spend can be rolled up the way the organization reports it, in AFS and
 
 Every service setting, set by service admins on S10 (`PutSetting`) and stored in `afs.service_settings`.
 The database refuses a value outside its range. This table and the database contract are the only lists
-(D45); ranges for the 000013 keys are D55.
+(D45); ranges for the 000013 keys are D55; the 000016 keys are seeded by `-db` for remediation teams.
 
 | Key | Default | Allowed values | Used by | Migration |
 |---|---|---|---|---|
@@ -717,6 +717,8 @@ The database refuses a value outside its range. This table and the database cont
 | `egress.denied_spike_threshold` | `20` | 1 to 100000 denials per agent or pool in 5 minutes | RPT-6 | 000013 |
 | `gateway.reservation_ttl_seconds` | `900` | 60 to 3600 | BUD-2 | 000013 |
 | `api.cors_origins` | `[]` | array of `https://host[:port]` origins | IF-1, IF-4 | 000013 |
+| `work_orders.cost_center` | unset | string of 1 to 100 characters; cost center of a remediation team whose swarm template names none | WO-1, RC-12 | 000016 |
+| `work_orders.owner_email` | unset | string `local@domain`; owner of a remediation team whose swarm template names none | WO-1, RC-12 | 000016 |
 
 ### 6.14 User stories and acceptance criteria
 

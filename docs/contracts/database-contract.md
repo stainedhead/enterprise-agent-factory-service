@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract v1 at schema 000016 (2026-11-21). 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). Planned first release containing 000011 to 000016: `v0.13.0` |
+| **Status** | Contract v1 at schema 000017 (2026-11-21). 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). 000017 adds `afs.schema_version()` for the startup check of services that cannot read the tracking table. Planned first release containing 000011 to 000017: `v0.13.0` |
 | **Provider** | [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db): migrations, roles, row-level security, `migrate` Go package, `afs-migrate` |
 | **Consumer** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi): `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing` |
 | **Full data dictionary** | `-db/docs/data-model.md` (every table, column rule and function). This document is the interface: who connects how, what each service may touch, and how failures surface |
@@ -12,7 +12,7 @@
 | Rule | Detail |
 |---|---|
 | Module | `github.com/stainedhead/enterprise-agent-factory-service-db` at a semver tag. `-restapi` pins it in `go.mod`; it never vendors SQL or defines tables |
-| Migrations | Embedded (`migrations.FS`). `afs-api` runs `migrate.Up` at startup under a PostgreSQL advisory lock; other services check `migrate.Version` and refuse to start if the schema is older than the version they were built against. `migrate.Up` and `migrate.Down` take options: `migrate.WithLockTimeout(d)` sets `lock_timeout` in each migration transaction (default `migrate.DefaultLockTimeout`, 10 s; 0 disables; negative is `migrate.ErrNegativeLockTimeout`), so a migration blocked on a table lock fails with `55P03` instead of queueing traffic behind it; `afs-migrate --lock-timeout` is the same |
+| Migrations | Embedded (`migrations.FS`). `afs-api` runs `migrate.Up` at startup under a PostgreSQL advisory lock; other services call `afs.schema_version()` (000017: `SECURITY DEFINER`, returns the highest applied version, executable by every service role, because the service roles cannot read `public.afs_schema_migrations`) and refuse to start if the schema is older than the version they were built against. `migrate.Up` and `migrate.Down` take options: `migrate.WithLockTimeout(d)` sets `lock_timeout` in each migration transaction (default `migrate.DefaultLockTimeout`, 10 s; 0 disables; negative is `migrate.ErrNegativeLockTimeout`), so a migration blocked on a table lock fails with `55P03` instead of queueing traffic behind it; `afs-migrate --lock-timeout` is the same |
 | Releases | A new migration is a minor release (`v0.N.0`). A fix to a function or view by a new migration is a patch release. Merged migrations never change; the runner refuses a changed checksum |
 | Forward only | Production never runs `down`. Every migration is online-safe and notes its lock impact |
 | Compatibility | A release must keep the previous `-restapi` release working (expand, then contract across two releases). Dropping a column used by a released `-restapi` needs that release retired first |
@@ -133,11 +133,14 @@ All views are `security_invoker`, so RLS applies to `afs_app` callers through th
 | `afs.purge_idempotency_keys() → bigint` | reconciler, every few minutes | Deletes expired keys |
 | `afs.caller_sees_team`, `afs.caller_is_service_admin`, `afs.caller_is_security_operator`, `afs.caller_owns_scope`, `afs.work_order_team`, `afs.caller_owns_work_order_repo`, `afs.current_actor`, `afs.new_id` (000016, owner only) | RLS, triggers and other functions | Not called by services directly |
 
+| `afs.schema_version() → bigint` (000017, SECURITY DEFINER, `afs_app`, `afs_reconciler`, `afs_gateway`, `afs_billing`, `afs_readonly`) | every service, at startup | The highest applied migration version, or 0 when none; nothing else is exposed. A service refuses to start when it is lower than the version the service was built against |
+
 ## 5. Transaction rules for `afs-api`
 
 1. One request, one transaction, `READ COMMITTED`, with the session settings of §3.
-2. A mutation writes the row, one `audit_log` record (`before`/`after` without secret values) and one
-   `outbox_events` record in the same transaction.
+2. A mutation writes the row, one `audit_log` record (`before`/`after` without secret values) and, when
+   the mutation has an event type in the [API contract](api-contract.md) §7, one `outbox_events` record in
+   the same transaction. A mutation with no event type writes no outbox row (API contract CD-7).
 3. Updates compare `version` (`UPDATE … WHERE id = $1 AND version = $2`); zero rows → `412` when the
    row exists, `404` otherwise. The `touch_row` trigger bumps `version`.
 4. Writes that change desired state bump `generation` where the table has one; the reconciler reports
