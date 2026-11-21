@@ -534,6 +534,184 @@ it in, so spend can be rolled up the way the organization reports it, in AFS and
 | TAG-6 | **Rollups.** Cost, usage, agent activity and external traffic roll up by any tag key and value at service level (service admins) and within a team's own scope. Rollups attribute each team's figures to its current tags; untagged figures show as *(untagged)*. Showback exports group by tag (BUD-7) | P1 |
 | TAG-7 | Service admins are told, once, to activate the service and system keys as cost allocation tags in AWS Billing, and the cost allocation tags page shows which keys CUR has seen | P2 |
 
+### 6.13 User stories and acceptance criteria
+
+Product-level stories. Each repository PRD breaks these into its own stories with acceptance criteria
+for its layer, citing the story ids below (for example `-restapi` RA-US-4 refines US-4). Acceptance
+criteria are written as Given / When / Then and are the basis of end-to-end tests in the dev
+environment.
+
+#### E1 Teams and access
+
+**US-1 · Onboard a team.** As a service admin, I want to create a team with its guardrails, models,
+required tags, sign-in provider and first team-admin in one wizard, so that a delivery team can start
+without a platform ticket. *(TEAM-1, TEAM-2, TEAM-3, ACC-1, TAG-2, S3)*
+- Given I am a service admin, when I complete the create-team wizard with valid input, then the team
+  appears as `Reconciling` and becomes `Ready` within 60 seconds (p95), with namespace `afs-t-<name>`,
+  Pod Security `restricted`, its ResourceQuota and LimitRange, and default-deny network policies.
+- Given a required service tag has no default, when I leave it empty, then the review step blocks
+  creation and names the tag, and the API refuses the same request with `ValidationError`.
+- Given more than one sign-in provider exists, when I create the team, then I must pick one (the
+  default is preselected), and the team's people sign in through it.
+- Given I am a team-admin or viewer, when I call `CreateTeam`, then I get `403 AccessDenied` and an audit
+  record of the denial.
+
+**US-2 · Manage who has access.** As a team-admin, I want to bind people and IdP groups to my team as
+team-admin or viewer, and issue short-lived API keys, so that access follows our org chart and
+pipelines can authenticate. *(ACC-2, ACC-3, ACC-4, T6)*
+- Given I am a team-admin, when I add a group binding, then members of that group who sign in through the
+  team's provider get the role on their next request, and the change is audited.
+- Given I am a team-admin, when I try to grant `service_admin`, then the request is refused.
+- When I create an API key, then its secret is shown once, it expires in at most 90 days, and only its
+  prefix is shown afterwards.
+- Given I am a viewer, then every control that changes membership is disabled with the tooltip
+  "Requires team-admin", and calling the API directly returns `403`.
+
+**US-3 · Isolation between teams.** As security, I want teams to be unable to see or reach each other,
+so that one team's agents and people cannot touch another team's code, secrets or data. *(G2, TEAM-3,
+TEAM-4, SEC-5)*
+- Given two teams A and B, when a member of A requests any resource of B by id, then the API returns
+  `404 NotFound` (never revealing it exists), and the database returns no rows even if the API's filter
+  were missing (RLS test).
+- Given an agent in A, when it opens a connection to a pod in B or to any host outside its allowed
+  systems, then the connection is denied and recorded as a denied flow.
+- Given a team-admin of A, when they try to create a NetworkPolicy, LoadBalancer Service or privileged
+  pod in A's namespace, then admission refuses it.
+
+#### E2 Agents, secrets and configuration
+
+**US-4 · Stand up an agent.** As a team-admin, I want to create an agent from a template with a model,
+storage, secrets and configuration, so that it starts working on our backlog. *(AGT-1, AGT-2, AGT-7,
+AGT-9, SEC-3, CFG-7, T3)*
+- When I create an agent with a digest-pinned image, then one pod runs under its own ServiceAccount with
+  a persistent volume at `/var/lib/agent`, and its status reaches `Running`.
+- Given an image referenced by tag rather than digest, then creation is refused with `ValidationError`.
+- Given the agent is restarted, paused and resumed, or its image upgraded, then the files on its volume
+  are unchanged.
+- The agent has no replica count anywhere in the UI, CLI, SDK or API.
+
+**US-5 · Secrets and configuration with zero impact on the container.** As an agent author, I want my
+agent to find its secrets and configuration already in its environment, so that it needs no code, SDK
+or call to fetch them. *(SEC-3, SEC-4, SEC-6, CFG-7)*
+- Given a secret bound as env var `GITHUB_TOKEN`, when the pod starts, then `GITHUB_TOKEN` holds the
+  current value; given a binding as file `/etc/afs/secrets/jira`, then that file holds it.
+- Given a configuration value `LOG_LEVEL`, then it is an environment variable and the file
+  `/etc/afs/config/LOG_LEVEL`.
+- When a team-admin rotates a bound secret or changes a configuration value, then every agent using it
+  restarts and sees the new value within 5 minutes, without any change to the agent's code or image.
+- No API response, CLI output, console page, log line or audit record shows a secret value.
+
+**US-6 · Write-only secrets.** As a team-admin, I want to create and rotate secrets by name and value
+without choosing where they live, so that they always land in the managed hierarchy with the right
+access. *(SEC-1, SEC-2, SEC-5, T4)*
+- When I create a team-shared secret `artifactory-reader`, then it is stored at
+  `<service>/afs-t-<team>/_shared/artifactory-reader` and I see the path, never the value.
+- Given a viewer, then they see names, paths, usage and rotation but no value and no way to read one.
+
+#### E3 AWS access
+
+**US-7 · Cross-account roles for an agent.** As a team-admin, I want to link an agent to a role in
+another organization account within my team's allowed accounts, and hand the account owner a trust
+policy, so that the agent can work there without long-lived keys. *(AGT-6, AGT-10, TEAM-8, T8, S6)*
+- Given the target account does not match the team's allowed-accounts filter, then the link is refused
+  by the API, the database and the IAM permissions boundary.
+- When I add a link, then AFS generates the external ID, shows the trust policy, writes a profile into
+  the pod's AWS config, and shows *Pending trust* until a verification assumes the role, then *Verified*.
+- Given the team does not manage its own accounts, then a team-admin cannot change the filter (disabled
+  with a tooltip; `403` from the API).
+
+#### E4 External systems
+
+**US-8 · Control which outside services agents reach.** As a service admin, I want a catalog of
+external systems that I can extend and switch off, and as a team-admin I want to narrow it for my team
+and each agent, so that egress is explicit and least-privilege. *(EXT-1 to EXT-7, S7, T9, T10)*
+- Given Slack is off at service level, then no team or agent can switch it on, and agents' connections
+  to Slack endpoints are denied with reason *system off at service level*.
+- When a team-admin switches GitHub off for one agent, then within 60 seconds that agent's egress policy
+  no longer allows GitHub hosts, without a restart, and the agent's page shows *off at agent level*.
+- Given OpenAI is switched on, then every page that shows it carries the *Unmetered* badge and reports
+  say its spend is not included.
+
+#### E5 Budget, cost and pricing
+
+**US-9 · Hard budget cap.** As a team-admin, I want my team's model spend to stop at the budget, so that
+a runaway agent cannot overspend. *(G3, BUD-1 to BUD-5, T5)*
+- Given a budget of $100 with $99.50 spent, when agents make concurrent calls whose worst-case cost
+  exceeds $0.50, then the gateway rejects the excess with `BudgetExceeded`, total spend never exceeds
+  the budget by more than one in-flight request per agent, and the IAM deny is applied as backstop.
+- When spend crosses 50%, 80% and 100%, then exactly one alert per threshold per period goes to the
+  team's channels.
+- Given I am a team-admin, when I set a budget above the ceiling, then it is refused.
+
+**US-10 · Current model prices.** As a service admin, I want price changes from the AWS Price List
+proposed to me daily, and billed cost compared with our estimates, so that budgets reflect what models
+actually cost. *(BUD-6, BUD-9, S1, S4)*
+- Given a price change on the AWS Price List, when the daily sync runs, then one pending proposal per
+  model appears on S4 and the dashboard banner counts it.
+- When I approve it, then the gateway uses the new price from its effective date or from approval,
+  whichever is later; nothing is backdated. When I reject it, nothing changes. Both are audited.
+- Given a team-day where the gateway figure and the billed figure differ by more than 5%, then the team
+  is flagged on S1 and a `cost.variance_detected` event is published.
+
+#### E6 Reporting and tags
+
+**US-11 · See spend, usage and activity.** As a service admin, team-admin or viewer, I want reports at
+service, team and agent level for budget, usage, cost by Bedrock model, idle versus working, and
+external traffic, so that I can manage cost and capacity. *(G7, RPT-1 to RPT-9, S8, T11, T12)*
+- Given any report, then figures are no more than 5 minutes behind the gateway, and every table can be
+  downloaded as CSV with the same numbers.
+- Given an agent that made no model call, reported idle and used CPU below the threshold for an hour,
+  then it shows as idle with *idle since* set to the end of its last working window.
+- Given a viewer of team A, then service-level reports and other teams' reports are not available
+  (hidden in the console, `403` from the API).
+
+**US-12 · Cost allocation tags.** As a service admin, I want every team to carry the tags our finance
+reporting needs, and every resource and Bedrock call tagged with team and agent ids automatically, so
+that spend rolls up by business unit, product or any other dimension. *(TAG-1 to TAG-7, S9, T13)*
+- Given any agent, then its IAM role, volume, snapshots and Bedrock calls carry `afs-team-id` and
+  `afs-agent-id` with no configuration by anyone, and no one can change or remove them.
+- Given a fixed service tag `environment = prod`, then every team's resources carry it, and a team cannot
+  override it.
+- When a team-admin adds `project = ledger-modernization`, then within 10 minutes the team's AWS
+  resources carry it, and reports can group spend by `project`.
+- Given a required key added after some teams exist, then those teams appear in *Teams missing a
+  required tag* and their spend shows as *(untagged)* until they set a value.
+
+#### E7 Recovery and audit
+
+**US-13 · Recover from configuration.** As a service admin, I want a fresh cluster with a restored
+database to converge to the full environment, so that we can recover from loss or move accounts.
+*(G5, CFG-1 to CFG-6, S5)*
+- Given a fresh EKS cluster and a database restored to a point in time, when the reconciler starts, then
+  every team, agent, policy, identity and secret binding is recreated with no manual step, within 1 hour
+  for the initial scale.
+- Given someone edits a managed Kubernetes object by hand, then the reconciler reverts it and records
+  `drift.corrected` in the audit log.
+- When I export a bundle and import it into another account with an account map in dry-run, then I see
+  the plan, and no secret value is in the bundle.
+
+**US-14 · Attribute everything.** As an auditor (viewer), I want every change and every agent's AWS call
+to be attributable to a person or agent and team, so that investigations are fast. *(G4, CFG-3, OPS-4)*
+- Every mutation has exactly one audit record with actor, team, request id and outcome; denied requests
+  are recorded too.
+- Agents' AWS sessions carry `afs-team-id` and `afs-agent-id` session tags visible in CloudTrail, also
+  in linked accounts.
+- Given an agent logs a string that looks like a password or the value of one of its bound secrets, then
+  the delivered log shows `[redacted:<hash prefix>]` instead.
+
+#### E8 Later phases
+
+**US-15 · Budgeted POC (phase 2).** As a service admin, I want an ephemeral team with a lifetime cap and
+expiry that tears itself down, so that experiments cannot outlive their budget. *(TEAM-7, BUD-8, P2)*
+- When the cap or the expiry is reached (per the team's teardown rule), then agents stop, IAM is revoked
+  and the namespace is deleted, while configuration and audit are kept.
+
+**US-16 · CVE remediation (phase 3).** As security, I want to create a CVE work order and have a capped
+remediation team open PRs in affected repositories and notify owning teams against the SLA.
+*(WO-1, WO-2, P3)*
+- When a work order is created through the API or EventBridge, then a remediation team is assigned within
+  its cap, PRs are tracked per repository, and owning teams are notified before the SLA is due.
+
 ## 7. Non-functional requirements
 
 | Area | Requirement |
@@ -562,6 +740,24 @@ repositories:
 
 Dependencies: `-restapi` imports `-db` (migrations) as a Go module; `-cli` and `-website` depend only on
 the REST API contract in `-restapi/api/openapi.yaml`.
+
+### 8.1 Repository PRDs and shared contracts
+
+This PRD is the product level. Each repository has its own PRD that takes the requirements it owns,
+refines the stories above into stories and acceptance criteria for its layer, and names the contracts it
+provides or consumes. The two contracts are shared design, reviewed here and owned by their provider.
+
+| Document | Covers |
+|---|---|
+| [Database contract](docs/contracts/database-contract.md) | `-db` ↔ `-restapi`: releases, roles and connections, session settings, what each service may touch, transaction rules, error mapping, known gaps |
+| [API contract](docs/contracts/api-contract.md) | `-restapi` ↔ `-cli`, `@afs/sdk`, console: conventions, authentication, permission catalog, every operation with its CLI command, SDK method and screen, resource shapes, errors, events |
+| [`-db` PRD](https://github.com/stainedhead/enterprise-agent-factory-service-db/blob/main/enterprise-agent-factory-service-db-PRD.md) | Schema, roles, RLS, migrations runner and CLI |
+| [`-restapi` PRD](https://github.com/stainedhead/enterprise-agent-factory-service-restapi/blob/main/enterprise-agent-factory-service-restapi-PRD.md) | `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing` |
+| [`-cli` PRD](https://github.com/stainedhead/enterprise-agent-factory-service-cli/blob/main/enterprise-agent-factory-service-cli-PRD.md) | `afs` |
+| [`-website` PRD](https://github.com/stainedhead/enterprise-agent-factory-service-website/blob/main/enterprise-agent-factory-service-website-PRD.md) | `@afs/sdk` and the console |
+
+Story ids are traced across levels: product US-n → repository stories (`DB-US-n`, `RA-US-n`, `CLI-US-n`,
+`WEB-US-n`) → specs and tests.
 
 ## 9. Release plan
 
