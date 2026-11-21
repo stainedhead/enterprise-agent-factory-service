@@ -416,13 +416,18 @@ page("07-ta-agents", "ta", team_nav("agents", "ta"), f"""
 <div class="tools"><div class="filter">🔍 Find agents</div><span class="sel">Any state ▾</span><div class="pager">‹ <b>1</b> › ⚙</div></div>
 <table><tr><th></th><th>Name</th><th>Status</th><th>Pod</th><th>Model</th><th>Template</th><th>Secrets</th><th>Cost, Nov MTD</th></tr>
 {agent_rows("reviewer-bot")}</table></div>
-<div class="card" style="position:relative"><div class="ch"><h2>reviewer-bot</h2><div class="btns"><span class="btn sm">Restart</span><span class="btn sm">Pause</span><span class="btn sm">Edit</span></div></div>
+<div class="card" style="position:relative"><div class="ch"><h2>reviewer-bot</h2><div class="btns"><span class="btn sm">Restart</span><span class="btn sm">Pause</span><span class="btn sm">Take snapshot</span><span class="btn sm">Edit</span></div></div>
 <div class="tabs" style="margin:0 20px 14px"><span class="on">Details</span><span>Secrets & identity</span><span>Usage</span><span>Logs</span><span>Revisions</span></div>
 <div class="cb"><div class="grid g4">
 <div class="kv"><div class="k">Image</div><div class="v mono small">ghcr.io/…/omp-review@sha256:9f2c…e1</div></div>
 <div class="kv"><div class="k">Service account</div><div class="v mono">agent-reviewer-bot</div></div>
 <div class="kv"><div class="k">Resources</div><div class="v">2 vCPU · 8 GiB · one pod</div></div>
-<div class="kv"><div class="k">Last change</div><div class="v">6h ago by key:ci-deployer</div></div></div></div></div>
+<div class="kv"><div class="k">Last change</div><div class="v">6h ago by key:ci-deployer</div></div></div>
+<div class="grid g4" style="margin-top:14px">
+<div class="kv"><div class="k">Persistent volume</div><div class="v">50 GiB gp3 · 31% used <a class="small">Expand</a></div></div>
+<div class="kv"><div class="k">Mounted at</div><div class="v mono">/var/lib/agent</div></div>
+<div class="kv"><div class="k">Snapshots</div><div class="v">Daily, keep 7 · last today 03:00 {st('ok','Completed')}</div></div>
+<div class="kv"><div class="k">On delete</div><div class="v">Snapshot, then delete volume</div></div></div></div></div>
 """)
 
 page("08-ta-create-agent", "ta", team_nav("agents", "ta"), f"""
@@ -438,6 +443,11 @@ page("08-ta-create-agent", "ta", team_nav("agents", "ta"), f"""
 <div class="card"><div class="ch"><h2>Model and resources</h2></div><div class="cb"><div class="grid g2">
 <div class="field"><label>Model</label><div class="hint">Enabled for this team</div><div class="input">claude-sonnet ▾</div></div>
 <div class="field"><label>Resources</label><div class="hint">One pod per agent. Add agents to add capacity.</div><div class="input">2 vCPU · 8 GiB ▾</div></div></div></div></div>
+<div class="card"><div class="ch"><div><h2>Persistent storage</h2><div class="sub">One volume for this agent's memory, configuration and work in progress, mounted at <span class="mono">/var/lib/agent</span>. It survives restarts, pauses, upgrades and reschedules.</div></div></div><div class="cb"><div class="grid g2">
+<div class="field"><label>Size (GiB)</label><div class="hint">1 to 1000. Can be expanded later, never shrunk.</div><div class="input">20</div></div>
+<div class="field"><label>Storage class</label><div class="hint">Offered by your service admins. Fixed after creation.</div><div class="input">gp3 · general purpose SSD, encrypted ▾</div></div>
+<div class="field"><label>When the agent is deleted</label><div class="input">Take a final snapshot, then delete the volume ▾</div></div>
+<div class="field"><label>Snapshot backups</label><div class="input">Daily, keep 7 ▾</div></div></div></div></div>
 <div class="card"><div class="ch"><div><h2>Secrets</h2><div class="sub">Team-shared secrets can be bound now. Secrets only this agent can read are added after it is created, under Secrets.</div></div><span class="btn sm">Add secret binding</span></div>
 <table><tr><th>Secret</th><th>Scope</th><th>Delivery</th><th>Target</th><th></th></tr>
 <tr><td>github-bot-key</td><td><span class="badge b-per" style="white-space:nowrap">Team shared</span></td><td>Environment variable</td><td class="mono">GITHUB_APP_KEY</td><td><a>Remove</a></td></tr>
@@ -445,7 +455,7 @@ page("08-ta-create-agent", "ta", team_nav("agents", "ta"), f"""
 <div style="display:flex;justify-content:flex-end;gap:8px"><span class="btn" style="border:0">Cancel</span><span class="btn">Preview CLI command</span><span class="btn p">Create agent</span></div>
 </div>
 <div style="width:360px"><div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb">
-<div class="code">afs agents create-agent \\<br>&nbsp; --team-id team_01JD3Z… \\<br>&nbsp; --name security-patcher \\<br>&nbsp; --template hermes-dev \\<br>&nbsp; --model-id claude-sonnet \\<br>&nbsp; --secret-bindings file://bindings.json</div>
+<div class="code">afs agents create-agent \\<br>&nbsp; --team-id team_01JD3Z… \\<br>&nbsp; --name security-patcher \\<br>&nbsp; --template hermes-dev \\<br>&nbsp; --model-id claude-sonnet \\<br>&nbsp; --storage SizeGiB=20,StorageClass=gp3,\\<br>&nbsp;&nbsp;&nbsp; OnDelete=snapshot_then_delete,\\<br>&nbsp;&nbsp;&nbsp; Snapshots=daily,Keep=7 \\<br>&nbsp; --secret-bindings file://bindings.json</div>
 <div class="small muted" style="margin-top:8px">Every console action maps to one CLI operation and one REST call.</div></div></div></div>
 </div>
 """)

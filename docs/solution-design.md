@@ -112,13 +112,16 @@ The Agent Factory Service (AFS) lets enterprise teams create and run their own *
 - `NetworkPolicy` default deny all ingress/egress, then allow DNS, allow egress to `afs-llm-gateway`, allow egress to the team's egress allow-list (FQDN rules with Cilium, or via an egress proxy).
 - ServiceAccounts per agent, EKS Pod Identity associations to the team's IAM role.
 - One StatefulSet with exactly one replica per agent (stable name, ServiceAccount and IAM session). There is no replica count: a team scales by adding agents.
+- One persistent volume per agent from the StatefulSet's `volumeClaimTemplate` (EBS CSI, encrypted, `WaitForFirstConsumer`, tagged `afs-team-id` and `afs-agent-id`), mounted at `/var/lib/agent`. The StatefulSet's PVC retention policy is `Retain` for both scale-down and delete, so pausing or re-creating the StatefulSet never loses data; the reconciler alone deletes a volume, following the agent's on-delete rule. Snapshots are EBS snapshots through CSI `VolumeSnapshot`, taken on the agent's schedule, pruned to its retention count, and recorded in `agent_volume_snapshots`. The team's `ResourceQuota` includes `requests.storage`.
 - IAM role `afs-team-<id>` with an ABAC policy scoped by `aws:PrincipalTag/afs-team-id`.
 - Bedrock application inference profile per (team, model) with cost allocation tags.
 - ExternalSecret (External Secrets Operator) objects that project referenced Secrets Manager entries into the namespace.
 - Agent workloads rendered from the Agentic Teammates CRD/Helm chart.
 - Log delivery (Fluent Bit output per team or CloudWatch subscription filters).
 
-It records `observed_generation`, phase and conditions per resource in `resource_status`, which the API and UI display. Drift (live state differs from desired) is corrected and logged as an audit event with actor `system:reconciler`. Deletes use an ordered finalizer flow: scale agents to zero, revoke IAM, delete inference profiles, delete namespace, mark row `deleted`.
+It records `observed_generation`, phase and conditions per resource in `resource_status`, which the API and UI display. Drift (live state differs from desired) is corrected and logged as an audit event with actor `system:reconciler`. Deletes use an ordered finalizer flow: scale agents to zero, apply each agent's on-delete rule to its volume (final snapshot, then delete or retain), revoke IAM, delete inference profiles, delete namespace, mark row `deleted`.
+
+Volume drift is handled like any other: a volume smaller than desired is expanded (online, EBS supports it); a PVC that is missing is re-created from the agent's latest completed snapshot when one exists (empty otherwise) and raises an alert; a volume bigger than desired, or of another storage class, is reported as a condition rather than changed, because EBS cannot shrink and a class change needs a data migration. EBS volumes live in one Availability Zone, so an agent reschedules within its volume's zone; moving it to another zone is a restore from snapshot.
 
 **afs-llm-gateway (Go).** The only path from agents to Bedrock. Runs in `afs-system`, multi-AZ.
 
@@ -239,7 +242,7 @@ Reserve → invoke → settle, as in section 3.1. Thresholds emit `budget.thresh
 - `config_revisions`: a trigger snapshots every change to versioned tables (who, when, full JSON), giving history and rollback ("restore revision N").
 - `audit_log`: append-only (UPDATE/DELETE revoked from the app role and blocked by trigger).
 - **Backups:** RDS automated backups with PITR, daily snapshot copied cross-region and cross-account (AWS Backup vault with vault lock).
-- **Export bundle:** `POST /v1/exports` produces a versioned, SHA-256-checksummed JSON (or YAML) document with `schemaVersion`, all teams, agents, members, bindings, budgets, configuration and secret *references*. Stored in S3 and downloadable.
+- **Export bundle:** `POST /v1/exports` produces a versioned, SHA-256-checksummed JSON (or YAML) document with `schemaVersion`, all teams, agents (including volume settings), members, bindings, budgets, configuration, secret *references* and each agent's latest volume *snapshot reference*. Import can restore volumes from those snapshots once they are shared with or copied to the target account and region. Stored in S3 and downloadable.
 - **Import:** `POST /v1/imports` with a mapping file (old account id → new, ARN rewrites, cluster id), dry-run by default, showing a plan (create/update/skip) before apply. Secrets must already exist (replicated via Secrets Manager multi-region replication or recreated) in the target account.
 - **Restart behavior:** the reconciler's startup full-reconcile re-applies everything. A brand-new cluster plus a restored DB converges to the full environment with no manual steps.
 

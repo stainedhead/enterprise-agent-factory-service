@@ -73,7 +73,7 @@ on another. Only service admins grant service admin.
 |---|:-:|:-:|:-:|
 | Create / delete teams, set ceilings and quotas | ✓ | | |
 | Edit team settings, suspend / resume | ✓ | ✓ | |
-| Agents: create, edit, scale, pause, restart, delete | ✓ | ✓ | |
+| Agents: create, edit, pause, restart, delete; expand volume, take snapshot | ✓ | ✓ | |
 | Members and API keys | ✓ | ✓ (team roles only) | |
 | Secrets: create, rotate, bind | ✓ | ✓ | |
 | Secrets: see names, references, usage | ✓ | ✓ | ✓ |
@@ -182,13 +182,18 @@ status and conditions, budget burn, agent health and recent activity.
 **T2 · Agents.** Agents with status, model, runtime template, bound secrets and cost. Selecting an agent
 opens its detail panel with *Restart*, *Pause* and *Edit*, and tabs for secrets and identity, usage, logs
 and revisions. An agent is one identity and runs as exactly one pod, so there is no replica count or
-*Scale* action. A team adds capacity by adding agents (see AGT-7).
+*Scale* action. A team adds capacity by adding agents (see AGT-7). The detail panel also shows the agent's
+persistent volume (size, storage class, on-delete rule, snapshot schedule and last snapshot) with
+*Take snapshot* and *Expand volume*. Team viewers see the same panel read-only.
 
 ![Agents](docs/ui/07-ta-agents.png)
 
 **T3 · Create agent.** Template from the Agentic Teammates catalog, image pinned by digest, persona, model
 (limited to models enabled for the team), resources, and secret bindings as environment variables or
 files. There is no replicas field: each agent is a single pod with its own ServiceAccount and IAM identity.
+The *Persistent storage* section sets the agent's volume for memory, configuration and work in progress:
+size, storage class (from the classes a service admin offers), what happens to the volume when the agent
+is deleted, and snapshot backups (AGT-9).
 Binding lists only the team's shared secrets and this agent's own secrets. The side panel shows the
 equivalent CLI command.
 
@@ -241,7 +246,10 @@ similar work across many repositories, so they share the pool's identity instead
 model is swarm (ephemeral team, one lifetime budget and expiry) → pools (one identity each, N workers) →
 workers (pods). Pools in a swarm can be grouped (for example "scan" and "fix" stages) and hand work to
 each other. Audit and usage are attributed to the pool, with the worker's pod name recorded for
-troubleshooting. Long-running team agents stay one identity, one pod (AGT-7).
+troubleshooting. Long-running team agents stay one identity, one pod (AGT-7). Storage for a pool is
+chosen per pool: an ephemeral scratch volume per worker (the default, deleted with the worker), and
+optionally one shared read-write volume for the pool (EFS) for shared memory or caches. Pool workers do
+not get individual persistent volumes.
 
 ![Ephemeral team budget](docs/ui/14-admin-ephemeral-team.png)
 
@@ -256,7 +264,7 @@ owning teams to notify, SLA due date and the remediation team assigned.
 |---|---|---|
 | Onboard a team | Service admin | Teams → Create team → details, guardrails → models & egress → budget → first team-admin → review → team appears `Reconciling`, then `Ready` |
 | Stand up agents | Team-admin | Secrets → Create secret → Agents → Create agent → bind secrets → status `Running` |
-| Respond to budget alert | Team-admin | Alert (Slack/email) → Budget & usage → see top agents → pause or scale an agent, or raise budget up to ceiling |
+| Respond to budget alert | Team-admin | Alert (Slack/email) → Budget & usage → see top agents → pause an agent, or raise budget up to ceiling |
 | Hard cap reached | System → team-admin | Gateway blocks calls → agents receive `BudgetExceeded` → team shows `Blocked (cap)` → team-admin asks service admin for a higher ceiling or waits for reset |
 | Investigate | Team viewer | Overview → conditions → Activity & audit → Config revisions |
 | Recover environment | Service admin | Restore DB (PITR) or import bundle → reconciler converges → dashboard shows `Healthy` |
@@ -291,6 +299,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | AGT-6 | Optional per-agent IAM role for least privilege | P1 |
 | AGT-7 | One agent is one identity and one pod (a StatefulSet with one replica, so the name, ServiceAccount, IAM session and audit trail stay stable). There is no replica count. A team scales by adding agents. Phase 2 swarm pools are the exception (AGT-8) | P0 |
 | AGT-8 | Swarms (ephemeral teams) hold several pools that work together. Each pool has its own identity, secrets and a worker count; its workers share that identity. Pools can be grouped into stages. The swarm has one lifetime budget; usage and audit are attributed to the pool, with the worker pod recorded | P2 |
+| AGT-9 | Every agent has one persistent volume (encrypted EBS gp3 by default, through a StatefulSet volume claim) mounted at `/var/lib/agent` for memory, configuration and work in progress. It survives restarts, pauses, image upgrades and reschedules. Team-admins set size (1 to 1000 GiB, default 20, grow only), storage class (from the service admin's list, fixed after creation), on-delete rule (snapshot then delete by default, delete, or retain) and snapshot schedule (off, daily or weekly, keeping 1 to 90). Viewers see the settings and snapshot history read-only. Volume usage counts toward the team's storage quota, and EBS cost is attributed to the team by tag | P0 |
 
 ### 6.3 Secrets
 
@@ -311,7 +320,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | BUD-3 | IAM explicit deny on the team's Bedrock role when the cap is reached (backstop), removed on reset or increase | P0 |
 | BUD-4 | Alerts at configurable thresholds (default 50/80/100%), once per period per threshold | P0 |
 | BUD-5 | Usage by agent, model and day in near real time | P0 |
-| BUD-6 | Daily CUR reconciliation of Bedrock (by inference-profile tag) and EKS compute (split cost allocation by namespace); variance alerts over 3% | P1 |
+| BUD-6 | Daily CUR reconciliation of Bedrock (by inference-profile tag), EKS compute (split cost allocation by namespace) and agent volumes and snapshots (by `afs-team-id` tag); variance alerts over 3% | P1 |
 | BUD-7 | Showback export by cost center | P1 |
 | BUD-8 | Lifetime budgets with expiry for ephemeral teams | P2 |
 
@@ -333,7 +342,7 @@ Priorities: **P0** required for the first production release (phase 1), **P1** p
 | CFG-2 | Reconciler applies desired state at startup and continuously; manual drift is reverted and audited | P0 |
 | CFG-3 | Every change is versioned (config revisions) and every mutation is audited (append-only) | P0 |
 | CFG-4 | PITR backups and cross-region/cross-account snapshot copies | P0 |
-| CFG-5 | Export a versioned, checksummed bundle (no secret values); import with ARN/account mapping and dry-run plan | P1 |
+| CFG-5 | Export a versioned, checksummed bundle (no secret values); import with ARN/account mapping and dry-run plan. Agent volumes are carried as their settings plus the latest snapshot reference; import can restore an agent's volume from that snapshot once it is shared or copied to the target account | P1 |
 | CFG-6 | Restore a team to a previous revision | P1 |
 
 ### 6.7 Delivery and notifications
@@ -395,7 +404,7 @@ the REST API contract in `-restapi/api/openapi.yaml`.
 |---|---|---|
 | M0 Foundations | Repos, CI, schema v1, OpenAPI skeleton, auth middleware, `/v1/me` | All gates green; isolation and RLS tests pass |
 | M1 Teams & access | TEAM-1..5, ACC-1..3, CFG-1..3, reconciler for namespace/network/IAM; console S1–S3, T1, T6, V1; CLI `teams`, `members` | A service admin onboards a team end to end in dev |
-| M2 Agents & secrets | AGT-1..4, AGT-7, SEC-1..3, SEC-5; console T2–T4, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
+| M2 Agents & secrets | AGT-1..4, AGT-7, AGT-9, SEC-1..3, SEC-5; console T2–T4, V2; CLI `agents`, `secrets` | Agents run with bound secrets; viewers cannot change anything (tested) |
 | M3 Spend control | BUD-1..5, OPS-2; gateway; console T5, S4 | Load test proves the hard cap; alerts fire once per threshold |
 | M4 Production readiness | CFG-4, BUD-6/7, OPS-1/3, ACC-4, AGT-5/6, CFG-5/6, S5 | DR rebuild drill passes; security review signed off |
 | Phase 2 | TEAM-7, BUD-8, AGT-8, P2 screen | First POC team runs and tears itself down |
