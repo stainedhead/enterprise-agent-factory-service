@@ -59,8 +59,8 @@ Exit codes: 0 success, 252 usage error, 254 service error (including `AccessDeni
 
 Contract: API 1.3 and later. Reference: `user-docs/collaboration.md`, `user-docs/reference/collaboration.md`.
 The collaboration agent is an ordinary agent with `--role collaboration`, made from a template whose capabilities
-include `paperclip`; a team has at most one. There is no capability filter on listing templates: list them and
-read `capabilities`.
+include `paperclip`; a team has at most one. Find such templates with
+`afs agents list-agent-templates --capability paperclip`.
 
 ```bash
 afs agents create-agent --team-id team_... --name paperclip --role collaboration --template paperclip \
