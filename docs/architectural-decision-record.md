@@ -294,8 +294,8 @@ Accepted, Proposed (needs review), Superseded.
     credential in `Authorization`. Paperclip's own login stays but is never the control: removing a binding cuts access
     within 60 seconds. Web UI and REST API are switched on or off independently per team, under a per-team guardrail and a
     service-wide switch.
-  - **A least-privilege database path.** The edge connects as `afs_edge`, which can execute six `SECURITY DEFINER`
-    functions (routes, settings, principal by person or key, access counts, one secret-detection event) and reads no table.
+  - **A least-privilege database path.** The edge connects as `afs_edge`, which can execute ten `SECURITY DEFINER`
+    functions (routes, settings, principal by person or key, access counts, one secret-detection event, server-side sessions and the single-use handoff) and reads no table. The ACM certificate and DNS cover the apex and the wildcard; the edge checks `Host`, not SNI.
   - **Recorded exceptions.** TEAM-3 and TEAM-4 gain the named openings of solution design §4.1; the in-namespace hop to
     Paperclip is HTTP inside WireGuard (PC-D7), the one exception to TLS on every hop.
 - Consequences: a new component and an internet-facing attack surface for the platform (WAF, ASVS L2, penetration test
