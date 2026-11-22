@@ -20,10 +20,10 @@ Sub-directory names match the repository names. Clone each one next to this file
 
 | Directory | Language / kind | Purpose | Status |
 |---|---|---|---|
-| `enterprise-agent-factory-service-db/` | SQL, Go 1.27 | PostgreSQL schema and migrations, roles and row-level security, `afs-migrate`, Go module embedding the migrations | Scaffolded; schema v1 and 15 integration tests |
-| `enterprise-agent-factory-service-restapi/` | Go 1.27 | `afs-api` (REST, RBAC, audit), `afs-reconciler`, `afs-gateway`, `afs-billing`; owns `api/openapi.yaml` | Scaffolded |
-| `enterprise-agent-factory-service-cli/` | Go 1.27 | `afs` CLI, AWS CLI conventions | Scaffolded |
-| `enterprise-agent-factory-service-website/` | TypeScript 7 (Bun workspace) | `@afs/sdk` accelerator SDK (`packages/sdk`) and the web console (`apps/console`) | Scaffolded |
+| `enterprise-agent-factory-service-db/` | SQL, Go 1.27 | PostgreSQL schema and migrations, roles and row-level security, `afs-migrate`, Go module embedding the migrations | Feature complete (migrations 000001–000019) |
+| `enterprise-agent-factory-service-restapi/` | Go 1.27 | `afs-api` (REST, RBAC, audit), `afs-reconciler`, `afs-gateway`, `afs-billing`; owns `api/openapi.yaml` | Feature complete |
+| `enterprise-agent-factory-service-cli/` | Go 1.27 | `afs` CLI, AWS CLI conventions | Feature complete |
+| `enterprise-agent-factory-service-website/` | TypeScript 7 (Bun workspace) | `@afs/sdk` accelerator SDK (`packages/sdk`) and the web console (`apps/console`) | Feature complete |
 
 All remotes are `github.com/stainedhead/<name>`. When a repository is added or changes status, update
 this table and the README table in the same change.
@@ -56,7 +56,7 @@ this table and the README table in the same change.
 ## Rules for working here
 - **Commit child changes in the child**, never in this root.
 - **Only root-level material is committed here:** `README.md`, `INTENT.md`, `AGENTS.md`, `CLAUDE.md`,
-  `LICENSE`, PRDs (`*-PRD.md`), `.gitignore`, `.github/` and anything under `docs/`, `user-docs/`, `skills/`
+  `CONTRIBUTING.md`, `LICENSE`, PRDs (`*-PRD.md`), `.gitignore`, `.github/` and anything under `docs/`, `user-docs/`, `skills/`
   or `specs/`. If you add a new top-level directory that belongs to this repo, add it to the allowlist in
   `.gitignore`.
 - **Before committing, check nothing from a child is staged:** `git ls-files -s` must show no mode
@@ -65,6 +65,11 @@ this table and the README table in the same change.
 - **Keep links honest.** Only link to a remote that exists.
 - **UI mockups** live in `docs/ui/` (PNG) with HTML sources in `docs/ui/source/`. Regenerate the PNGs when
   a source changes, and keep the PRD's screen list in step.
+- **Architecture diagrams** live in `docs/diagrams/` (SVG and PNG) with their sources in
+  `docs/diagrams/source/`. Edit the source and re-render (`node docs/diagrams/source/render.mjs`); never hand-edit
+  an SVG. Child READMEs embed copies under their own `docs/images/`; refresh those copies when a diagram changes.
+- **Screenshots** in `docs/images/screenshots/` are real captures of the console from the `-website` Playwright
+  suite (`docs:screenshots`), not mockups.
 - **`user-docs/` rule.** `user-docs/` holds only files that help someone adopt, install and use the set as
   a whole. It is not for design, requirements or process material, and it must not link into `specs/`.
 - **`skills/` rule.** `skills/` holds agent skill documents for agent-facing tools in this set (the `afs`
