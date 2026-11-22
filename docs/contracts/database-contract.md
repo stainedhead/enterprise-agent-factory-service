@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract v1 at schema 000019 (2026-11-22). 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). 000017 adds `afs.schema_version()` for the startup check of services that cannot read the tracking table, and `identity_providers.cli_client_id` (the CLI public client, D48; `client_id` is the console client). Planned first release containing 000011 to 000017: `v0.13.0` 000018 adds daily report rollups and the follow-ups `-restapi` asked for (X-DB-8 to X-DB-10, `agent_secret_bindings` triggers, ETag-stable report schedules); 000019 adds `afs.record_work_order_secret` (template secrets for remediation teams) and `afs.event_detail`, and gives the outbox payloads written by `afs.instantiate_work_order_team` the API contract §7 envelope. Schema 000019 is at `-db` `main` (83f0345) and is not yet tagged; `-restapi` pins its pseudo-version until the tag exists |
+| **Status** | Contract v1 at schema 000019 (2026-11-22), with migration 000020 (Paperclip team collaboration, [paperclip-team-collaboration-PRD.md](../../paperclip-team-collaboration-PRD.md) DB-US-44 to DB-US-47) specified in §7.2 and not yet built; it is the next minor release after 000019. 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). 000017 adds `afs.schema_version()` for the startup check of services that cannot read the tracking table, and `identity_providers.cli_client_id` (the CLI public client, D48; `client_id` is the console client). Planned first release containing 000011 to 000017: `v0.13.0` 000018 adds daily report rollups and the follow-ups `-restapi` asked for (X-DB-8 to X-DB-10, `agent_secret_bindings` triggers, ETag-stable report schedules); 000019 adds `afs.record_work_order_secret` (template secrets for remediation teams) and `afs.event_detail`, and gives the outbox payloads written by `afs.instantiate_work_order_team` the API contract §7 envelope. Schema 000019 is at `-db` `main` (83f0345) and is not yet tagged; `-restapi` pins its pseudo-version until the tag exists |
 | **Provider** | [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db): migrations, roles, row-level security, `migrate` Go package, `afs-migrate` |
 | **Consumer** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi): `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing` |
 | **Full data dictionary** | `-db/docs/data-model.md` (every table, column rule and function). This document is the interface: who connects how, what each service may touch, and how failures surface |
@@ -21,7 +21,7 @@
 
 ## 2. Roles and connections
 
-Each service connects as its own LOGIN user, a member of exactly one role below, with IAM database
+Each service connects as its own LOGIN user, a member of exactly one role below (000020 adds `afs_edge`; run `afs-migrate bootstrap-roles` before deploying a release that contains it), with IAM database
 authentication on RDS (no static passwords). Pool sizes are per service.
 
 | Role | Service | May | May not |
@@ -31,6 +31,7 @@ authentication on RDS (no static passwords). Pool sizes are per service.
 | `afs_reconciler` | `afs-reconciler` (incl. activity and traffic collectors, outbox publisher, teardown, work order intake and tracking) | Read everything except idempotent response bodies and API key hashes; `LISTEN afs_desired_state`; open spend periods (`ensure_spend_counter`), release expired reservations, clear expired ceiling overrides and lower budgets to the base ceiling, drop partitions older than 13 months; write `resource_status`, lifecycle `state`, teardown columns, inference profile ARNs, identity and role-link status (agents and pools), `org_aws_accounts`, snapshots, `agent_activity`, `external_traffic`, tag sets; insert work orders from EventBridge, assign them and create their remediation teams (`instantiate_work_order_team`, 000016) and record the secrets of their template (`record_work_order_secret`, 000019), run the report rollups (`rollup_reports_recent`, `rollup_reports_daily`, 000018), mark pools deleted (000016), update repository progress from GitHub, insert work order notifications; purge expired idempotency keys; mark outbox published; create partitions; insert audit (drift) | Change desired state chosen by people |
 | `afs_gateway` | `afs-gateway` | Read teams, agents, pools, models (incl. `max_output_tokens`), prices, budgets, effective tags; `ensure_spend_counter`, `reserve_spend_held` / `settle_reservation` (and the older `reserve_spend` / `settle_spend`); insert `usage_events` (stamped with `tag_set_id`), tag sets, threshold events, outbox; `resolve_workload` (000016) | Anything else |
 | `afs_billing` | `afs-billing` | Read usage, teams, agents, models, prices, budgets, activity, traffic; write `cost_daily`, `cost_reconciliations`, `cost_allocation_tag_status`, tag sets; insert and supersede `model_price_proposals`; (000018) read `service_settings (key, value)` and `team_models (team_id, model_id, inference_profile_arn)` and the daily rollups; read `report_schedules` and `notification_channels` and update a schedule's run columns; insert outbox | Approve prices; change desired state |
+| `afs_edge` (000020) | `afs-edge` | `EXECUTE` on the `afs.collab_*` and `afs.record_collab_access` / `afs.emit_collab_secret_detected` functions of §7.2 and `afs.schema_version()`; `LISTEN afs_desired_state` | Any table privilege, any other function |
 | `afs_readonly` | Reporting and support | Read everything except API key hashes and audit before/after payloads | Write |
 
 ## 3. Session settings (`afs-api` only)
@@ -76,6 +77,10 @@ R = read, W = insert/update/delete, I = insert only, U(cols) = update listed col
 | `cost_allocation_tag_status` | R | R | — | W |
 | `agents` and `agent_pools` (000014: nullable `template_id` → `agent_templates`) | `template_id` set: a new row, or a changed `template_id` or `image`, needs an enabled template and an image digest on its allowed list, else `23514` (`agents_template_guard`, `agent_pools_template_guard`); NULL `template_id` is not guarded and the free-text `template` stays | as the rows below | as the rows below | as the rows below |
 | `agents`, `agent_secret_bindings`, `agent_identities`, `agent_role_links`, `agent_config_values`, `namespace_config_values`, `team_tags`, `external_system_optouts`, team `external_systems`, `secrets`, `budgets`, `log_destinations`, `notification_channels` | W | R; U(status columns) | R (agents, team_models, budgets) | R (agents) |
+| `team_collaboration`, `agent_collaboration` (000020, §7.2) | W (`team_collaboration`: insert with a collaboration agent, U(`web_ui_enabled`, `rest_api_enabled`, `registration_mode`); `agent_collaboration`: insert and U(`connect`, `paperclip_agent_id`); the latter only while `registration_mode = 'manual'`) | R; `agent_collaboration` U(`paperclip_agent_id`, `link_state`, `last_synced_at`, `last_error`); resource status in `resource_status` | — | — |
+| `collaboration_access` (000020, partitioned) | R (RLS: own teams) | R, F `ensure_collaboration_access_partition`, `drop_partitions_older_than` | — | — |
+| `collab_hostname_holds` (000020) | R | R, D (expired rows) | — | — |
+| `secrets` rows with `managed_by = 'paperclip'` (000020) | R | I, U, D (only such rows; trigger `42501` for any other secret row) | — | — |
 | `agent_volume_snapshots` | I (manual requests) | W | — | — |
 | `org_aws_accounts` | R | W | — | — |
 | `budgets` | W (`on_exhaust = 'notify'` only by service admins and only on persistent teams, guard 000013) | U(amount_usd) only to lower it to the base ceiling when an override expires | R | R |
@@ -133,6 +138,13 @@ All views are `security_invoker`, so RLS applies to `afs_app` callers through th
 | `afs.touch_row_runner_exempt()` (000018, trigger `report_schedules_touch`) | report schedules | Like `touch_row()`, but an update that changes only `last_run_at`, `last_status`, `last_error` and `next_run_at` leaves `version` and `updated_at` alone. A mixed update, or one that changes nothing, bumps as before; revision and change-feed triggers still fire |
 | `afs.record_work_order_secret(work_order_id, pool_id, name, description, arn, delivery, target) → text` (000019, SECURITY DEFINER, `afs_reconciler` only; `afs_app` gets `42501`) | reconciler (RC-12), after `instantiate_work_order_team`, once per `spec.secrets` entry of the template | Records one template secret for a work order whose status is `assigned`, `in_progress` or `pr_opened` and that has a team, on one `enabled` or `paused`, not deleted pool of that team: a managed `secrets` row (`pool_id` set), its `pool_secret_bindings` row (`delivery` `env` or `file`; `target` an environment variable name or an absolute path; `description` NULL is stored as an empty string), audit `RecordWorkOrderSecret` (`actor_type` `system`, `actor_id` `afs.current_actor()`, `pool_id` set, no value) and outbox `secret.created` with the envelope (`data` `{secretId, name, scope: pool}`, `poolId` in the envelope). Returns the secret id (`sec_…`). The ARN must be `arn:aws:secretsmanager:<region>:111122223333:secret:<path>-<6 alphanumeric>` with `<path>` equal to `afs.secret_path(team, NULL, pool, name)`, so the reconciler creates the empty secret at that path first and passes the ARN Secrets Manager returned. Idempotent on (team, name): an existing secret returns its id and writes nothing, whatever ARN or pool is passed. Never stores a value. Errors: unknown work order `P0002`; no team or work order not live `55000`; pool unknown, of another team or not live `23503`; bad ARN, delivery or target `23514`; target already bound on the pool or ARN already used `23505` |
 | `afs.event_detail(team_id, pool_id, data) → jsonb` (000019, owner only) | `instantiate_work_order_team`, `record_work_order_secret` | Builds the outbox payload of API contract §7: `{id (evt_ + ULID), occurredAt (UTC, `YYYY-MM-DDTHH:MM:SSZ`), teamId, poolId?, actor (afs.current_actor()), data}` |
+| `afs.collab_routes() → (team_id, slug, namespace, hostname, team_state, agent_id, agent_state, web_ui_enabled, rest_api_enabled, web_ui_effective, rest_api_effective, may_expose, ready, not_ready_reason, service_name, port, provider_id, issuer_url, groups_claim, collab_client_id, collab_client_secret_arn)` (000020, SECURITY DEFINER, `afs_edge` only) | afs-edge, at start, on `LISTEN afs_desired_state` and every 30 s | The route table; see §7.2 for the column rules |
+| `afs.collab_settings() → (key, value)` (000020, `afs_edge` only) | afs-edge | The seven `collab.*` settings and nothing else |
+| `afs.collab_principal(team_id, subject, provider_id, groups text[]) → (binding_id, role, subject_type, user_id)` (000020, `afs_edge` only) | afs-edge, per decision (cached 60 s) | Role bindings that apply to a signed-in person on a team; §7.2 |
+| `afs.collab_principal_key(team_id, key_sha256 bytea) → (key_id, role, state, expires_at, revoked_at)` (000020, `afs_edge` only) | afs-edge, for a team API key | The API-key form of the above; §7.2 |
+| `afs.record_collab_access(rows jsonb) → integer` (000020, `afs_edge` only) | afs-edge, every 30 s | Adds five-minute counts to `collaboration_access`; §7.2 |
+| `afs.emit_collab_secret_detected(team_id, surface, principal_kind, principal_id, pattern, action, count) → bigint` (000020, `afs_edge` only) | afs-edge | Writes one `collaboration.secret_detected` outbox event; §7.2 |
+| `afs.ensure_collaboration_access_partition(month date) → text` (000020, `afs_reconciler`) | reconciler, monthly | Like the other `ensure_*_partition` functions |
 | `afs.account_allowed(team_id, account_id) → boolean` | api, reconciler | Allowed-accounts filter |
 | `afs.team_missing_required_tags(team_id, key) → text` | api | Required tags a team still lacks (for clear errors) |
 | `afs.ensure_usage_partition`, `afs.ensure_activity_partition`, `afs.ensure_traffic_partition` | reconciler, monthly | Create next month's partitions ahead of time |
@@ -140,7 +152,7 @@ All views are `security_invoker`, so RLS applies to `afs_app` callers through th
 | `afs.purge_idempotency_keys() → bigint` | reconciler, every few minutes | Deletes expired keys |
 | `afs.caller_sees_team`, `afs.caller_is_service_admin`, `afs.caller_is_security_operator`, `afs.caller_owns_scope`, `afs.work_order_team`, `afs.caller_owns_work_order_repo`, `afs.current_actor`, `afs.new_id` (000016, owner only) | RLS, triggers and other functions | Not called by services directly |
 
-| `afs.schema_version() → bigint` (000017, SECURITY DEFINER, `afs_app`, `afs_reconciler`, `afs_gateway`, `afs_billing`, `afs_readonly`) | every service, at startup | The highest applied migration version, or 0 when none; nothing else is exposed. A service refuses to start when it is lower than the version the service was built against |
+| `afs.schema_version() → bigint` (000017, SECURITY DEFINER, `afs_app`, `afs_reconciler`, `afs_gateway`, `afs_billing`, `afs_readonly`, and from 000020 `afs_edge`) | every service, at startup | The highest applied migration version, or 0 when none; nothing else is exposed. A service refuses to start when it is lower than the version the service was built against |
 
 ### 4.3 Outbox payload shape
 
@@ -182,7 +194,7 @@ layer maps those to the [API contract](api-contract.md) §6 codes.
 |---|---|---|
 | `23514` check_violation | Field rule, guard trigger (for example a fixed tag, a disabled provider, ceiling exceeded, a `kind` change, `notify` on an ephemeral team, a disabled agent template or an image digest not on the template's allowed list, a succeeded export without `s3_uri`, an image without a full `@sha256:<64 hex>` digest (000015), a secret on a service-level notification channel (000015), a negative reconciliation amount (000015)) | `ValidationError` |
 | `23502` not_null_violation | Missing required field | `ValidationError` |
-| `23505` unique_violation | Duplicate name, slug, issuer, pending proposal | `Conflict` |
+| `23505` unique_violation | Duplicate name, slug, issuer, pending proposal; a second collaboration agent in a team (index `agents_team_collaboration_uq`, `details.reason = collaboration_agent_exists`); a slug whose hostname is held (constraint name `collab_hostname_held`, `details.reason = hostname_held`) | `Conflict` |
 | `23503` foreign_key_violation | Unknown reference on write → `ValidationError`; dependents exist on delete → `Conflict` | as stated |
 | `55000` object_not_in_prerequisite_state | State does not allow it (provider in use, proposal already decided, key in use by teams, a change to `api_keys.created_at` (000015); for the reconciler, a work order that cannot be instantiated (000016)) | `Conflict` |
 | `P0002` no_data_found | `instantiate_work_order_team` on an unknown work order (reconciler only) | logged, not shown |
@@ -244,6 +256,13 @@ The same list as root PRD §6.13. The database refuses a value outside its range
 | `api.cors_origins` | `[]` | JSON array of `https://host[:port]` origins | 000013 |
 | `work_orders.cost_center` | unset | string of 1 to 100 characters; cost center of a remediation team whose template names none | 000016 |
 | `work_orders.owner_email` | unset | string `local@domain`; owner of a remediation team whose template names none | 000016 |
+| `collab.base_domain` | `null` (unset: the feature is off) | JSON `null`, or a lower-case DNS name of 4 to 253 characters, each label 1 to 63 of `[a-z0-9-]` not starting or ending with `-` | 000020 |
+| `collab.public_endpoints` | `true` | boolean | 000020 |
+| `collab.allowed_source_cidrs` | `[]` | JSON array of at most 200 strings, each a valid IPv4 or IPv6 CIDR with no host bits set (`cidr` cast) | 000020 |
+| `collab.session_ttl_minutes` | `480` | integer 15 to 1440 | 000020 |
+| `collab.content_scan` | `"block"` | `"block"`, `"warn"`, `"off"` | 000020 |
+| `collab.max_body_mb` | `25` | integer 1 to 100 | 000020 |
+| `collab.denied_spike_threshold` | `50` | integer 1 to 100000 | 000020 |
 
 ## 7.1 Idempotency for `afs-api`
 
@@ -256,6 +275,208 @@ The same list as root PRD §6.13. The database refuses a value outside its range
 3. A response that contains `secretKey` (`CreateApiKey`, `CreateServiceApiKey`) is never stored as is:
    the API stores the body with `secretKey` removed, and the CHECK of 000011 refuses any body that still
    contains it. A replay returns the stored body, so the secret is shown only once (D52).
+
+## 7.2 Migration 000020: Paperclip team collaboration
+
+Requirements: [Paperclip PRD](../../paperclip-team-collaboration-PRD.md) COL-1, COL-2, COL-5, COL-7, COL-12, COL-14,
+COL-16 to COL-20, COL-23, COL-31, COL-36, SEC-7 and the TEAM-9 hostname hold; stories DB-US-44 to DB-US-47. Minor
+release. The migration is one transaction, additive, and its header notes the lock impact of each statement. Down
+reverses it (it drops the new objects and columns; it exists for local use and tests only). Decisions made here are
+PC-D11 to PC-D18 (PRD §12.1).
+
+**Pre-flight.** `bootstrap/roles.sql` gains `afs_edge` (`NOLOGIN`, created `IF NOT EXISTS` like the others). The
+migration begins by checking that the role exists and fails with `55000` ("run afs-migrate bootstrap-roles") if
+not, because `afs_owner` cannot create cluster roles. Operators run `afs-migrate bootstrap-roles` before deploying a
+`-restapi` release that embeds 000020.
+
+### 7.2.1 Existing tables
+
+| Change | Definition | Lock and notes |
+|---|---|---|
+| `agent_templates.capabilities` | `text[] NOT NULL DEFAULT '{}'` with `CHECK (afs.capabilities_ok(capabilities))`: at most 8 elements, no duplicates, every element in the known list, which is `{paperclip}` (adding a value is a later migration, per the text-plus-CHECK rule). Written by service admins through the existing `app_write` policy | Constant default: no rewrite |
+| `agents.role` | `text NOT NULL DEFAULT 'worker' CONSTRAINT agents_role_check CHECK (role IN ('worker','collaboration'))`. Existing rows become `worker` | Constant default: no rewrite; brief `ACCESS EXCLUSIVE` |
+| `agents_team_collaboration_uq` | `CREATE UNIQUE INDEX ON afs.agents (team_id) WHERE role = 'collaboration' AND deleted_at IS NULL`. A second live collaboration agent raises `23505` | Plain (transactional) build takes a `SHARE` lock that blocks agent writes while it builds; `agents` is small (thousands of rows), so it is milliseconds |
+| `agents` guard trigger `afs.agents_collaboration_guard()` (BEFORE INSERT OR UPDATE) | UPDATE that changes `role` → `23514`. `role = 'collaboration'` needs `template_id` not NULL on a template whose `capabilities` contains `paperclip`, `iam_identity = 'dedicated'` and a snapshot schedule other than `off`, else `23514`. `role = 'worker'` on a `paperclip` template → `23514` | Messages name the failed rule for people |
+| `agent_templates` guard trigger `afs.agent_templates_capability_guard()` (BEFORE UPDATE) | Removing `paperclip` while a live collaboration agent uses the template, or adding it while a live worker agent does → `55000` | |
+| `agents` cleanup trigger `afs.agents_collaboration_cleanup()` (AFTER UPDATE OF `state`, `deleted_at`; SECURITY DEFINER) | When a collaboration agent leaves `enabled` and `paused` (state `deleting` or `deleted`): deletes its `team_collaboration` row (so the route disappears) and sets `agent_collaboration.connect = false` for every agent of the team (link rows stay; the reconciler revokes keys and sets `link_state = 'disabled'`). Fires the revision and change-feed triggers | |
+| `teams.may_expose_collaboration` | `boolean NOT NULL DEFAULT true`. The guard trigger of 000013 lists it with the service-admin-only columns: any other caller changing it → `42501` | Constant default |
+| `identity_providers.collab_client_id`, `collab_client_secret_arn` | `collab_client_id text` nullable, `CHECK (collab_client_id ~ '^[A-Za-z0-9._:@-]{1,255}$')`; `collab_client_secret_arn text` nullable, `CHECK (… LIKE 'arn:aws%:secretsmanager:%:secret:%')`; `CHECK (collab_client_secret_arn IS NULL OR collab_client_id IS NOT NULL)`. A reference, never a value. Written by service admins through the existing policy | Nullable columns |
+| `role_bindings.role`, `api_keys.role` | Both CHECKs accept `team_collaborator`. `role_bindings_check` and `api_keys_scope_check` already tie service-level roles to a NULL team, so `team_collaborator` with no team → `23514` | Constraints replaced `NOT VALID` then `VALIDATE` |
+| `secrets.managed_by` | `text NOT NULL DEFAULT 'user' CHECK (managed_by IN ('user','afs','paperclip'))`; see §7.2.4 | Constant default |
+| `service_settings` | Range check of 000013 replaced (`NOT VALID` then `VALIDATE`) to cover the seven `collab.*` keys of §7.0, using helper `afs.cidr_list_ok(jsonb)` and `afs.dns_name_ok(jsonb)`; rows seeded with the defaults of §7.0 (`collab.base_domain` seeded as JSON `null`). A value outside a range → `23514` | |
+| `afs.drop_partitions_older_than(months)` | Replaced: also drops `collaboration_access` partitions (still never `audit_log`). Returns the dropped names as before | |
+| `afs.schema_version()` | `EXECUTE` also granted to `afs_edge` | |
+
+### 7.2.2 `team_collaboration` (desired state, one row per team that has a collaboration agent)
+
+| Column | Type | Rules |
+|---|---|---|
+| `team_id` | `text` | `PRIMARY KEY`, `REFERENCES afs.teams (id) ON DELETE CASCADE` |
+| `agent_id` | `text NOT NULL` | `FOREIGN KEY (team_id, agent_id) REFERENCES afs.agents (team_id, id)`; a constraint trigger requires that agent's `role = 'collaboration'` (`23514`) |
+| `web_ui_enabled` | `boolean NOT NULL DEFAULT true` | The team's stored choice (COL-20) |
+| `rest_api_enabled` | `boolean NOT NULL DEFAULT false` | The team's stored choice |
+| `registration_mode` | `text NOT NULL DEFAULT 'manual'` | `CHECK IN ('manual','managed')` |
+| `version`, `generation`, `created_at`, `created_by`, `updated_at` | as other desired-state tables | `afs.touch_row()`, generation bump, `afs.record_revision()` (key `<team_id>`, since the table has no `id` column, like `agent_secret_bindings`), `afs.notify_desired_state()` (payload `team_collaboration:<team_id>:<team_id>`) |
+
+`afs-api` inserts the row in the same transaction as the collaboration agent, and the cleanup trigger above deletes it.
+The database stores the team's choice and does not check guardrails: the guardrails (`collab.base_domain`,
+`collab.public_endpoints`, `teams.may_expose_collaboration`) apply when the route is computed, so turning one off keeps
+the stored choice (COL-20). `resource_status` carries the reconciler's conditions (`EndpointReady`, `PaperclipReady`,
+`RegistrationHealthy`, `UnmanagedPaperclipAgents`) under `resource_kind = 'team_collaboration'`, `resource_id = team_id`.
+RLS: `ENABLE ROW LEVEL SECURITY`, policy `app_team` for `afs_app` on `afs.caller_sees_team(team_id)` (all commands),
+`service_roles_all` for the service roles.
+
+### 7.2.3 `agent_collaboration` (desired state plus link status, one row per worker agent that was ever connected)
+
+| Column | Type | Rules |
+|---|---|---|
+| `team_id`, `agent_id` | `text NOT NULL` | `PRIMARY KEY (team_id, agent_id)`, `FOREIGN KEY (team_id, agent_id) REFERENCES afs.agents (team_id, id)`; the agent must be `role = 'worker'` (`23514`) |
+| `connect` | `boolean NOT NULL` | `true` while the team has no `team_collaboration` row → `55000` (`Conflict`) |
+| `paperclip_agent_id` | `text` | `CHECK (paperclip_agent_id ~ '^[A-Za-z0-9._:-]{1,128}$')`. A change by any role other than `afs_reconciler` while the team's `registration_mode = 'managed'` → `55000` |
+| `link_state` | `text NOT NULL` | `CHECK IN ('pending','linked','failed','disabled')`. Set by trigger on insert and on a change of `connect` (`pending` when `connect` becomes true, `disabled` when false); thereafter only `afs_reconciler` changes it |
+| `last_synced_at` | `timestamptz` | Reconciler only |
+| `last_error` | `text` | `CHECK (length(last_error) <= 500)`; reconciler only; never contains a Paperclip key or content |
+| `version`, `generation`, `created_at`, `created_by`, `updated_at` | as above | revision key `<team_id>/<agent_id>`, notify payload `agent_collaboration:<team_id>:<agent_id>`. A change of `connect` bumps `generation` so the reconciler rolls the pod |
+
+An agent with no row reads as `connect = false`, `link_state = 'disabled'`; agents that predate the collaboration agent
+are therefore not connected (COL-10) and there is no backfill. `afs-api` upserts the row (`INSERT … ON CONFLICT DO UPDATE`).
+Column grants enforce who writes what (§7.2.6). RLS as `team_collaboration`.
+
+### 7.2.4 Managed secrets and reserved names
+
+`secrets.managed_by` and trigger `afs.secrets_managed_guard()` (BEFORE INSERT OR UPDATE OR DELETE):
+
+| Secret name | `managed_by` allowed | Scope and ARN |
+|---|---|---|
+| `paperclip` | none (`23514`): it would sit beside the `paperclip/` prefix | |
+| `paperclip-better-auth-secret`, `paperclip-tool-action-signing-secret`, `paperclip-secrets-master-key`, `paperclip-board-api-key` | `afs` | agent scope, the team's collaboration agent only; normal managed path |
+| `paperclip-agent-api-key` | `user` (manual registration) or `afs` (managed registration) | agent scope, a worker agent; normal managed path |
+| any other `paperclip-*` | `paperclip` | agent scope, the collaboration agent; the ARN's path part must start with `afs.secret_path(team_id, agent_id, 'paperclip') \|\| '/'`; `origin = 'registered'` (Paperclip created it, so the managed-path recompute of the insert trigger does not apply) |
+| every other name | `user` | as today |
+
+Anything else → `23514`. For `paperclip` rows, `name` is `paperclip-` plus the path suffix lower-cased with characters
+outside `[a-z0-9-]` replaced by `-`, cut to 63 characters, and made unique with a `-<4 hex>` suffix on collision, so the
+existing `UNIQUE (team_id, name)` keeps holding (PC-D11). `afs_reconciler` is the only writer of `paperclip` rows;
+`afs_app` cannot insert or update one (policy and column grant) and `afs_reconciler` cannot write any other secret row
+(`42501`). An `agent_secret_bindings` insert for a `paperclip` secret → `23514`. `afs`-managed boot secrets are bound by
+`afs-api` in the `CreateAgent` transaction. The agent's secret path and IAM prefix rules are unchanged; the collaboration
+agent's role additionally may write and delete only below `.../<agent>/paperclip/` (SEC-7), which is an IAM matter for
+`-restapi`.
+
+### 7.2.5 Edge role, functions and fact table
+
+Role `afs_edge` holds `USAGE` on schema `afs`, `EXECUTE` on exactly the functions below (revoked from `PUBLIC`), and no
+table privilege. It may `LISTEN afs_desired_state`. All functions are `SECURITY DEFINER`, owned by `afs_owner`, with
+`SET search_path = pg_catalog, afs`, and return only the named columns.
+
+**`afs.collab_routes()`** returns one row per team that is not `deleting` or `deleted` and has a `team_collaboration` row:
+
+| Column | Type | Meaning |
+|---|---|---|
+| `team_id`, `slug`, `namespace` | `text` | |
+| `hostname` | `text` | `slug || '.' || collab.base_domain`; NULL when the base domain is unset |
+| `team_state` | `text` | `active` or `suspended` |
+| `agent_id`, `agent_state` | `text` | the collaboration agent; `enabled`, `paused`, `deleting` |
+| `web_ui_enabled`, `rest_api_enabled` | `boolean` | stored choices |
+| `web_ui_effective`, `rest_api_effective` | `boolean` | stored choice AND `teams.may_expose_collaboration` AND `collab.public_endpoints` AND base domain set AND (for the web UI) the provider has `collab_client_id` |
+| `may_expose` | `boolean` | the guardrail |
+| `ready` | `boolean` | `team_state = 'active'`, `agent_state = 'enabled'` and `resource_status` condition `EndpointReady = True` |
+| `not_ready_reason` | `text` | NULL when ready; else `team_suspended`, `paused` or `starting` (anything else, including a deleting agent, is `starting`) |
+| `service_name`, `port` | `text`, `integer` | `paperclip`, `3100` |
+| `provider_id`, `issuer_url`, `groups_claim` | `text` | the team's provider, else the default provider |
+| `collab_client_id`, `collab_client_secret_arn` | `text` | NULL when the provider has none |
+
+**`afs.collab_settings()`** returns `(key text, value jsonb)` for the seven `collab.*` keys only.
+
+**`afs.collab_principal(p_team_id text, p_subject text, p_provider_id text, p_groups text[])`** returns
+`(binding_id text, role text, subject_type text, user_id text)`: the `team_admin`, `team_viewer` and `team_collaborator`
+bindings on that team and the `service_admin` bindings that match the person, by the rules of `afs-api` (D21): a user
+binding matches on the user whose `sub` and provider equal the arguments (`user_id` is NULL when no such user row exists
+yet); a group binding matches when `p_groups` contains `group_name` and `p_provider_id` is the team's effective provider
+(service-level group bindings: the provider they name). No `security_operator` row is ever returned. `p_groups` is
+limited to 500 entries (`22023` beyond).
+
+**`afs.collab_principal_key(p_team_id text, p_key_sha256 bytea)`** returns
+`(key_id text, role text, state text, expires_at timestamptz, revoked_at timestamptz)`: no row for an unknown hash, for a
+service-level key, or for a key of another team (a key never reveals other teams); `state` is `active`, `expired` or
+`revoked`; sets `last_used_at` at most once a minute for a usable key. Never returns the hash.
+
+**`afs.record_collab_access(p_rows jsonb) → integer`** takes an array of at most 1000 objects `{bucket_start, team_id,
+surface, principal_kind, principal_id, outcome, service_admin_entry, requests, bytes}` and adds each to
+`collaboration_access` with `INSERT … ON CONFLICT DO UPDATE SET requests = requests + EXCLUDED.requests, bytes = bytes +
+EXCLUDED.bytes`. A `bucket_start` not on a five-minute boundary or outside `now() - 1 day … now() + 5 minutes` → `22023`;
+unknown values → `23514`; rows for an unknown team are skipped. Returns the number of rows applied. It writes counts
+only, never a body, path or header.
+
+**`afs.emit_collab_secret_detected(p_team_id text, p_surface text, p_principal_kind text, p_principal_id text, p_pattern
+text, p_action text, p_count integer) → bigint`** writes one `outbox_events` row of type `collaboration.secret_detected`
+with the API contract §7 envelope through `afs.event_detail` (actor `system:edge`) and returns the outbox id.
+`p_pattern` is one of `aws_access_key`, `github_token`, `slack_token`, `private_key`, `jwt`, `okta_client_secret`,
+`entra_client_secret`, `generic_assignment`; `p_action` is `blocked` or `warned`; there is no parameter that could carry a
+value or fragment. It can write no other event type (PC-D16).
+
+**`collaboration_access`** (fact table, partitioned by month on `bucket_start`, 13-month retention like the other fact
+tables, D36; `afs.ensure_collaboration_access_partition(month)` creates partitions ahead, a default partition catches
+strays):
+
+| Column | Type | Rules |
+|---|---|---|
+| `bucket_start` | `timestamptz NOT NULL` | `CHECK (extract(epoch FROM bucket_start)::bigint % 300 = 0)` |
+| `team_id` | `text NOT NULL` | no foreign key (facts outlive the team, like `agent_activity`) |
+| `surface` | `text NOT NULL` | `IN ('web_ui','rest_api')` |
+| `principal_kind` | `text NOT NULL` | `IN ('user','api_key','anonymous')` |
+| `principal_id` | `text NOT NULL` | `usr_…` or `key_…`; `''` exactly when `anonymous` (a person's name is never stored) |
+| `outcome` | `text NOT NULL` | `IN ('signed_in','signed_out','allowed','secret_warned','denied_unauthenticated','denied_forbidden','denied_surface_disabled','denied_secret_detected','denied_bad_request','throttled','unavailable')` |
+| `service_admin_entry` | `boolean NOT NULL DEFAULT false` | true when the person had access only as a service admin (COL-31) |
+| `requests` | `integer NOT NULL` | `> 0` |
+| `bytes` | `bigint NOT NULL DEFAULT 0` | `>= 0` |
+| `recorded_at` | `timestamptz NOT NULL DEFAULT now()` | |
+
+Primary key `(bucket_start, team_id, surface, principal_kind, principal_id, outcome, service_admin_entry)`; index on
+`(team_id, bucket_start)`. Denied-spike counting (COL-30) uses outcomes `denied_unauthenticated`, `denied_forbidden`,
+`denied_surface_disabled` and `denied_secret_detected`. Reports (COL-36) read the table directly; there is no rollup.
+RLS: `ENABLE ROW LEVEL SECURITY`, `SELECT` policy for `afs_app` on `afs.caller_sees_team(team_id)`, `service_roles_all`.
+
+**`collab_hostname_holds`** (TEAM-9, PC-D9): `slug text PRIMARY KEY`, `team_id text NOT NULL` (no foreign key),
+`held_until timestamptz NOT NULL`, `created_at timestamptz NOT NULL DEFAULT now()`. An AFTER UPDATE trigger on `teams`
+inserts (or extends) a hold of `now() + 30 days` when `deleted_at` is set on a team that has a `team_collaboration` row.
+A BEFORE INSERT trigger on `teams` refuses a slug with an unexpired hold held for a different `team_id` with `23505`
+(constraint name `collab_hostname_held`). `teams.slug` is `UNIQUE` across deleted rows today, which already refuses reuse;
+the hold keeps the rule explicit and survives any later purge of deleted team rows. The reconciler deletes expired
+holds daily; there is no early release in this release (PC-D11).
+
+### 7.2.6 Grants by role
+
+| Object | `afs_app` | `afs_reconciler` | `afs_edge` | `afs_billing` | `afs_readonly` | `afs_gateway` |
+|---|---|---|---|---|---|---|
+| `team_collaboration` | `SELECT`; `INSERT (team_id, agent_id, web_ui_enabled, rest_api_enabled, registration_mode)`; `UPDATE (web_ui_enabled, rest_api_enabled, registration_mode)`; no `DELETE` | `SELECT` | none | none | `SELECT` | none |
+| `agent_collaboration` | `SELECT`; `INSERT (team_id, agent_id, connect, paperclip_agent_id)`; `UPDATE (connect, paperclip_agent_id)` | `SELECT`; `UPDATE (paperclip_agent_id, link_state, last_synced_at, last_error)` | none | none | `SELECT` | none |
+| `collaboration_access` | `SELECT` (RLS) | `SELECT`; `EXECUTE ensure_collaboration_access_partition`, `drop_partitions_older_than` | via `record_collab_access` only | none | `SELECT` | none |
+| `collab_hostname_holds` | `SELECT` | `SELECT`, `DELETE` | none | none | `SELECT` | none |
+| `secrets` | `INSERT` and `UPDATE` as today, with `managed_by` insertable as `user` or `afs` only and not updatable; no write to `paperclip` rows | `INSERT`, `UPDATE`, `DELETE` on `managed_by = 'paperclip'` rows only; `SELECT` all as today | none | none | `SELECT` | none |
+| `agent_templates.capabilities`, `teams.may_expose_collaboration`, `identity_providers.collab_*`, `service_settings` `collab.*` | as the table today (service admins only where the guard says so) | `SELECT` | via the functions | `SELECT` on `service_settings` as today | `SELECT` | none |
+| functions of §7.2.5 | none | `ensure_collaboration_access_partition` | all but the partition function | none | none | none |
+
+`afs_billing` and `afs_gateway` get nothing new: the collaboration agent calls the gateway like any agent, and the
+collaboration report is on demand only (PC-D13). The reconciler's access to Paperclip's board key is the existing
+read of `secrets` plus an IAM condition in `-restapi`.
+
+### 7.2.7 Change feed, RLS and tests
+
+- Change feed (D30): notify triggers on `team_collaboration` and `agent_collaboration`; `teams`, `agents`, and
+  `identity_providers` already notify, which covers `may_expose_collaboration`, the role of an agent and provider
+  changes. `service_settings` has no `generation`, so a setting change reaches the edge at its next 30-second poll.
+- Revisions: `team_collaboration` and `agent_collaboration` have revision triggers; `collaboration_access` and
+  `collab_hostname_holds` do not.
+- RLS: both desired-state tables and `collaboration_access` as above; the new team-owned tables get rows in
+  `seedOtherTeams`, and `collaboration_access` gets rows for another team in the read-isolation test.
+- Tests: `TestCollaborationAgent/*` (second insert `23505`, role change `23514`, template, identity and snapshot checks,
+  capability removal `55000`), `TestTeamCollaboration/*`, `TestAgentCollaboration/*`, `TestManagedSecrets/*` (reserved
+  names, binding refusal, reconciler write scope), `TestServiceSettingRanges/collab.*`,
+  `TestRowLevelSecurityIsolatesTeams/team_collaboration`, `TestCrossTeamWritesChangeNothing/team_collaboration`,
+  `TestEdgeRole/*` (no direct select on any table; each function returns only its named columns; `emit_collab_secret_detected`
+  writes no other type), `TestCollaborationAccess/*` (alignment, additive upsert, retention), `TestHostnameHold/*`, and
+  up/down/up with checksums.
 
 ## 8. Change process
 

@@ -180,7 +180,7 @@ def admin_nav(on):
     return nav("Agent Factory", items, on)
 
 
-def team_nav(on, role, team="payments-factory", swarm=False):
+def team_nav(on, role, team="payments-factory", swarm=False, collab=False):
     items = [
         ("grp", "Team"), ("overview", "Overview"), ("agents", "Agents"), ("members", "Members & access"),
         ("grp", "Configuration"), ("secrets", "Secrets"), ("config", "Configuration values"), ("identities", "Agent identities"),
@@ -193,6 +193,8 @@ def team_nav(on, role, team="payments-factory", swarm=False):
         items.insert(4, ("keys", "API keys"))
     if swarm:
         items.insert(3, ("pools", "Pools & stages"))
+    if collab:
+        items.insert(items.index(("agents", "Agents")) + 1, ("collab", "Collaboration"))
     switch = f'<div class="team-switch"><span><b>{team}</b></span><span class="muted">▾</span></div>'
     return nav("Agent Factory", items, on, switch)
 
@@ -1145,5 +1147,69 @@ page("29-sec-work-order-detail", "so", nav("Agent Factory", [("grp", "Security")
 <div>Outside contacts · 1 repository · service email channel</div><div class="muted" style="margin-top:6px">Each owner is notified once per event: assigned, PR opened, merged, SLA warning (48 h before due), SLA breached and completion.</div></div></div>
 <div class="card"><div class="cb"><div class="k small muted">Equivalent CLI</div><div class="code">afs work-orders describe-work-order --work-order-id wo_01JD3Z…</div></div></div></div>
 """)
+
+# ------------------------------------------------------------------------------------------------
+# Paperclip team collaboration (T16, V3)
+# ------------------------------------------------------------------------------------------------
+
+def collab_page(ro):
+    dis = " dis" if ro else ""
+    tip = '<span class="tip"><span class="tipbox">Requires team-admin</span></span>' if ro else ""
+    banner = ('<div class="alert"><span class="ic">ⓘ</span><div><b>You have read-only access to this page.</b> '
+              'You can open Paperclip and see how it is set up. Team-admins (Marcus Chen) change the endpoints and connections. '
+              'Your role decides what you can do inside Paperclip: viewers read, collaborators also write.</div></div>') if ro else ""
+    open_btn = '<span class="btn p">Open Paperclip ↗</span>'
+    cmd = "" if ro else ('<div class="card"><div class="cb"><div class="k small muted">Equivalent CLI for the last change</div>'
+        '<div class="code">afs collaboration put-collaboration --team-id team_01JD3Z… --web-ui-enabled --no-rest-api-enabled</div></div></div>')
+    agents = [
+        ("reviewer-bot", True, "ag_8f2a41", "linked", "ok", "3 min ago"),
+        ("ledger-maintainer", True, "ag_3c77d0", "linked", "ok", "3 min ago"),
+        ("dependency-updater", True, "—", "pending", "warn", "—"),
+        ("release-notes-bot", True, "ag_91be05", "failed", "err", "12 min ago"),
+        ("test-gap-finder", False, "—", "disabled", "pend", "—"),
+        ("incident-scribe", False, "—", "disabled", "pend", "—"),
+    ]
+    rows = "".join(
+        f'<tr class="{"sel" if n=="dependency-updater" and not ro else ""}"><td><span class="cb2{" on" if n=="dependency-updater" and not ro else ""}"></span></td><td><a>{n}</a></td>'
+        f'<td>{tg(c, ro)}</td><td class="mono">{pid}</td><td>{st(k, ls)}</td><td class="muted">{when}</td></tr>'
+        for n, c, pid, ls, k, when in agents)
+    return f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › Collaboration</div>
+{banner}
+<div class="hdr"><div><h1>Collaboration <span class="badge b-blue">Paperclip</span> <span class="info">Info</span></h1>
+<div class="desc">One board, chat and roster for the team's agents and people. One collaboration agent per team.</div></div>
+<div class="btns"><span class="btn dd{dis}">Actions</span>{open_btn}{tip}</div></div>
+<div class="card"><div class="ch"><h2>Status</h2></div><div class="cb"><div class="grid g4">
+<div class="kv"><div class="k">Collaboration agent</div><div class="v"><a>paperclip-hub</a> <span class="badge b-blue">Collaboration</span></div><div class="k">Phase</div><div class="v">{st('ok','Ready')} · gen 6 / 6</div></div>
+<div class="kv"><div class="k">Hostname</div><div class="v mono">payments-factory.collab.example.com</div><div class="k">Registration</div><div class="v">Manual</div></div>
+<div class="kv"><div class="k">Web UI</div><div class="v">{st('ok','On')}</div><div class="k">REST API</div><div class="v">{st('pend','Off')}</div></div>
+<div class="kv"><div class="k">Conditions</div><div class="v small">EndpointReady {st('ok','True')}<br>PaperclipReady {st('ok','True')}<br>RegistrationHealthy {st('ok','True')}<br>UnmanagedPaperclipAgents {st('ok','False')}</div></div>
+</div></div></div>
+<div class="card"><div class="ch"><div><h2>Public endpoints</h2><div class="sub">Both are reached through the AFS edge: sign-in with {"your" if ro else "the team's"} company provider and an AFS role check on every request.</div></div></div><div class="cb">
+<div class="grid g2">
+<div class="tile on"><b>{tg(True, ro)} Web UI</b><span>The Paperclip board and chat in a browser. Viewers read; collaborators and team-admins can write.</span></div>
+<div class="tile"><b>{tg(False, ro)} REST API</b><span>Paperclip's API for pipelines, with an AFS token in X-Afs-Authorization. Needs the collaborator or team-admin role to write.</span></div></div>
+<div class="small muted" style="margin-top:10px">Switches are disabled with "Not allowed for this team by the service" when the team guardrail is off, or "Public collaboration is off for the service" when the service setting is off.</div></div></div>
+{cmd}
+<div class="card"><div class="ch"><div><h2>Connected agents <span class="cnt">(6)</span></h2><div class="sub">Connected agents get PAPERCLIP_API_URL, PAPERCLIP_AGENT_ID and PAPERCLIP_AGENT_API_KEY in their environment. Agents that predate the collaboration agent are not connected automatically.</div></div>
+<div class="btns"><span class="btn dis">Disconnect</span><span class="btn p{dis if ro else ''}">Connect</span></div></div>
+<div class="tools"><div class="filter">🔍 Find agents</div><span class="sel">All link states ▾</span><div class="pager">‹ <b>1</b> › ⚙</div></div>
+<table><tr><th></th><th>Agent</th><th>Connected</th><th>Paperclip agent id</th><th>Link state</th><th>Last sync</th></tr>{rows}</table></div>
+<div class="grid g2">
+<div class="card"><div class="ch"><div><h2>Paperclip-managed secrets <span class="cnt">(3)</span></h2><div class="sub">Created by Paperclip itself under the agent's reserved path. Read-only; values are never shown.</div></div></div>
+<table><tr><th>Name</th><th>Managed by</th><th>Last changed</th></tr>
+<tr><td class="mono">paperclip-github-connector</td><td><span class="badge b-warn">Managed by Paperclip</span></td><td>2026-11-19</td></tr>
+<tr><td class="mono">paperclip-jira-sync-token</td><td><span class="badge b-warn">Managed by Paperclip</span></td><td>2026-11-18</td></tr>
+<tr><td class="mono">paperclip-better-auth-secret</td><td><span class="badge b-blue">Managed by AFS</span></td><td>2026-11-12</td></tr></table></div>
+<div class="card"><div class="ch"><div><h2>Recent access</h2><div class="sub">Last 7 days, from the edge's records. Counts only, no content.</div></div></div><div class="cb">
+<div class="grid g3"><div class="kv"><div class="k">Sign-ins</div><div class="big g">64</div></div><div class="kv"><div class="k">People</div><div class="big g">11</div></div><div class="kv"><div class="k">Denied</div><div class="big g">3</div></div></div>
+<table><tr><th>Person</th><th>Sign-ins</th><th>Requests</th><th>Denied</th></tr>
+<tr><td>dana.ortiz</td><td>9</td><td class="num">1,204</td><td class="num">0</td></tr>
+<tr><td>marcus.chen</td><td>14</td><td class="num">3,880</td><td class="num">1</td></tr>
+<tr><td>priya.raman <span class="badge b-warn">Service admin entry</span></td><td>1</td><td class="num">42</td><td class="num">0</td></tr></table></div></div></div>
+"""
+
+page("30-ta-collaboration", "ta", team_nav("collab", "ta", collab=True), collab_page(False))
+page("31-tv-collaboration", "tv", team_nav("collab", "tv", collab=True), collab_page(True))
 
 print("\n".join(sorted(p.name for p in OUT.glob("*.html"))))

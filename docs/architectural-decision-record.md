@@ -275,3 +275,30 @@ Accepted, Proposed (needs review), Superseded.
   §8.2, §9 and §10 updated (US-19 to US-26); API contract v1.1.0; database contract at 000013; new gateway contract;
   solution design §3, §5, §7, §9 to §12 aligned. Repository PRDs follow in their own changes.
 
+## ADR-016 One public edge for team collaboration (Paperclip)
+
+- Status: Proposed (decided by Claude for J's review, 2026-11-22; PC-D1 and PC-D2 of the
+  [Paperclip PRD](../paperclip-team-collaboration-PRD.md))
+- Context: each team's agents and people need a shared board and chat (Paperclip, run by the Agentic Teammates
+  `agentic-team-w-paperclip` image). People must reach its web UI and REST API from the internet, but TEAM-3 and TEAM-4
+  deny all namespace ingress and forbid LoadBalancer and NodePort Services. Paperclip has no OIDC (its own sign-in is
+  email and password), its own agent and secret models, and its content is untrusted input to every agent that reads it.
+- Decision:
+  - **One AFS-owned public entry (PC-D1).** An internet-facing ALB with AWS WAF forwards to `afs-edge`, a Go service in
+    `afs-system` (multi-AZ, at least 3 replicas), which routes by host (`<team-slug>.<collab.base_domain>`, wildcard DNS
+    and certificate) to the team's `paperclip` ClusterIP Service. Teams still cannot publish anything; the reconciler
+    renders the only exception. One shared ALB keeps cost flat and needs no per-team listener rules.
+  - **The edge decides access, not Paperclip (PC-D2).** `afs-edge` signs people in with the team's own provider (OIDC code
+    + PKCE, fixed callback, host-only session cookie per team) and authorizes every request with the same
+    `internal/authz` code and role bindings as `afs-api`; REST callers send `X-Afs-Authorization` and keep Paperclip's
+    credential in `Authorization`. Paperclip's own login stays but is never the control: removing a binding cuts access
+    within 60 seconds. Web UI and REST API are switched on or off independently per team, under a per-team guardrail and a
+    service-wide switch.
+  - **A least-privilege database path.** The edge connects as `afs_edge`, which can execute six `SECURITY DEFINER`
+    functions (routes, settings, principal by person or key, access counts, one secret-detection event) and reads no table.
+  - **Recorded exceptions.** TEAM-3 and TEAM-4 gain the named openings of solution design §4.1; the in-namespace hop to
+    Paperclip is HTTP inside WireGuard (PC-D7), the one exception to TLS on every hop.
+- Consequences: a new component and an internet-facing attack surface for the platform (WAF, ASVS L2, penetration test
+  before production, kill switches); a new role `team_collaborator` and five permissions in the API contract; migration
+  `-db` 000020; contracts updated (database §7.2, API §4.4b and §4.4c, gateway: no change). Alternatives rejected: a load
+  balancer or Ingress per team (breaks TEAM-4 and multiplies cost), and trusting Paperclip's login (no SSO, no RBAC).

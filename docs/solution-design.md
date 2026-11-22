@@ -95,6 +95,7 @@ with owners and defaults, are PRD §10.3 (OQ-1 to OQ-9).
   Browser ── Web console (TS7/React) ──┐                                     │
   Terminal ── afs CLI (Go) ────────────┼──► ALB ──► afs-api (Go) ◄── JWT ────┘
   Pipelines ── @afs/sdk (TS7) ─────────┘              │  RBAC, validation, audit
+  Internet ── public ALB + WAF ──► afs-edge (SSO, authz, scan) ──► ns afs-t-<slug> Service paperclip:3100
                                                       ▼
                                        ┌────── RDS PostgreSQL ──────┐
                                        │ desired state · audit ·    │
@@ -141,6 +142,10 @@ It records `observed_generation`, phase and conditions per resource in `resource
 
 Volume drift is handled like any other: a volume smaller than desired is expanded (online, EBS supports it); a PVC that is missing is re-created from the agent's latest completed snapshot when one exists (empty otherwise) and raises an alert; a volume bigger than desired, or of another storage class, is reported as a condition rather than changed, because EBS cannot shrink and a class change needs a data migration. EBS volumes live in one Availability Zone, so an agent reschedules within its volume's zone; moving it to another zone is a restore from snapshot.
 
+**afs-edge (Go).** The only component reachable from the internet, added by the Paperclip team collaboration change ([PRD](../paperclip-team-collaboration-PRD.md), PC-D1, ADR-016). Runs in `afs-system`, multi-AZ, at least 3 replicas, behind one internet-facing ALB (platform Terraform) with a wildcard ACM certificate for `*.<collab.base_domain>` and an AWS WAF web ACL (managed rule groups, a per-IP rate rule, an optional corporate CIDR allow list). It maps the request's host (`<team-slug>.<collab.base_domain>`) to a team through the route table (`afs.collab_routes()`, refreshed on the change feed and every 30 seconds), signs people in with OIDC code + PKCE against the team's own provider (one fixed callback per environment, a one-time handoff and a host-only `__Host-afs-collab` cookie per team host), authorizes every request with the same `internal/authz` code and role bindings as `afs-api` (`collaboration:access` for `GET` and `HEAD`, `collaboration:contribute` for everything else, decisions cached at most 60 seconds), accepts REST callers on `X-Afs-Authorization`, scans request bodies for credential patterns, limits and records access, and forwards to that team's `paperclip` Service (port 3100) and nothing else. It connects to the database as `afs_edge`, which can only execute six `SECURITY DEFINER` functions, and uses Pod Identity for its AWS calls. It never stores or logs Paperclip content. Externally visible behaviour: [API contract §4.4c](contracts/api-contract.md).
+
+The reconciler gains, for a team with a collaboration agent only: the ClusterIP Service `paperclip` and Paperclip's environment and secret-provider settings on that agent's pod; an egress rule from each connected agent to the Paperclip pod on TCP 3100 and an ingress policy on that pod admitting only those agents, `afs-edge` and the reconciler; the admission additions of §4; and, in `managed` registration, the Paperclip roster, key and secret scans.
+
 **afs-gateway (Go).** The only path from agents to Bedrock. Runs in `afs-system`, multi-AZ. The wire interface is the [gateway contract](contracts/gateway-contract.md) (D28).
 
 1. Agent calls a Bedrock Runtime compatible path (`POST /model/{modelId}/converse`, `/converse-stream`, `/invoke`, `/invoke-with-response-stream`) or the Anthropic Messages compatible `POST /anthropic/v1/messages`, using its standard SDK. The pod gets `AFS_GATEWAY_URL`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY=afs-gateway` (a placeholder, not a secret) and the gateway's CA (`/var/run/secrets/afs/gateway/ca.crt`, named in `AWS_CA_BUNDLE`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS`), so standard SDKs need no change.
@@ -161,7 +166,7 @@ At higher scale the spend counters move to ElastiCache (Redis/Valkey) with Postg
 
 | Layer | Control |
 |---|---|
-| Network | Namespace per team. Default-deny `NetworkPolicy` for ingress and egress. Only DNS, gateway and the endpoints of the external systems each agent may use (service catalog → team → agent, each level only narrowing). No cross-namespace traffic. Admission policy (ValidatingAdmissionPolicy by default; Kyverno is the alternative, OQ-6) blocks teams from creating their own NetworkPolicies, Services of type LoadBalancer/NodePort, or hostNetwork pods |
+| Network | Namespace per team. Default-deny `NetworkPolicy` for ingress and egress (two named exceptions for Paperclip, below). Only DNS, gateway and the endpoints of the external systems each agent may use (service catalog → team → agent, each level only narrowing). No cross-namespace traffic. Admission policy (ValidatingAdmissionPolicy by default; Kyverno is the alternative, OQ-6) blocks teams from creating their own NetworkPolicies, Services of type LoadBalancer/NodePort, or hostNetwork pods (and, since the collaboration change, Ingress and Gateway API objects, `externalIPs`, `loadBalancerSourceRanges` and any Service that selects the collaboration pod other than the reconciler's `paperclip` Service) |
 | Compute | Pod Security Admission `restricted`. ResourceQuota/LimitRange. Optional dedicated Karpenter NodePool per sensitivity tier (taints + tolerations) for teams needing node-level isolation |
 | Kubernetes API | Agents' service accounts get no Kubernetes RBAC by default (`automountServiceAccountToken: false`; only the optional projected gateway token and, for work order reporting, the `afs-api` token are mounted). Humans have no kubectl access by default; team viewers can optionally get read-only via EKS access entries scoped to their namespace |
 | AWS IAM | One IAM role per team, ABAC by the `afs-team-id` role tag and the Pod Identity `kubernetes-namespace` session tag. Secrets, S3 prefixes, log groups and inference profiles are all tagged with the team id, and the policy only matches its own tag |
@@ -169,6 +174,16 @@ At higher scale the spend counters move to ElastiCache (Redis/Valkey) with Postg
 | Data (AFS DB) | Every team-scoped table has `team_id`. API authorization filters on it. PostgreSQL row-level security as defense in depth (`afs.team_ids`, `afs.service_admin`, `afs.security_operator` session settings, database contract §3) |
 | Spend | Separate inference profile, budget, counters and IAM deny per team |
 | Logs | Separate log group / S3 prefix / destination per team |
+| Public ingress | One AFS-owned entry: internet-facing ALB with WAF to `afs-edge` in `afs-system`. Teams own no load balancer, Ingress or route. The edge decides access per request with AFS role bindings and the team's own provider, forwards only to the team's `paperclip` Service, and strips AFS credentials. Per-team and service-wide kill switches (`mayExposeCollaboration`, `collab.public_endpoints`); no team namespace is reachable from outside except through it |
+
+### 4.1 Exceptions for Paperclip collaboration
+
+Team namespaces keep default deny; these are the only openings, all rendered by the reconciler, never by a team:
+
+- **TEAM-3.** Egress from each *connected* agent to the Paperclip pod on TCP 3100 in the same namespace, and an ingress policy on the Paperclip pod that admits only connected agents of the same namespace, `afs-edge` pods and the reconciler. Unconnected agents and every other namespace stay denied. Paperclip never initiates a connection to another agent (pull only, PC-D5).
+- **TEAM-4.** Admission policy still refuses what teams could use to publish. Only the reconciler may create the one `paperclip` ClusterIP Service in a team namespace; isolation tests prove a team cannot publish anything, including a second Paperclip.
+- **Encryption in transit (PC-D7).** Paperclip serves plain HTTP, so the hops from `afs-edge` and from agents to Paperclip are HTTP inside Cilium's WireGuard transparent encryption and the namespace policy. This is the one recorded exception to the root PRD's rule that every hop is TLS; TLS 1.2+ holds from the internet to the ALB and from the ALB to `afs-edge`.
+- **One identity.** The collaboration pod runs the Paperclip server and its Hermes orchestrator as one AFS agent: one ServiceAccount, IAM role, gateway identity, volume and audit trail (PC-D3).
 
 Namespace isolation shares the kernel. That is acceptable for internal enterprise tenants; the dedicated-NodePool option exists for teams that handle regulated data, and gVisor/Kata runtime classes are a non-goal of this release.
 
@@ -187,6 +202,7 @@ Agents and pools that report work order progress call `afs-api` with a second pr
 | `service_admin` | Global | Everything, including service settings, model catalog and pricing, creating/deleting teams, all teams' data, export/import, audit |
 | `team_admin` | One team | Manage that team's agents, members, budgets (within the limit a service admin set), identities, secrets, configuration, log delivery, notification channels |
 | `team_viewer` | One team | Read that team's configuration, status, usage and audit. Secrets show name, description and reference metadata, never values |
+| `team_collaborator` | One team | Everything `team_viewer` can read, plus write in the team's Paperclip (`collaboration:contribute`) and use its REST API (`collaboration:api`), with no right to change AFS configuration (PC-D6) |
 | `security_operator` | Global, work orders only | Create, cancel and read every work order and its progress; list and describe swarm templates; look up the team directory; no team access (`403` on every team route). Also held by service-level API keys for security tooling |
 
 Role bindings can be granted to a user or to an IdP group (`subject_type = group`, matched on the `groups` claim), so enterprises manage membership in the IdP. A person can hold different roles on different teams. Budget **ceilings** (`max_budget_usd`) are set by service admins; team admins set budgets up to that ceiling.
@@ -239,6 +255,10 @@ column, is [API contract §3](contracts/api-contract.md#3-permission-catalog).
 | View work orders assigned to or touching own team | ✓ | ✓ | ✓ |
 | Report repository progress on an assigned work order | ✓ | ✓ | |
 | Issue service-level security operator API keys | ✓ | | |
+| Open the team's Paperclip through the public endpoint, read-only (`collaboration:access`; also `team_collaborator`) | ✓ | ✓ | ✓ |
+| Write in Paperclip and use its REST API (`collaboration:contribute`, `collaboration:api`; also `team_collaborator`) | ✓ | ✓ | |
+| Create the collaboration agent, switch the web UI and REST API, connect agents, rotate Paperclip keys | ✓ | ✓ | |
+| Allow or forbid public collaboration per team (`mayExposeCollaboration`) and service-wide (`collab.*` settings) | ✓ | | |
 
 Each action is a named permission (e.g. `agents:write`, `secrets:read-metadata`). The API's route table declares the permission for each route; one authorization function `Authorize(principal, permission, teamID)` is the only place decisions are made. `GET /v1/me` returns the caller's bindings and effective permissions per team so the CLI and web can hide or disable actions. **The client-side check is UX only; the API is the enforcement point.**
 
@@ -493,4 +513,5 @@ enterprise-agent-factory-service/              docs-only root: PRD, this design,
 | CLI language | Go | Python (like AWS CLI) | Single static binary, shares API types |
 | Network policy | Cilium (decided) | VPC CNI network policy | FQDN egress rules for SaaS endpoints |
 | Egress control | External systems catalog with service → team → agent opt-outs, rendered as per-agent FQDN policy | Free-form host allow-list per team | Named, documented, centrally governed services; per-agent least privilege; one place to see who can reach what |
+| Public collaboration endpoint | One AFS-owned ALB, WAF and `afs-edge` doing SSO and authorization per request | A load balancer or Ingress per team; trusting Paperclip's own login | One governed entry, flat cost, each team keeps its own provider, and removing a binding cuts access in 60 seconds whatever Paperclip says |
 | Cross-account access | Dedicated agent role + role links with external IDs, inside a per-team glob filter | Shared team role trusted by every target account | Least privilege per agent, CloudTrail attribution in the target account, and a guardrail central teams control |
