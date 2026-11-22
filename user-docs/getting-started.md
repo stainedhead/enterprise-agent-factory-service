@@ -17,7 +17,7 @@ The root `.gitignore` keeps the children untracked, so each stays its own reposi
 | Repository | Install |
 |---|---|
 | -db, -restapi, -cli | Go 1.27 (`go.mod` pins the toolchain, so any Go ≥ 1.21 downloads it) and `make`. `-db` integration tests also need PostgreSQL 17 or Docker |
-| -website | Node.js 22 or later, pnpm 12 (`corepack enable`) |
+| -website | Bun 1.4 (`curl -fsSL https://bun.sh/install \| bash`); Node.js 22 or later only as a fallback runtime |
 
 ## Claude Code plugins
 
@@ -31,10 +31,15 @@ The root `.gitignore` keeps the children untracked, so each stays its own reposi
 
 | You want to | Go to |
 |---|---|
-| Understand the architecture | `docs/solution-design.md` in this repository |
+| Understand the architecture | [The diagrams](../docs/diagrams/README.md) and `docs/solution-design.md` in this repository |
 | Read the requirements and UI | `enterprise-agent-factory-service-initial-PRD.md` in this repository |
 | Change tables, roles or row-level security | `enterprise-agent-factory-service-db/` |
 | Change the API, reconciler, gateway or billing | `enterprise-agent-factory-service-restapi/` |
 | Change the `afs` CLI | `enterprise-agent-factory-service-cli/` |
 | Change the SDK or web console | `enterprise-agent-factory-service-website/` |
 | Specify a feature that touches both | `specs/` in this repository |
+
+## Next
+
+- New to AFS? Read the [adoption guide](adoption-guide.md).
+- Want to contribute? Read [CONTRIBUTING.md](../CONTRIBUTING.md).
