@@ -208,6 +208,7 @@ Every navigation item opens one screen below:
 | Swarm templates, External systems, Export & import | P5, S7, S11 |
 | Team: Overview, Agents, Pools & stages, Members & access | T1 (V1), T2, P4, T6 |
 | Configuration: Secrets, Agent identities, Configuration values, External systems, Models | T4 (V2), T8, T7, T9, T1 *Models* tab |
+| Team: Collaboration (Paperclip, added by the [Paperclip change](paperclip-team-collaboration-PRD.md)) | T16 (V3) |
 | Configuration: Log delivery, Notifications | T14 |
 | Cost: Budget & usage, Reports, Cost tags | T5, T11, T13 |
 | History: Activity & audit, Config revisions | T15 |
@@ -429,6 +430,12 @@ revisions* lists revisions per resource with a diff of any two; *Restore* runs a
 and restores on confirmation (CFG-3, CFG-6). Team viewers see both read-only; *Restore* is disabled for
 them.
 
+**T16 · Collaboration (Paperclip).** Added by the [Paperclip change PRD](paperclip-team-collaboration-PRD.md) (section 5 there
+describes the panels): status and conditions, the *Web UI* and *REST API* switches, connected agents with link state,
+Paperclip-managed secrets, recent access. *Open Paperclip* opens the team hostname.
+
+![Collaboration, team-admin](docs/ui/30-ta-collaboration.png)
+
 #### Team viewer
 
 **V1 · Team overview, read-only.** The same page as T1 with an information banner. *Edit*, *Actions* and
@@ -441,6 +448,10 @@ shown (D50).
 are used, so they can troubleshoot, but cannot create, rotate or bind them, and nobody sees values.
 
 ![Secrets, team viewer](docs/ui/13-tv-secrets.png)
+
+**V3 · Collaboration, read-only.** The T16 page with every control disabled ("Requires team-admin"); *Open Paperclip* works for anyone with `collaboration:access`.
+
+![Collaboration, team viewer](docs/ui/31-tv-collaboration.png)
 
 #### Budgeted workloads, swarms and CVE remediation
 

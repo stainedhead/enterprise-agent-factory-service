@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft for review (2026-11-22), revised after the `review-prd` pass the same day |
+| **Status** | Draft for review (2026-11-22), revised after the `review-prd` pass the same day. Contracts landed 2026-11-22: database contract §7.2 (migration 000020), API contract v1.3.0 (§4.4b, §4.4c), gateway contract note, solution design §3.1, §4, §4.1, ADR-016, mockups T16 and V3, architecture diagram. Child repositories have not started |
 | **Kind** | Change PRD to the feature-complete [initial PRD](enterprise-agent-factory-service-initial-PRD.md). Requirements here add to it; where they change an existing requirement, the change is named (section 6.8) |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
@@ -117,9 +117,12 @@ reach Paperclip inside the namespace with their Paperclip key, never through the
 
 ## 5. User experience
 
-Follows the console rules of the initial PRD §5.1. No new mockups are made in this PRD; the spec phase adds
-`docs/ui/30-ta-collaboration.png` and `31-tv-collaboration.png` from HTML sources, and this list is updated
-in the same change.
+Follows the console rules of the initial PRD §5.1. Mockups (HTML sources in `docs/ui/source/`):
+[T16](docs/ui/30-ta-collaboration.png) and [V3](docs/ui/31-tv-collaboration.png), also listed in the initial PRD §5.3.
+
+![Collaboration, team-admin](docs/ui/30-ta-collaboration.png)
+
+![Collaboration, read-only](docs/ui/31-tv-collaboration.png)
 
 **T16 · Collaboration (Paperclip)** (new; team navigation *Team → Collaboration*). Page header with *Info*,
 *Open Paperclip* (primary, opens the team hostname in a new tab; disabled with the reason when the web UI is
@@ -580,6 +583,15 @@ provider first: `-db` 000020, then `-restapi` (`api/openapi.yaml`, edge, reconci
 | PC-D8 | Defaults | Web UI on, REST API off at creation; `mayExposeCollaboration` on per team; `collab.public_endpoints` on; content scanning `block`; registration `manual` until managed mode ships, then `managed` for new collaboration agents |
 | PC-D9 | Hostname | `<team-slug>.<collab.base_domain>`, wildcard DNS and certificate, so team names stay out of certificate transparency; a deleted team's hostname is held for 30 days |
 | PC-D10 | Pools, push adapters, inbound webhooks | Out of scope (section 3); each would widen the opening or break per-agent identity |
+| PC-D11 | Reserved secret names, and the hostname hold | `paperclip` is reserved outright; the three boot secrets and `paperclip-board-api-key` are `afs`-managed on the collaboration agent; `paperclip-agent-api-key` stays creatable by a team-admin on a worker (needed for `manual` registration, so DB-US-46's blanket `paperclip-` reservation has this one exception); other `paperclip-*` names belong to `managed_by = paperclip` rows named `paperclip-<sanitized path suffix>`. The 30-day hostname hold is a table `collab_hostname_holds (slug, team_id, held_until)` filled by a trigger when a team with a collaboration row is deleted, checked on team insert, purged daily by the reconciler; no early release |
+| PC-D12 | How does the edge read everything it needs with no table access? | `afs_edge` executes six functions: `collab_routes()` (which also carries the team's provider issuer, groups claim, collaboration client id and secret ARN), `collab_settings()`, `collab_principal(...)`, `collab_principal_key(...)`, `record_collab_access(rows jsonb)` and `emit_collab_secret_detected(...)`. DB-US-47 named three; the rest were needed for settings, provider data and the secret-detection event |
+| PC-D13 | Is the collaboration report schedulable? | No, on demand only (`GetTeamReport` and `GetServiceReport`, kind `collaboration`), so `afs_billing` gets no new grants |
+| PC-D14 | Who emits the link events? | The reconciler, when `linkState` reaches or leaves `linked`; `ConnectAgentToCollaboration` and `DisconnectAgentFromCollaboration` write audit only and join the outbox exemption list; `RotateCollaborationKeys` emits `secret.rotated` per secret |
+| PC-D15 | Permission for `ListCollaborationEndpoints` | Existing `admin:settings`; no new service-level permission |
+| PC-D16 | Who raises `collaboration.denied_spike`? | The reconciler, from `collaboration_access` every minute over a 5-minute window, so replicas need no shared counters and delivery stays within 2 minutes; the edge emits only `collaboration.secret_detected`, through a function that can write that one event type |
+| PC-D17 | WebSocket frames from read-only callers | A caller holding only `collaboration:access` may open WebSocket and SSE streams to watch; any client frame closes the connection (1008). Writers' text frames are scanned like bodies |
+| PC-D18 | Compressed request bodies | Refused with `400 unsupported_encoding` while scanning is `block` or `warn`, because they cannot be scanned |
+| PC-D19 | Collaboration resource before an agent exists | `GetTeamCollaboration` and `ListCollaborationLinks` return `404` and the mutations `409`, both with `details.reason = collaboration_agent_missing`; the console shows an empty state linking to T3 |
 
 ### 12.2 Risks
 

@@ -30,6 +30,7 @@ contracts, and links to the four repositories that hold the code.
 - [Swarms and CVE remediation](#swarms-and-cve-remediation)
 - [Roles](#roles)
 - [The repositories](#the-repositories)
+- [Related projects](#related-projects)
 - [Documentation for users](#documentation-for-users)
 - [Contributing](#contributing)
 - [Status](#status)
@@ -161,6 +162,15 @@ Each child is an independent repository. Clone them next to this one (see
 | [enterprise-agent-factory-service-website](https://github.com/stainedhead/enterprise-agent-factory-service-website) | TypeScript 7, Bun | `@afs/sdk` and the web console | [README](https://github.com/stainedhead/enterprise-agent-factory-service-website#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-website/blob/main/user-docs/README.md) |
 
 ![Repositories and contracts](docs/diagrams/repository-map.svg)
+
+## Related projects
+
+- [agentic-teams](https://github.com/stainedhead/agentic-teams): the map of the repositories that let
+  autonomous SDLC agents work as attributable teammates (Hermes and CLI harness images, Paperclip, Okta-backed
+  credentials). AFS runs those agents; it does not build them.
+- [software-factory-manager](https://github.com/stainedhead/software-factory-manager): builds `facman`, a
+  terminal UI and headless CLI that gives lab machines and CI runners a consistent toolset for working in
+  software factories. A related project from the same author.
 
 ## Documentation for users
 

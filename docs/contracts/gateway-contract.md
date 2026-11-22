@@ -44,6 +44,8 @@ Request and response bodies are passed through unchanged except that the gateway
 The gateway identifies the calling pod by its **source pod IP**, never by a credential the agent's SDK
 sends (D57). This is what keeps standard SDKs working unchanged.
 
+A team's Paperclip collaboration agent is an ordinary agent to the gateway: one pod, one agent id, the same reservation and `402` rules. Paperclip's orchestrator (Hermes) and the Paperclip server share that pod's identity, so their calls are attributed to the collaboration agent (Paperclip PRD COL-4). Nothing in this contract changes for it.
+
 | Item | Value |
 |---|---|
 | Identity | Source pod IP, mapped to namespace, ServiceAccount and pod (hence team, agent or pool, and worker pod) through the Kubernetes API (pod watch, cached) and Cilium endpoint identity. An IP with no current team pod → `401 Unauthenticated` |
