@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract v1.3.1 (2026-11-22) corrects v1.3.0 after the `-db`, `-restapi`, `-website` and `-cli` PRD reviews (see §9). v1.3.0 (2026-11-22) adds Paperclip team collaboration (§4.4b, §4.4c, the `team_collaborator` role and the events of §7; see §9); v1.2.0, draft for implementation (2026-11-21); v1.2.0 records the decisions of `-restapi` milestone M0 (CD-1 to CD-10, see §9) and, as an amendment of 2026-11-22, those of the feature-complete build (CD-7 exemption list, CD-11, CD-12, swarm template secrets, `Me.servicePermissions`; see §9); v1.1.0 was revised after the `review-prd` pass (root PRD D23 to D57) |
+| **Status** | Contract v1.3.2 (2026-11-22) records decisions from the build of the Paperclip collaboration change (see §9). v1.3.1 (2026-11-22) corrects v1.3.0 after the `-db`, `-restapi`, `-website` and `-cli` PRD reviews (see §9). v1.3.0 (2026-11-22) adds Paperclip team collaboration (§4.4b, §4.4c, the `team_collaborator` role and the events of §7; see §9); v1.2.0, draft for implementation (2026-11-21); v1.2.0 records the decisions of `-restapi` milestone M0 (CD-1 to CD-10, see §9) and, as an amendment of 2026-11-22, those of the feature-complete build (CD-7 exemption list, CD-11, CD-12, swarm template secrets, `Me.servicePermissions`; see §9); v1.1.0 was revised after the `review-prd` pass (root PRD D23 to D57) |
 | **Provider** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi) (`afs-api`) |
 | **Consumers** | [-cli](https://github.com/stainedhead/enterprise-agent-factory-service-cli) (`afs`), [-website](https://github.com/stainedhead/enterprise-agent-factory-service-website) (`@afs/sdk`, console) |
 | **Machine-readable form** | `-restapi/api/openapi.yaml` (OpenAPI 3.1). Built from this document; once an operation is in the YAML, the YAML wins and this document is updated to match in the same PR |
@@ -282,8 +282,9 @@ v1.3.0 adds `role` and `collaboration` (§4.4b):
   with its defaults; if Secrets Manager cannot be written the request fails `503 Unavailable` and creates nothing. It emits
   `agent.created` and one `secret.created` per boot secret. `DeleteAgent` of the collaboration agent disables both surfaces,
   removes the route and disconnects every agent (COL-8).
-- `ListAgentTemplates` and `PutAgentTemplate` carry `capabilities[]` (values: `paperclip`); `ListAgentTemplates` accepts
-  `?capability=`.
+- `ListAgentTemplates` and `PutAgentTemplate` carry `capabilities[]` (values: `paperclip`); `ListAgentTemplates` has **no**
+  `capability` filter (decision RCF-1, v1.3.2): the list is small and each item carries `capabilities[]`, so clients filter
+  locally. The CLI and the PRD drop `--capability`.
 
 ### 4.4a Swarms: stages and pools
 
@@ -435,10 +436,11 @@ InvokeApi operation: …`, exit 254).
 ambiguous_credentials`). With neither, browser navigation (`Accept: text/html`, `Sec-Fetch-Mode: navigate`) is web UI
 traffic and is redirected to sign in; anything else is API traffic.
 
-**Credentials.** `X-Afs-Authorization` is an access token from the team's sign-in provider (same issuer, audience and
-expiry rules as `afs-api`, §2, so the CLI's SSO token works) or a team API key (`afsk_…`) whose role holds
+**Credentials.** `X-Afs-Authorization` is an access token from the team's sign-in provider (same issuer and expiry rules as `afs-api`, §2; the audience rules are below, so the CLI's SSO token works) or a team API key (`afsk_…`) whose role holds
 `collaboration:api`. The caller's Paperclip credential stays in `Authorization`. The edge validates and strips
 `X-Afs-Authorization`, decides with `internal/authz` (cached at most 60 s), and forwards.
+
+**Bearer audiences (v1.3.2).** The edge accepts a bearer token whose `aud` is one of three client ids of the team's provider: the console client id (`identity_providers.client_id`), the CLI client id (`cli_client_id`) or the collaboration client id (`collab_client_id`). The first two come from `afs.collab_routes()` (`-db` 000021). Any other audience is `401 token_invalid`.
 
 **Hosts.** The ALB listener certificate covers `<collab.base_domain>` and `*.<collab.base_domain>`, Route 53 has an apex record and the wildcard, and listener rules forward only those host headers. The edge refuses any `Host` that is neither the apex nor a known team host (`404`); it does not check SNI, which the ALB terminates (G4).
 
@@ -518,7 +520,7 @@ secrets and, in `managed` registration, a connected agent's `paperclip-agent-api
 Paperclip itself under the reserved prefix `<service>/<namespace>/<agent>/paperclip/`, SEC-7; listed with metadata, never a
 value, refreshed hourly from Secrets Manager metadata; `name` is `paperclip-` plus the path suffix). `ListSecrets` accepts
 `?managedBy=user|afs|paperclip`. For `afs` and `paperclip` secrets `UpdateSecret`, `DeleteSecret` and `PutSecretValue` →
-`409 Conflict` (`details.reason = managed_secret`); `RotateSecret` on an `afs` secret takes no body (AFS generates the value) and is allowed except
+`409 Conflict` (`details.reason = managed_secret`; **planned addition, RCF-2, not yet implemented in `-restapi`:** `details.managedBy = afs|paperclip`, so a client can name who manages the secret; clients must treat it as optional until `-restapi` ships it); `RotateSecret` on an `afs` secret takes no body (AFS generates the value) and is allowed except
 `paperclip-secrets-master-key` (`ValidationError`, `reason: master_key_not_rotatable`) and a `paperclip` secret → `409 Conflict` (`managed_secret`). A
 `paperclip` secret cannot be bound (`ValidationError`). `CreateSecret` refuses the name `paperclip` and any name starting
 `paperclip-` except `paperclip-agent-api-key` on a worker agent (`ValidationError`, `reason: reserved_name`).
@@ -673,7 +675,7 @@ All *svc*. Screen S10 unless stated.
 
 | Op | Method and path | Perm | CLI | SDK | Screen | P |
 |---|---|---|---|---|---|---|
-| `GetSettings` | `GET /v1/admin/settings` (every key of root PRD §6.13 with value, default and range, including the seven `collab.*` keys of the Paperclip PRD §6.9 (`collab.base_domain` unset reads `null`); the database-only keys `work_orders.cost_center` and `work_orders.owner_email` are not exposed, CD-8) | `admin:settings` | `admin get-settings` | `admin.settings.get()` | S10 | P0 |
+| `GetSettings` | `GET /v1/admin/settings` (every key of root PRD §6.13 with value, default and range, including the seven `collab.*` keys of the Paperclip PRD §6.9 (`PutSetting` accepts the same seven keys in its key enum: `collab.base_domain`, `collab.public_endpoints`, `collab.session_ttl_minutes`, `collab.max_body_mb`, `collab.content_scan`, `collab.allowed_source_cidrs`, `collab.denied_spike_threshold`) (`collab.base_domain` unset reads `null`); the database-only keys `work_orders.cost_center` and `work_orders.owner_email` are not exposed, CD-8) | `admin:settings` | `admin get-settings` | `admin.settings.get()` | S10 | P0 |
 | `PutSetting` | `PUT /v1/admin/settings/{key}` `{value}` | `admin:settings` | `admin put-setting` | `admin.settings.put()` | S10, S9 | P0 |
 | `ListIdentityProviders` | `GET /v1/admin/identity-providers` | `admin:identity-providers` | `admin list-identity-providers` | `admin.identityProviders.list()` | S10 | P0 |
 | `CreateIdentityProvider` | `POST /v1/admin/identity-providers` (v1.3.0: optional `collabClientId` and `collabClientSecretArn`, a Secrets Manager reference, never the value; `collabClientSecretArn` needs `collabClientId`; `ListSignInProviders` never returns them) | `admin:identity-providers` | `admin create-identity-provider` | `admin.identityProviders.create()` | S10 | P0 |
@@ -905,6 +907,7 @@ Events written by database functions use the same envelope (`afs.event_detail`, 
 
 ## 9. Changelog
 
+- **v1.3.2 (2026-11-22), build of the Paperclip collaboration change:** `PutSetting` key enum includes the seven `collab.*` keys; `afs-edge` bearer audience rules (console, CLI or collaboration client id); RCF-1 decided (`ListAgentTemplates` has no `capability` filter; the CLI and PRD drop `--capability`); RCF-2 planned (`details.managedBy` on the `managed_secret` error, not yet implemented in `-restapi`).
 - **v1.3.1 (2026-11-22), contract corrections (PC-D20 to PC-D31):** edge callback only on the apex, certificate and DNS cover apex and wildcard, every other apex path `404`; server-side edge sessions and single-use handoff (cookie holds an opaque id); SNI check dropped (`host_mismatch` removed); edge records go to stdout with `afs.team_id` and the node collector routes them to the team's log delivery; event `collaboration.bootstrap_completed`; `CreateTeam` `409 hostname_held`; `team_collaborator` inherits the conditional viewer grants; `RotateSecret` on an `afs` secret takes no body; priorities of `ListCollaborationLinks`, connect and disconnect (P0, C1) and `ListCollaborationEndpoints` (P0, C2); `SwarmTemplate.spec.collaboration`; `invoke-api` reads `GetTeamCollaboration` once and `restApiUrl` is `https://<hostname>/api`; 404 versus 403 `surface_disabled` stated; once-only Paperclip keys pass through unchanged. All additive or clarifying.
 - **v1.3.0 (2026-11-22), Paperclip team collaboration ([PRD](../../paperclip-team-collaboration-PRD.md), PC-D11 to PC-D19):** §4.4b (seven operations: `GetTeamCollaboration`, `PutTeamCollaboration`, `ListCollaborationLinks`, `ConnectAgentToCollaboration`, `DisconnectAgentFromCollaboration`, `RotateCollaborationKeys`, `ListCollaborationEndpoints`); §4.4c the edge's externally visible behaviour; role `team_collaborator` and permissions `collaboration:read|manage|access|contribute|api`; `Agent.role` and `Agent.collaboration`; `Team.mayExposeCollaboration`; `Secret.managedBy` and its filter; `AgentTemplate.capabilities`; identity provider `collabClientId` and `collabClientSecretArn`; seven `collab.*` settings; collaboration report kind; seven events; new `details.reason` values. All additive (minor).
 - **v1.2.0 (2026-11-21), `-restapi` M0 (CD-1 to CD-10):** delete status codes (`202` with body for resources that carry a status, `204` otherwise); `If-Match` optional on `PUT`; `NotificationTestResult` and event `notification.test_requested`; `RestoreResult`, `Snapshot`, `StorageClass`, `AuditEvent`, `Revision` and `CostRow` shapes; `TeamTags.requestMetadataDroppedKeys`; mutations without a §7 event type write no outbox row; identity provider client id mapping recorded as open; `403` for a signed-in caller with no binding on a route not scoped to one team; error notes: oversized body is `400`, unknown path or verb is `404` in the envelope, page tokens bound to operation and caller, CSV formula cells prefixed with `'`.

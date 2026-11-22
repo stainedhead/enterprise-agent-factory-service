@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract v1 at schema 000019 (2026-11-22), with migration 000020 (Paperclip team collaboration, [paperclip-team-collaboration-PRD.md](../../paperclip-team-collaboration-PRD.md) DB-US-44 to DB-US-47) specified in §7.2 and not yet built; it is the next minor release after 000019. Corrected on 2026-11-22 (contract corrections round, PC-D20 to PC-D31) to match the `-db` PRD §9.1 decisions DB-D1 to DB-D16 and the `-restapi` gaps G1 to G10. 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). 000017 adds `afs.schema_version()` for the startup check of services that cannot read the tracking table, and `identity_providers.cli_client_id` (the CLI public client, D48; `client_id` is the console client). Planned first release containing 000011 to 000017: `v0.13.0` 000018 adds daily report rollups and the follow-ups `-restapi` asked for (X-DB-8 to X-DB-10, `agent_secret_bindings` triggers, ETag-stable report schedules); 000019 adds `afs.record_work_order_secret` (template secrets for remediation teams) and `afs.event_detail`, and gives the outbox payloads written by `afs.instantiate_work_order_team` the API contract §7 envelope. Schema 000019 is at `-db` `main` (83f0345) and is not yet tagged; `-restapi` pins its pseudo-version until the tag exists |
+| **Status** | Contract v1.3.2 (2026-11-22) at schema 000021: migration 000020 (Paperclip team collaboration, [paperclip-team-collaboration-PRD.md](../../paperclip-team-collaboration-PRD.md) DB-US-44 to DB-US-47, specified in §7.2) and 000021 (`collab_routes()` provider client ids, §7.2.10) are built in `-db` at `main` (0d87776) and ship in release 1.0.1, which `-db` and `-restapi` share. Earlier history: contract v1 at schema 000019. Corrected on 2026-11-22 (contract corrections round, PC-D20 to PC-D31) to match the `-db` PRD §9.1 decisions DB-D1 to DB-D16 and the `-restapi` gaps G1 to G10. 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). 000017 adds `afs.schema_version()` for the startup check of services that cannot read the tracking table, and `identity_providers.cli_client_id` (the CLI public client, D48; `client_id` is the console client). Planned first release containing 000011 to 000017: `v0.13.0` 000018 adds daily report rollups and the follow-ups `-restapi` asked for (X-DB-8 to X-DB-10, `agent_secret_bindings` triggers, ETag-stable report schedules); 000019 adds `afs.record_work_order_secret` (template secrets for remediation teams) and `afs.event_detail`, and gives the outbox payloads written by `afs.instantiate_work_order_team` the API contract §7 envelope. Schema 000019 is at `-db` `main` (83f0345) and is not yet tagged; `-restapi` pins its pseudo-version until the tag exists |
 | **Provider** | [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db): migrations, roles, row-level security, `migrate` Go package, `afs-migrate` |
 | **Consumer** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi): `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing` |
 | **Full data dictionary** | `-db/docs/data-model.md` (every table, column rule and function). This document is the interface: who connects how, what each service may touch, and how failures surface |
@@ -521,7 +521,7 @@ ago and handoffs expired more than an hour ago; returns the rows deleted.
 A swarm template `spec` gains an optional `collaboration: {templateId}` (an agent template `tpl_…` that has the `paperclip`
 capability). `afs.instantiate_work_order_team` (000016) is extended: when the spec has it, the function also inserts, in the same
 transaction, the team's collaboration agent (`role = 'collaboration'`, that template and its current digest, a dedicated identity,
-daily snapshots, the template's default resources and model, name `paperclip`) and its `team_collaboration` row (web UI on,
+daily snapshots, name `paperclip`; its model is the swarm's first pool's, and its image is that pool's repository at the collaboration template's current digest, unless the spec's `collaboration` gives an `image`; `agent_templates` has no model or repository column: `-db` decision DB-D18; no pool raises `23514`) and its `team_collaboration` row (web UI on,
 REST API off, `registration_mode = 'manual'`), and writes the outbox events `agent.created` (API contract §7 envelope) beside the
 existing ones. An unknown or disabled template, or one without `paperclip`, raises `23514` and creates nothing. `afs-api` is not
 in this flow, so the three boot secrets are generated by the reconciler (it creates each secret in Secrets Manager with a random
@@ -529,6 +529,18 @@ value, as in `CreateAgent`) and recorded with `afs.record_work_order_secret`, wh
 team's collaboration agent (`agt_…`) in its pool argument: it then records an agent-scope secret with `managed_by = 'afs'` and its
 binding, only for the three boot secret names and their environment variables (`BETTER_AUTH_SECRET`,
 `PAPERCLIP_TOOL_ACTION_SIGNING_SECRET`, `PAPERCLIP_SECRETS_MASTER_KEY`); other rules as for a pool secret.
+
+### 7.2.10 Migration 000021 and notes from the build of 000020 (contract v1.3.2)
+
+**000021, provider client ids.** `afs.collab_routes()` additionally returns `provider_client_id` (the team provider's console client id, `identity_providers.client_id`) and `provider_cli_client_id` (its CLI client id, `cli_client_id`), appended after `collab_client_secret_arn`. `afs-edge` uses them to accept REST bearer tokens minted for the console or CLI client (API contract §4.4c, "Bearer audiences"). The ids are public OIDC client ids, not secrets. `afs_edge` still reads no table. The function is dropped and created again because its return type changes; the grant to `afs_edge` is repeated. No table is touched.
+
+**Facts about 000020 that consumers rely on:**
+
+- **Change feed payload.** `team_collaboration` and `agent_collaboration` have no `id` column, so their `afs_desired_state` notification is `<table>:<team_id>:` with an empty id part. Listeners key on the team.
+- **Revision key.** `config_revisions.resource_id` for `team_collaboration` is the `team_id` (one row per team, whatever agent it points at). `agent_collaboration` uses the usual `team_id/agent_id` composite form.
+- **Edge session tables.** `collab_edge_sessions` and `collab_edge_handoffs` have row-level security enabled with a `deny_all` policy (`USING (false)`) for `afs_app`; no role holds a grant. Only the `afs_edge` functions of §7.2.8 reach them.
+- **Partition helpers.** `EXECUTE` on `ensure_usage_partition`, `ensure_activity_partition` and `ensure_traffic_partition` is revoked from `PUBLIC` (they are `SECURITY DEFINER` and `afs_edge` must not reach them); `afs_reconciler` keeps its explicit grants.
+- **Team group bindings.** A group binding on a team (`team_id` set) carries no provider (000010). `afs.collab_principal` resolves it against the team's identity provider, else the default one; only a service-level binding names its own provider.
 
 ### 7.2.7 Change feed, RLS and tests
 
@@ -555,3 +567,7 @@ binding, only for the three boot secret names and their environment variables (`
 2. `-restapi` adopts the tag in its own PR (`go get …@vX.Y.Z`), with repository tests against the new
    schema.
 3. A breaking change follows expand and contract across two `-db` releases.
+
+## 9. Change log
+
+- **v1.3.2 (2026-11-22), build of the Paperclip collaboration change:** migration 000021 (`collab_routes()` returns `provider_client_id` and `provider_cli_client_id`), §7.2.10 records facts about 000020 (change feed payload, revision key, deny-all edge session policies, `PUBLIC` execute revoked on partition helpers, team group bindings carry no provider), and §7.2.9 states that a swarm collaboration agent takes the first pool's model and image (DB-D18).
