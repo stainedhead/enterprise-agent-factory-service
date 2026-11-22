@@ -81,6 +81,22 @@ example a gateway crash) expires after service setting `gateway.reservation_ttl_
 and is released by the reconciler. Spend can exceed the cap only where a call's actual cost exceeds its
 reserved worst case, at most one in-flight call per agent or pool worker.
 
+The reserved worst case is always the limit the gateway forwards: when the request sends no output limit,
+an unusable one, or one above the reserved cap, the gateway writes the cap into the request it forwards
+(creating `inferenceConfig` when absent), so Bedrock can never produce more than was reserved. For
+`InvokeModel` the limit field depends on the model family named in the model id (cross-region prefixes `us.`,
+`eu.`, `apac.` and foundation-model ARNs are handled): `max_tokens` for Anthropic (`max_tokens_to_sample` for
+`claude-v2*` and `claude-instant*`), Mistral and Cohere; `textGenerationConfig.maxTokenCount` for Amazon Titan
+Text; `max_gen_len` for Meta. A family with no known limit field is refused with `400 ValidationError` before
+any reservation or forward (use Converse for such models, for example Amazon Nova). An Anthropic Messages
+request without `max_tokens` is refused with `400`, as the Messages API itself requires it.
+
+If settlement fails after the gateway's inline attempts, it keeps the settlement in a bounded in-memory retry
+queue (10,000 entries, exponential backoff from 1 s to 1 minute, 10 minutes from the first failure) and
+counts it in `afs_gateway_settle_failures_total`; a settlement that cannot be retried falls back to the
+reservation's expiry above. On shutdown the gateway drains in-flight HTTP calls, makes a final settle attempt
+for each pending entry, then flushes usage rows.
+
 ## 5. Streaming
 
 The gateway forwards stream events as they arrive and adds less than 25 ms (p99) to the time to first
@@ -137,7 +153,9 @@ One `afs.usage_events` row per call, written in batches (at most 1 s delay). Col
 
 The reserved amount lives in `afs.spend_reservations`; the operation name and gateway overhead are
 metrics, not columns. Rejected calls are recorded so reports can show them (RPT-3). No prompt or
-completion content is stored or logged.
+completion content is stored or logged. A usage row the writer cannot store (queue full, or a write that fails
+after its retries) is dropped, logged with team, budget and amount only, and counted in
+`afs_gateway_usage_rows_dropped_total{reason}` (`queue_full` or `write_failed`); reports then miss that call.
 
 ## 9. Versioning
 
