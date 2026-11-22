@@ -156,9 +156,9 @@ Each child is an independent repository. Clone them next to this one (see
 
 | Repository | Language | What it is | Read first | User docs |
 |---|---|---|---|---|
-| [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db) | SQL, Go 1.27 | PostgreSQL 17 schema and migrations, roles and row-level security, `afs-migrate` | [README](https://github.com/stainedhead/enterprise-agent-factory-service-db#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-db/blob/main/user-docs/README.md) |
-| [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi) | Go 1.27 | `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing`; owns `api/openapi.yaml` | [README](https://github.com/stainedhead/enterprise-agent-factory-service-restapi#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-restapi/blob/main/user-docs/README.md) |
-| [enterprise-agent-factory-service-cli](https://github.com/stainedhead/enterprise-agent-factory-service-cli) | Go 1.27 | `afs` CLI, AWS CLI conventions, 180 operations | [README](https://github.com/stainedhead/enterprise-agent-factory-service-cli#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-cli/blob/main/user-docs/README.md) |
+| [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db) | SQL, Go 1.27 | PostgreSQL 17 schema and migrations, roles and row-level security, `afs-migrate`; migrations 000001–000021; release 1.0.1, lockstep with `-restapi` | [README](https://github.com/stainedhead/enterprise-agent-factory-service-db#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-db/blob/main/user-docs/README.md) |
+| [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi) | Go 1.27 | `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing`, `afs-edge`; release 1.0.1, lockstep with `-db`; owns `api/openapi.yaml` | [README](https://github.com/stainedhead/enterprise-agent-factory-service-restapi#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-restapi/blob/main/user-docs/README.md) |
+| [enterprise-agent-factory-service-cli](https://github.com/stainedhead/enterprise-agent-factory-service-cli) | Go 1.27 | `afs` CLI, AWS CLI conventions, 187 operations | [README](https://github.com/stainedhead/enterprise-agent-factory-service-cli#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-cli/blob/main/user-docs/README.md) |
 | [enterprise-agent-factory-service-website](https://github.com/stainedhead/enterprise-agent-factory-service-website) | TypeScript 7, Bun | `@afs/sdk` and the web console | [README](https://github.com/stainedhead/enterprise-agent-factory-service-website#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-website/blob/main/user-docs/README.md) |
 
 ![Repositories and contracts](docs/diagrams/repository-map.svg)
@@ -208,8 +208,7 @@ requests are reviewed. Each repository also has an `AGENTS.md` with its rules fo
 
 All four code repositories are feature complete on `main` against the PRD and pass their quality gates in
 CI. Still to come: end-to-end runs on a real EKS cluster and AWS account (restore drill and full-scale load
-test included), and the first tagged releases (`-db`, `-restapi`, the `afs` CLI and `@afs/sdk`). Until those
-releases exist, build from source as each repository's getting-started guide shows.
+test included), and publishing the releases: `-db` and `-restapi` share version 1.0.1 (lockstep), the `afs` CLI is 1.0.1, and `@afs/sdk` is still to come. Until the releases are published, build from source as each repository's getting-started guide shows.
 
 ## License
 

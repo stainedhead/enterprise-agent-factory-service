@@ -20,8 +20,8 @@ Sub-directory names match the repository names. Clone each one next to this file
 
 | Directory | Language / kind | Purpose | Status |
 |---|---|---|---|
-| `enterprise-agent-factory-service-db/` | SQL, Go 1.27 | PostgreSQL schema and migrations, roles and row-level security, `afs-migrate`, Go module embedding the migrations | Feature complete (migrations 000001–000019) |
-| `enterprise-agent-factory-service-restapi/` | Go 1.27 | `afs-api` (REST, RBAC, audit), `afs-reconciler`, `afs-gateway`, `afs-billing`; owns `api/openapi.yaml` | Feature complete |
+| `enterprise-agent-factory-service-db/` | SQL, Go 1.27 | PostgreSQL schema and migrations, roles and row-level security, `afs-migrate`, Go module embedding the migrations | Feature complete (migrations 000001–000021); release 1.0.1, shared with `-restapi` (lockstep) |
+| `enterprise-agent-factory-service-restapi/` | Go 1.27 | `afs-api` (REST, RBAC, audit), `afs-reconciler`, `afs-gateway`, `afs-billing`, `afs-edge`; owns `api/openapi.yaml` | Feature complete; release 1.0.1, lockstep with `-db` |
 | `enterprise-agent-factory-service-cli/` | Go 1.27 | `afs` CLI, AWS CLI conventions | Feature complete |
 | `enterprise-agent-factory-service-website/` | TypeScript 7 (Bun workspace) | `@afs/sdk` accelerator SDK (`packages/sdk`) and the web console (`apps/console`) | Feature complete |
 
