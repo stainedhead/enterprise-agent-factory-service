@@ -1,7 +1,7 @@
 # Skill: the `afs` CLI
 
-> **Status banner.** Release `v1.0.1` of `enterprise-agent-factory-service-cli` is tagged by the repository
-> owner and is not yet published: no signed archives, no Homebrew formula and no tap exist yet. Until the
+> **Status banner.** Release `v1.0.1` of `enterprise-agent-factory-service-cli` is prepared on `main`; the
+> repository owner pushes the tag, and it is not yet published: no signed archives, no Homebrew formula and no tap exist yet. Until the
 > release is published, build from source (`make build` writes `bin/afs`). This file describes the CLI at
 > `main`; check `afs --version` and `afs <service> <operation> help` for the truth on a given build.
 
