@@ -172,7 +172,9 @@ the table above, including the conditional ones** (`teams:get-kubeconfig` when `
 | `agents:write` | Still covers update, pause, resume, restart and snapshot of the orchestration agent, except its fixed fields (§4.4d), and an agent's `models`. It no longer creates or deletes an orchestration agent, for any role: only `CreateTeam`, `instantiate_work_order_team` and team deletion do |
 | `pools:write` | Also a pool's `models` |
 | `admin:models` | Also `PutServiceModelAccess` |
-| `admin:settings` | Also `ListOrchestrationEndpoints` and the `orchestration.*` and `models.*` settings | The new
+| `admin:settings` | Also `ListOrchestrationEndpoints` and the `orchestration.*` and `models.*` settings | |
+
+The new
 permissions are a change in `internal/authz` and `domain/permission.ts` in the same cycle. Team-admins grant
 `team_collaborator` like the other team roles and cannot grant `service_admin` or `security_operator`.
 

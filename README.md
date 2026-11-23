@@ -55,8 +55,8 @@ The goals and non-goals are in [INTENT.md](INTENT.md); the full requirements are
 [initial PRD](enterprise-agent-factory-service-initial-PRD.md).
 Proposed changes to it are change PRDs at this root:
 [Paperclip team collaboration](paperclip-team-collaboration-PRD.md) (built, release 1.0.1) and
-[Team orchestration agent](team-orchestration-agent-PRD.md) (UI design in review), which makes an
-orchestration agent part of every team.
+[Team orchestration agent](team-orchestration-agent-PRD.md) (built, release 1.1.0), which makes an
+orchestration agent part of every team and adds service, team and agent model access.
 
 ## What a team gets
 
@@ -66,7 +66,8 @@ orchestration agent part of every team.
 | **Agents as first-class objects** | One agent is one pod with one identity and an encrypted EBS volume with scheduled snapshots |
 | **Agent identity** | A Kubernetes service account and an IAM role (shared per team or dedicated per agent) through EKS Pod Identity, plus cross-account role links filtered by allowed accounts |
 | **Secrets without exposure** | Write-only values in AWS Secrets Manager under a managed path, delivered as env vars or files with no change to the container |
-| **Metered model access** | Bedrock through the AFS gateway with a per-team inference profile; Bedrock and Anthropic SDKs work unchanged |
+| **An orchestration agent** | Created with every team: one container with a hidden orchestration runtime and a collaboration tool (Paperclip AI by default, or Buzz). It is the only part of a team reachable from outside the cluster, with its Web UI and Web API each Off, Private or Public within a limit the service admin sets |
+| **Metered model access** | Bedrock through the AFS gateway with a per-team inference profile; Bedrock and Anthropic SDKs work unchanged. Service admins choose the models enabled for the service and for each team (both default to All); team-admins can narrow each agent's list and set its default model |
 | **Hard budgets** | Every call reserves its worst-case cost first; at the cap calls stop, and an IAM deny backs it up |
 | **Reporting and showback** | Real-time usage, daily billed cost from CUR, activity and external traffic per agent, grouped by cost-allocation tags |
 | **Human access** | Okta or Entra ID sign-in, roles per team, API keys for pipelines, a full audit trail |
@@ -91,6 +92,21 @@ and the original design mockups for every role are in [docs/ui/](docs/ui/).
 ## Architecture
 
 ![Architecture overview](docs/diagrams/architecture-overview.svg)
+
+### The orchestration agent and model access (1.1.0)
+
+Every team gets one orchestration agent when the team is created, shown apart from the team's other agents.
+Only it has endpoints outside the cluster: `afs-edge` forwards a public or a private hostname to it at the level
+the team-admin chose, capped by the service admin's limit. Every model call passes the service, team and agent
+model lists at the gateway. The full design is in the [team orchestration agent PRD](team-orchestration-agent-PRD.md).
+
+![Orchestration agent, endpoint exposure and model admission](docs/diagrams/orchestration-agent.svg)
+
+| Orchestration endpoints (service admin) | Orchestration agent, collaboration tab (team admin) |
+|---|---|
+| ![Orchestration endpoints across teams](docs/images/screenshots/34-admin-orchestration.png) | ![Orchestration agent collaboration tab](docs/images/screenshots/37-team-orchestration.png) |
+| **Orchestration agent configuration** | **Orchestration agent, as a team viewer** |
+| ![Orchestration agent configuration with models](docs/images/screenshots/38-orchestration-agent-config.png) | ![Read-only orchestration agent](docs/images/screenshots/43-viewer-orchestration.png) |
 
 | Component | Repository | Role |
 |---|---|---|
@@ -158,8 +174,8 @@ Each child is an independent repository. Clone them next to this one (see
 
 | Repository | Language | What it is | Read first | User docs |
 |---|---|---|---|---|
-| [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db) | SQL, Go 1.27 | PostgreSQL 17 schema and migrations, roles and row-level security, `afs-migrate`; migrations 000001–000021; release 1.0.1, lockstep with `-restapi` | [README](https://github.com/stainedhead/enterprise-agent-factory-service-db#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-db/blob/main/user-docs/README.md) |
-| [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi) | Go 1.27 | `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing`, `afs-edge`; release 1.0.1, lockstep with `-db`; owns `api/openapi.yaml` | [README](https://github.com/stainedhead/enterprise-agent-factory-service-restapi#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-restapi/blob/main/user-docs/README.md) |
+| [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db) | SQL, Go 1.27 | PostgreSQL 17 schema and migrations, roles and row-level security, `afs-migrate`; migrations 000001–000022; release 1.1.0, lockstep with `-restapi` | [README](https://github.com/stainedhead/enterprise-agent-factory-service-db#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-db/blob/main/user-docs/README.md) |
+| [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi) | Go 1.27 | `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing`, `afs-edge`; release 1.1.0 (API 1.4.0), lockstep with `-db`; owns `api/openapi.yaml` | [README](https://github.com/stainedhead/enterprise-agent-factory-service-restapi#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-restapi/blob/main/user-docs/README.md) |
 | [enterprise-agent-factory-service-cli](https://github.com/stainedhead/enterprise-agent-factory-service-cli) | Go 1.27 | `afs` CLI, AWS CLI conventions, 187 operations | [README](https://github.com/stainedhead/enterprise-agent-factory-service-cli#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-cli/blob/main/user-docs/README.md) |
 | [enterprise-agent-factory-service-website](https://github.com/stainedhead/enterprise-agent-factory-service-website) | TypeScript 7, Bun | `@afs/sdk` and the web console | [README](https://github.com/stainedhead/enterprise-agent-factory-service-website#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-website/blob/main/user-docs/README.md) |
 
@@ -210,7 +226,7 @@ requests are reviewed. Each repository also has an `AGENTS.md` with its rules fo
 
 All four code repositories are feature complete on `main` against the PRD and pass their quality gates in
 CI. Still to come: end-to-end runs on a real EKS cluster and AWS account (restore drill and full-scale load
-test included), and publishing the releases: `-db` and `-restapi` share version 1.0.1 (lockstep), the `afs` CLI is 1.0.1, and `@afs/sdk` is still to come. Until the releases are published, build from source as each repository's getting-started guide shows.
+test included), and publishing the releases: `-db` and `-restapi` share version 1.1.0 (lockstep), and the `afs` CLI, `@afs/sdk` and the console are 1.1.0. Until the releases are published, build from source as each repository's getting-started guide shows.
 
 ## License
 

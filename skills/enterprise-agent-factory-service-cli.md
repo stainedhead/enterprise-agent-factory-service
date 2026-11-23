@@ -1,6 +1,6 @@
 # Skill: the `afs` CLI
 
-> **Status banner.** Release `v1.0.1` of `enterprise-agent-factory-service-cli` is prepared on `main`; the
+> **Status banner.** Release `v1.1.0` of `enterprise-agent-factory-service-cli` is prepared on `main`; the
 > repository owner pushes the tag, and it is not yet published: no signed archives, no Homebrew formula and no tap exist yet. Until the
 > release is published, build from source (`make build` writes `bin/afs`). This file describes the CLI at
 > `main`; check `afs --version` and `afs <service> <operation> help` for the truth on a given build.
@@ -34,7 +34,7 @@ Secret values come from `file://PATH`, `fileb://PATH` or `-` (standard input) on
 ## Command shape
 
 `afs <service> <operation> [--options]`. Services: `teams`, `agents`, `pools`, `secrets`, `budgets`, `members`,
-`api-keys`, `audit`, `reports`, `models`, `work-orders`, `swarm-templates`, `collaboration`, `admin`, plus `configure`,
+`api-keys`, `audit`, `reports`, `models`, `work-orders`, `swarm-templates`, `collaboration`, `orchestration`, `admin`, plus `configure`,
 `sso` and `completion`. Operations are kebab-case verb-noun and map to one API call each (`list-teams` is `ListTeams`).
 Options mirror API fields (`--team-id`, `--amount-usd`); lists are space-separated.
 
@@ -55,7 +55,30 @@ Global options: `--profile --endpoint-url --output json|yaml|table|text|csv --qu
 Errors go to stderr as `An error occurred (<Code>) when calling the <Operation> operation: <message>`.
 Exit codes: 0 success, 252 usage error, 254 service error (including `AccessDenied`), 255 other (network, config).
 
-## Team collaboration (Paperclip)
+## Team orchestration agent and model access (1.1.0)
+
+Contract: API 1.4 and later. Reference: `user-docs/orchestration.md`, `user-docs/reference/orchestration.md`.
+Each team has one orchestration agent running `paperclip` or `buzz` (Buzz has no web surfaces). It replaces the
+1.0 collaboration commands below, which are deprecated until 2.0.0 (a warning on stderr; stdout unchanged).
+
+```bash
+afs orchestration describe-orchestration --team-id team_...
+afs orchestration put-orchestration --team-id team_... --web-ui-exposure private --web-api-exposure off [--registration-mode managed] [--wait]
+afs orchestration change-tool --team-id team_... --tool buzz [--wait]
+afs admin list-orchestration-endpoints
+afs teams update-team --team-id team_... --max-collaboration-exposure public     # service admin: the team limit
+afs admin put-service-model-access --access all|selected
+afs teams put-team-models --team-id team_... --access selected --model-ids <id> <id>
+afs agents create-agent ... --models all|<id> <id> --default-model-id <id>       # also update-agent and pools
+```
+
+- Exposure is `off|private|public` per surface and both are sent together; above the team limit is refused
+  (`exposure_above_limit`). `--model-id` is deprecated for `--default-model-id`.
+- Replaced: `collaboration describe-collaboration|put-collaboration`, `admin list-collaboration-endpoints`,
+  `--may-expose-collaboration`, `--role collaboration`, settings `collab.base_domain|collab.public_endpoints`.
+- `collaboration invoke-api` now reads the orchestration doc; a Web API that is off is `SurfaceOff` (exit 254).
+
+## Team collaboration (Paperclip, deprecated in 1.1.0)
 
 Contract: API 1.3 and later. Reference: `user-docs/collaboration.md`, `user-docs/reference/collaboration.md`.
 The collaboration agent is an ordinary agent with `--role collaboration`, made from a template whose capabilities

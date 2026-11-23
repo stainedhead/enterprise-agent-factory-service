@@ -19,13 +19,13 @@ export default (d) => {
   d.node({ id: 'bus', x: 630, y: 500, w: 230, title: 'EventBridge afs-events', sub: ['outbox, at least once'], tone: 'aws' });
   d.node({ id: 'notify', x: 920, y: 500, w: 150, title: 'Notifications', sub: ['Slack · email', 'Jira · webhook'], tone: 'neutral' });
 
-  // Public collaboration entry (Paperclip): the only internet-facing path
-  d.node({ id: 'alb', x: 600, y: 96, w: 200, title: 'Public ALB + WAF', sub: ['internet-facing, TLS 1.2+', '*.collab.<domain>'], tone: 'aws' });
-  d.node({ id: 'edge', x: 850, y: 96, w: 280, title: 'afs-edge', sub: ['host → team, SSO per team, authz', 'scan, limits → Service paperclip:3100'], tone: 'api', badge: '-restapi' });
+  // Orchestration entry: the only path from outside the cluster, public or private per surface
+  d.node({ id: 'alb', x: 600, y: 96, w: 200, title: 'Public / internal ALB', sub: ['public: internet + WAF', 'private: VPC + corporate'], tone: 'aws' });
+  d.node({ id: 'edge', x: 850, y: 96, w: 280, title: 'afs-edge', sub: ['host → team and level, SSO, authz', 'scan, limits → orchestration agent'], tone: 'api', badge: '-restapi' });
 
   // EKS
   d.group({ x: 1180, y: 96, w: 300, h: 560, label: 'EKS cluster', tone: 'k8s', sub: 'Agentic Teammates runtime (CRDs)' });
-  d.node({ id: 'ns1', x: 1200, y: 150, w: 260, title: 'ns afs-t-payments', sub: ['agents: reviewer, triage', 'one agent = one pod + EBS', 'default-deny network'], tone: 'k8s' });
+  d.node({ id: 'ns1', x: 1200, y: 150, w: 260, title: 'ns afs-t-payments', sub: ['◆ orchestration agent + workers', 'one agent = one pod + EBS', 'default-deny network'], tone: 'k8s' });
   d.node({ id: 'ns2', x: 1200, y: 272, w: 260, title: 'ns afs-t-search', sub: ['long-running dev team'], tone: 'k8s' });
   d.node({ id: 'ns3', x: 1200, y: 360, w: 260, title: 'ns afs-t-cve-2026-…', sub: ['ephemeral swarm: pools', 'of workers, lifetime budget'], tone: 'k8s' });
   d.node({ id: 'gw', x: 1200, y: 530, w: 260, title: 'afs-gateway', sub: ['ns afs-system · multi-AZ', 'reserve → invoke → settle'], tone: 'api', badge: '-restapi' });
