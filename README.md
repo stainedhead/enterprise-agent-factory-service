@@ -53,8 +53,10 @@ does not scale and is hard to govern. AFS makes it a managed service:
 
 The goals and non-goals are in [INTENT.md](INTENT.md); the full requirements are in the
 [initial PRD](enterprise-agent-factory-service-initial-PRD.md).
-Proposed changes to it are change PRDs at this root; the first, in review, is
-[Paperclip team collaboration](paperclip-team-collaboration-PRD.md).
+Proposed changes to it are change PRDs at this root:
+[Paperclip team collaboration](paperclip-team-collaboration-PRD.md) (built, release 1.0.1) and
+[Team orchestration agent](team-orchestration-agent-PRD.md) (UI design in review), which makes an
+orchestration agent part of every team.
 
 ## What a team gets
 
