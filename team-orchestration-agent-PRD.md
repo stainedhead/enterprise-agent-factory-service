@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft for review (2026-11-23). UI design first: J reviews the mockups and requirements here before any repository starts. No contract, schema or code has changed |
+| **Status** | Approved by J for implementation (2026-11-23), with the decisions of section 12.1 and J's answers to OR-OQ-9 and OR-OQ-10 (now OR-D16 and OR-D17). Release 1.1.0 in every repository; `-db` and `-restapi` in lockstep |
 | **Kind** | Change PRD to the [Paperclip team collaboration PRD](paperclip-team-collaboration-PRD.md) (built and merged as release 1.0.1) and to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md). Requirements here replace the named requirements of those PRDs (section 6.10); everything not named stays as built |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
@@ -400,7 +400,7 @@ any of the team's models from any of its agents. This section makes each level a
 
 | ID | Requirement | Pri |
 |---|---|---|
-| MOD-1 | **Service level.** Setting `models.service_access` is `all` (default) or `selected`. With `all`, every catalog model is enabled for the service, including models added later; the per-model enabled flag is ignored and read-only. With `selected`, the per-model flag decides (today's behaviour). The reconciler syncs the catalog daily from Bedrock in the environment's regions (`ListFoundationModels` and the cross-region inference profiles), adding new models with a price proposal (BUD-9); a model is **callable** only while it is enabled and has an approved price, because the gateway needs a price to reserve spend (BUD-2) | P0 |
+| MOD-1 | **Service level.** Setting `models.service_access` is `all` (default) or `selected`. With `all`, every catalog model is enabled for the service, including models added later; the per-model enabled flag is ignored and read-only. With `selected`, the per-model flag decides (today's behaviour). The reconciler syncs the catalog daily from Bedrock in the environment's regions (`ListFoundationModels` and the cross-region inference profiles), adding new models the account can invoke (terms for provider models are accepted outside AFS, OR-D17) with a price proposal (BUD-9); a model is **callable** only while it is enabled and has an approved price, because the gateway needs a price to reserve spend (BUD-2) | P0 |
 | MOD-2 | **Team level.** A team's `modelAccess` is `all` (default: every model enabled for the service, now and later) or `selected` (an explicit list, today's `team_models`). Only service admins change it (`teams:set-guardrails`, as today). The reconciler keeps one application inference profile per callable model of the team, creating profiles when a model becomes callable for the team and removing them (after a 7-day grace for cost reports) when it stops | P0 |
 | MOD-3 | **Agent level.** Each agent (worker, orchestration agent and swarm pool) has `models: {access: all \| selected, modelIds[], defaultModelId}`. `all` (default for new agents) means every model the team may use, now and later; `selected` names one or more of them. `defaultModelId` is required and must be in the agent's effective set; it is the model the runtime uses unless the agent chooses another. Team-admins set it (`agents:write`) | P0 |
 | MOD-4 | **Delivery.** The agent receives, with zero impact on its container (SEC-6), `AFS_DEFAULT_MODEL` (AFS model id), `AFS_MODELS` (comma-separated effective ids) and `/etc/afs/models.json` (id, provider, max output tokens, per model). Changing the agent's models rolls the pod; a change in the team's or service's effective set updates the file and env on the next roll and is enforced by the gateway at once | P0 |
@@ -762,6 +762,8 @@ Service admins can lower the default resources (section 6.8); work order teams d
 | OR-D13 | What does "all models" mean at each level? | A live rule, not a copy: `all` follows the level above as it changes, so a model the service adds and prices reaches agents with no team or agent edit. `selected` is a fixed list that never grows by itself |
 | OR-D14 | Why a default model per agent? | Runtimes need one model to start with; the harness may switch among the agent's allowed models per task. AFS enforces the set, not the choice |
 | OR-D15 | Upgrade behaviour for models | Keep 1.0.1 access: the service stays `selected`, teams keep their lists, agents get `all` within the team (the 1.0.1 gateway already allowed any team model). New installs start `all` everywhere (J's default) |
+| OR-D16 | Who narrows a team's model list? (J, 2026-11-23, was OR-OQ-9) | Service admins only (`teams:set-guardrails`). Team-admins narrow per agent: one agent can be given fewer models than another (MOD-3) |
+| OR-D17 | Models that need extra AWS or provider terms (J, 2026-11-23, was OR-OQ-10) | Terms are accepted above the service and team level (AWS account and organisation owners), not in AFS. The daily sync lists only models the account can invoke; a model whose terms are not accepted is never callable and never joins *All* |
 | OR-D12 | Work order teams | Also get one (J: "every team"), with on-delete *delete* to avoid snapshot cost for short-lived teams |
 
 ### 12.2 Risks
@@ -787,8 +789,8 @@ Service admins can lower the default resources (section 6.8); work order teams d
 | OR-OQ-6 | Buzz object storage: per-team S3 prefix with the orchestrator's role (assumed), or in-pod MinIO on the volume? | `-restapi`, Agentic Teammates | O4 | S3 prefix (ORC-12) |
 | OR-OQ-7 | Should service admins be able to set a different tool per environment (dev Buzz, prod Paperclip)? | J | O3 | Yes, by `orchestration.tools` per environment; no extra feature |
 | OR-OQ-8 | Should *Change tool* be service-admin only? | J | O3 | Team-admin with typed confirmation (OR-D6) |
-| OR-OQ-9 | Should team-admins (not only service admins) narrow their own team's model list? | J | O1 | No; service admins only, as today (`teams:set-guardrails`); team-admins narrow per agent |
-| OR-OQ-10 | Should "all models" include models that need extra AWS terms (for example Marketplace or provider EULAs) automatically? | J, security | O1 | No: the sync adds them disabled until a service admin accepts the terms, even in `all` mode |
+| OR-OQ-9 | *Resolved, OR-D16* | | | |
+| OR-OQ-10 | *Resolved, OR-D17* | | | |
 
 ## 13. Glossary
 
@@ -805,8 +807,8 @@ Service admins can lower the default resources (section 6.8); work order teams d
 
 ## 14. Review record
 
-`review-prd` pass, 2026-11-23 (dev-flow). Verdict after fixes: **Ready for J's design review** (then
-contracts, then spec per repository).
+`review-prd` passes, 2026-11-23 (dev-flow). Verdict after fixes: **Ready for spec**. J approved the design
+and the decisions for implementation on 2026-11-23.
 
 | Dimension | Status | Note |
 |---|---|---|
@@ -817,6 +819,9 @@ contracts, then spec per repository).
 | Acceptance criteria | ✅ Pass | Given / When / Then per product story (US-34 to US-40) and repository story, with timings, error codes and `details.reason` values |
 | Dependency identification | ✅ Pass | Runtime images, Buzz upstream, network and DNS, identity providers, security approval |
 | Open questions | ✅ Pass | OR-OQ-1 to OR-OQ-8, each with owner, milestone and default |
+
+Third pass after J's answers (2026-11-23): OR-OQ-9 and OR-OQ-10 resolved as OR-D16 and OR-D17; MOD-1 now
+says the sync adds only invocable models; no open question blocks O1.
 
 Second pass after J's model-access change (2026-11-23): MOD-1 to MOD-8, US-41, DB-US-61, RA-US-22, WEB-US-49,
 WEB-US-50, CLI-US-28, OR-D13 to OR-D15, OR-OQ-9 and OR-OQ-10 added; goal OG7 added; the existing per-model
