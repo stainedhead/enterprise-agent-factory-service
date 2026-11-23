@@ -177,6 +177,10 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 .surf .url{font-family:"DejaVu Sans Mono",monospace;font-size:12.5px;margin:6px 0}
 .lvl{display:inline-block;border-radius:10px;padding:1px 9px;font-size:12px;font-weight:700}
 .lvl.pub{background:#fff1e6;color:#b45309}.lvl.prv{background:#e8f3ff;color:#004a9e}.lvl.off{background:#f3f3f7;color:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#f3f3f7;border-radius:14px;padding:2px 10px;font-size:12.5px;margin:0 6px 6px 0;font-family:"DejaVu Sans Mono",monospace}
+.chip b{font-family:"Open Sans",sans-serif;color:var(--muted);font-weight:400}
+.chip.def{border-color:var(--blue);background:#f0f7ff}
+.mset{border:1px solid #8c959f;border-radius:8px;padding:8px 10px 2px;background:#fff}
 .segnote{border-left:3px solid #7300e5;background:#faf7ff;padding:8px 12px;border-radius:0 8px 8px 0;font-size:13px;margin-bottom:14px}
 </style>
 <div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › Orchestration</div>
@@ -193,9 +197,9 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <div class="kv"><div class="k">Service account</div><div class="v mono">agent-orchestrator</div></div></div>
 <div class="field"><label>Persona and instructions</label><div class="input" style="height:54px">Plan the team's work on the board, split it into issues for the right agents, review results and keep people informed.</div></div></div></div>
 <div class="grid g2">
-<div class="card"><div class="ch"><h2>Model and resources</h2></div><div class="cb"><div class="grid g2">
-<div class="kv"><div class="k">Model</div><div class="v mono">claude-sonnet</div></div>
-<div class="kv"><div class="k">Resources</div><div class="v">2 vCPU · 8 GiB · one pod</div></div></div></div></div>
+<div class="card"><div class="ch"><h2>Models and resources</h2></div><div class="cb">
+<div class="kv"><div class="k">Models</div><div class="v"><span class="chip def">claude-sonnet <b>default</b></span><span class="chip">claude-opus</span><span class="chip">claude-haiku</span> <span class="muted small">Selected, 3 of 4 team models</span></div></div>
+<div class="kv"><div class="k">Resources</div><div class="v">2 vCPU · 8 GiB · one pod</div></div></div></div>
 <div class="card"><div class="ch"><h2>AWS identity</h2></div><div class="cb"><div class="grid g2">
 <div class="kv"><div class="k">IAM identity</div><div class="v">Dedicated <span class="muted small">always</span></div></div>
 <div class="kv"><div class="k">Role</div><div class="v mono small">afs/agents/afs-t-payments-factory/orchestrator</div></div></div></div></div></div>

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft for review (2026-11-22), revised after the `review-prd` pass the same day. Contracts landed 2026-11-22 and corrected the same day after the child PRD reviews (PC-D20 to PC-D31; API contract v1.3.1): database contract §7.2 (migration 000020), API contract v1.3.0 (§4.4b, §4.4c), gateway contract note, solution design §3.1, §4, §4.1, ADR-016, mockups T16 and V3, architecture diagram. Child repositories have not started |
-| **Superseded in part** | The [team orchestration agent PRD](team-orchestration-agent-PRD.md) (draft, 2026-11-23) proposes making the collaboration agent a mandatory orchestration agent per team, with Off / Private / Public endpoints and a choice of tool; its section 6.9 names the requirements here that it replaces |
+| **Superseded in part** | The [team orchestration agent PRD](team-orchestration-agent-PRD.md) (draft, 2026-11-23) proposes making the collaboration agent a mandatory orchestration agent per team, with Off / Private / Public endpoints and a choice of tool; its section 6.10 names the requirements here that it replaces |
 | **Kind** | Change PRD to the feature-complete [initial PRD](enterprise-agent-factory-service-initial-PRD.md). Requirements here add to it; where they change an existing requirement, the change is named (section 6.8) |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |

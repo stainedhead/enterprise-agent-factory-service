@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft for review (2026-11-23). UI design first: J reviews the mockups and requirements here before any repository starts. No contract, schema or code has changed |
-| **Kind** | Change PRD to the [Paperclip team collaboration PRD](paperclip-team-collaboration-PRD.md) (built and merged as release 1.0.1) and to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md). Requirements here replace the named requirements of those PRDs (section 6.9); everything not named stays as built |
+| **Kind** | Change PRD to the [Paperclip team collaboration PRD](paperclip-team-collaboration-PRD.md) (built and merged as release 1.0.1) and to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md). Requirements here replace the named requirements of those PRDs (section 6.10); everything not named stays as built |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
 | **Repositories** | `enterprise-agent-factory-service` (this root: PRD, contracts, design, mockups), `-db`, `-restapi`, `-cli`, `-website` (`@afs/sdk` and the console) |
@@ -40,6 +40,12 @@ This change makes orchestration a fixed part of every team:
 
 Buzz has no REST API and no confirmed browser client (section 2.2), so when Buzz is the tool both the Web UI
 and the Web API are **Off and disabled**, with "N/A" text explaining why (J, 2026-11-23).
+
+**Model access, for every agent (J, 2026-11-23).** An agent may use **all, one or several** Bedrock models,
+not one fixed model. Service admins set the models enabled for the service, and the models each team may use;
+both default to **all**. Team-admins then pick all of the team's models or a selection per agent, with one
+default model for the runtime (section 6.9). This applies to workers and to the orchestration agent alike,
+on the shared agent configuration screen.
 
 ## 2. Problem and context
 
@@ -92,6 +98,7 @@ names each place they change.
 | OG3 | Outside reachability is explicit and graded | Each surface is Off, Private or Public; nothing else in any team namespace is reachable from outside the cluster (isolation tests); a level above the team's limit is refused by the API |
 | OG4 | Collaboration settings live in one place | No tool or endpoint field appears on the shared agent configuration screen (console component test); every collaboration setting is on the *Collaboration* tab or a worker's *Collaboration* section |
 | OG5 | The tool is a choice, not a hard-wiring | Paperclip AI and Buzz are both selectable where enabled; adding a third tool needs a template and a capability row, not a schema change |
+| OG7 | Agents use the models they need without a ticket | An agent can be given all, one or several of its team's models; with the defaults, a model the service enables is callable by every agent set to *All team models* as soon as its price is approved, with no team or agent change |
 | OG6 | 1.0.1 teams move without losing work | Every existing collaboration agent becomes its team's orchestration agent with its volume, secrets, links and endpoint choices unchanged in effect |
 
 ### Non-goals (this change)
@@ -246,6 +253,29 @@ the environment names the agent receives. The CLI panel has no role option.
 
 ![Create agent with collaboration section](docs/ui/40-ta-create-agent-collaboration.png)
 
+### 5.3a Model access (all agents)
+
+**S4 · Model catalog & pricing** (changed). A *Models enabled for the service* panel on top: **All models**
+(default; every Bedrock model in the catalog, including models the daily sync adds) or **Selected models**
+(only those switched on in the table; new models start disabled). The catalog table gains *Service* (enabled
+or disabled), *Price* (approved or waiting) and *Teams with access*; *Enable* and *Disable* work only in
+*Selected* mode. A notice lists models that are enabled but not callable because no price is approved.
+
+![Model catalog with service model access](docs/ui/44-admin-model-access.png)
+
+**S3 · Create team, step 3 *Models & network*** (changed). *Models for this team*, service admins only:
+**All service models** (default; follows the service list, now and later) or **Selected models**, with the
+models, their price state and when the team's inference profile is created. The same control is on the team's
+detail page (S2 *Details*), replacing the plain list of `PutTeamModels`.
+
+![Create team, Models step](docs/ui/45-admin-team-models.png)
+
+**T3 · Create agent** and **T18 · Agent configuration** (changed, shown above): *Models and resources* has
+*Models* (**All team models** or **Selected models** as removable chips with *+ Add model*, listing only the
+team's models) and *Default model* (one of them). The orchestration agent uses the same control. The CLI
+equivalent is `--models <id> … | all` and `--default-model-id`. T2's *Model* column shows the default model and
+"+2" when the agent has more.
+
 ### 5.4 Team viewer (and team collaborator)
 
 **T2 read-only.** The same two regions with the read-only banner; *Create agent*, *Restart*, *Pause* and
@@ -281,8 +311,8 @@ migration, console regrouping), then **P1** (Private exposure, tool choice and c
 |---|---|---|
 | ORC-1 | `agents.role` is `worker` or `orchestration`. Every team created after this change has exactly one non-deleted orchestration agent from the commit of `CreateTeam` until the team is deleted. The database enforces "at most one" (unique index) and "at least one" for new teams (deferred constraint trigger, DB-US-58); the API never returns a new team without its agent | P0 |
 | ORC-2 | `CreateTeam` creates the orchestration agent in the same transaction, with the tool's boot secrets generated in Secrets Manager first (as COL-7); a failure to write them returns `503 Unavailable` and creates nothing. `CreateAgent` with `role` other than `worker` returns `ValidationError` (`details.reason = role_reserved`), and with name `orchestrator` `ValidationError` (`details.reason = name_reserved`). `DeleteAgent` on the orchestration agent returns `409 Conflict` (`details.reason = orchestration_agent_required`). The agent is deleted only by team deletion (TEAM-9) | P0 |
-| ORC-3 | **Defaults.** Name `orchestrator` (reserved: no other agent may take it); runtime template from the tool (ORC-6); model, resources and volume from the service settings of section 6.8, overridable in `CreateTeam`; dedicated IAM identity; daily snapshots, 14 kept, never off; on-delete *snapshot then delete* | P0 |
-| ORC-4 | **Fixed fields.** Name, role, template (except through *Change tool*, ORC-11) and IAM identity mode cannot be changed on the orchestration agent (`ValidationError`, `details.reason = orchestration_field_fixed`). Model, persona, resources, volume size, snapshot retention, configuration values, secret bindings, pause and restart work as for any agent (AGT-1 to AGT-11) | P0 |
+| ORC-3 | **Defaults.** Name `orchestrator` (reserved: no other agent may take it); runtime template from the tool (ORC-6); models (all team models, default model from settings, section 6.9), resources and volume from the service settings of section 6.8, overridable in `CreateTeam`; dedicated IAM identity; daily snapshots, 14 kept, never off; on-delete *snapshot then delete* | P0 |
+| ORC-4 | **Fixed fields.** Name, role, template (except through *Change tool*, ORC-11) and IAM identity mode cannot be changed on the orchestration agent (`ValidationError`, `details.reason = orchestration_field_fixed`). Models, persona, resources, volume size, snapshot retention, configuration values, secret bindings, pause and restart work as for any agent (AGT-1 to AGT-11) | P0 |
 | ORC-5 | One agent, one identity, one pod (AGT-7, COL-4): the harness and the collaboration tool run in the one pod under one ServiceAccount, one IAM role, one gateway identity and one volume. Its model calls count against the team budget; when the budget is exhausted the tool keeps serving people and only model calls are refused (COL-8) | P0 |
 | ORC-6 | **Hidden harness.** Agent templates gain capabilities `orchestration`, `tool:paperclip` and `tool:buzz` (replacing `paperclip`). Service setting `orchestration.tools` maps each tool to one template with `orchestration` and that tool capability, plus enabled and default flags. Team-facing API fields and screens show the tool and "Orchestration runtime", never the template or harness name; `GetAgent` returns `templateId` for the orchestration agent only to service admins and `runtime: "orchestration"` to everyone | P0 |
 | ORC-7 | Work order and swarm teams also get an orchestration agent: `instantiate_work_order_team` creates it with the swarm template's `spec.orchestration` (`tool`, starting levels; defaults from settings), replacing PC-D29's optional `spec.collaboration`. Their volume on-delete rule is *delete* unless the template says otherwise, so short-lived teams do not keep snapshots | P1 |
@@ -354,10 +384,32 @@ migration, console regrouping), then **P1** (Private exposure, tool choice and c
 | `orchestration.default_limit` | `private` | `off`, `private`, `public` | ORC-14 |
 | `orchestration.default_web_ui_exposure` | `private` | not above `default_limit` | ORC-13 |
 | `orchestration.default_web_api_exposure` | `off` | not above `default_limit` | ORC-13 |
-| `orchestration.default_model_id`, `.default_resources`, `.default_volume_gib` | service's default model, `1 vCPU · 4 GiB`, `20` | enabled model; resource presets; 10 to 1000 | ORC-3 |
+| `orchestration.default_resources`, `.default_volume_gib` | `1 vCPU · 4 GiB`, `20` | resource presets; 10 to 1000 | ORC-3 |
+| `models.service_access` | `all` | `all`, `selected` | MOD-1 |
+| `models.default_team_access` | `all` | `all`, `selected` (a new team in `selected` mode starts with `models.default_team_models`) | MOD-2 |
+| `models.default_team_models` | `[]` | enabled model ids | MOD-2 |
+| `models.default_model_id` | the service's default model | an enabled model | MOD-3 (an agent's default model when the creator gives none) |
 | `collab.allowed_source_cidrs`, `.session_ttl_minutes`, `.content_scan`, `.max_body_mb`, `.denied_spike_threshold` | unchanged | unchanged | Public ALB and edge (unchanged) |
 
-### 6.9 Changes to existing requirements
+### 6.9 Model access: all, one or several models (every agent)
+
+Today the service keeps a model catalog with a per-model enabled flag (S4), the team has an explicit list
+(`team_models`, `PutTeamModels`, service admins only), each agent names one `modelId`, and the gateway accepts
+any of the team's models from any of its agents. This section makes each level a choice between **all** and a
+**selection**, and makes the agent level enforceable.
+
+| ID | Requirement | Pri |
+|---|---|---|
+| MOD-1 | **Service level.** Setting `models.service_access` is `all` (default) or `selected`. With `all`, every catalog model is enabled for the service, including models added later; the per-model enabled flag is ignored and read-only. With `selected`, the per-model flag decides (today's behaviour). The reconciler syncs the catalog daily from Bedrock in the environment's regions (`ListFoundationModels` and the cross-region inference profiles), adding new models with a price proposal (BUD-9); a model is **callable** only while it is enabled and has an approved price, because the gateway needs a price to reserve spend (BUD-2) | P0 |
+| MOD-2 | **Team level.** A team's `modelAccess` is `all` (default: every model enabled for the service, now and later) or `selected` (an explicit list, today's `team_models`). Only service admins change it (`teams:set-guardrails`, as today). The reconciler keeps one application inference profile per callable model of the team, creating profiles when a model becomes callable for the team and removing them (after a 7-day grace for cost reports) when it stops | P0 |
+| MOD-3 | **Agent level.** Each agent (worker, orchestration agent and swarm pool) has `models: {access: all \| selected, modelIds[], defaultModelId}`. `all` (default for new agents) means every model the team may use, now and later; `selected` names one or more of them. `defaultModelId` is required and must be in the agent's effective set; it is the model the runtime uses unless the agent chooses another. Team-admins set it (`agents:write`) | P0 |
+| MOD-4 | **Delivery.** The agent receives, with zero impact on its container (SEC-6), `AFS_DEFAULT_MODEL` (AFS model id), `AFS_MODELS` (comma-separated effective ids) and `/etc/afs/models.json` (id, provider, max output tokens, per model). Changing the agent's models rolls the pod; a change in the team's or service's effective set updates the file and env on the next roll and is enforced by the gateway at once | P0 |
+| MOD-5 | **Enforcement.** The gateway admits a call only for a model in the caller's effective set: service ∩ team ∩ agent (∩ pool for workers of a pool), callable (MOD-1). Otherwise `403 AccessDenied` with `details.reason` `model_not_enabled_for_service`, `model_not_enabled_for_team`, `model_not_enabled_for_agent` or `model_not_priced`. The gateway caches the sets for at most 60 s and refreshes on the change feed | P0 |
+| MOD-6 | **Narrowing never edits a lower level.** Removing a model from the service or a team removes it from every effective set below within 60 s, but leaves stored agent selections as they are, so restoring the model restores access. An agent whose default model leaves its effective set gets condition `ModelUnavailable=True` naming it, an `agent.model_unavailable` event to the team's channels, and a warning on T2 and T18; its calls to other allowed models continue. An agent whose selection becomes empty is `Degraded` with the same condition | P0 |
+| MOD-7 | **API.** `Agent` and `Pool` gain `models {access, modelIds, defaultModelId, effectiveModelIds†}`; `modelId` stays as a deprecated alias of `defaultModelId` until 2.0.0 (writing it alone sets `access = all` on create and only the default on update). `Team` gains `modelAccess`; `ListTeamModels` returns the effective list with `access`, `PutTeamModels` takes `{access, modelIds}`. `ListModels` returns `callable` and `priceState`. New service operation `PutServiceModelAccess` (`admin:models`) sets `models.service_access`. Events: `team.models_changed`, `agent.model_unavailable` | P0 |
+| MOD-8 | **Console and CLI.** S4, S3 step 3, S2 detail, T3, T18 and the pool form as section 5.3a; every model control lists only models the level above allows, says how many, and shows the CLI equivalent. CLI: `agents create-agent`/`update-agent --models all \| <id> … --default-model-id <id>`, the same on pools; `teams put-team-models --access all \| selected [--model-ids …]`; `admin put-service-model-access --access all \| selected`; table columns `DefaultModel`, `Models` | P0 |
+
+### 6.10 Changes to existing requirements
 
 | Existing | Change |
 |---|---|
@@ -371,6 +423,10 @@ migration, console regrouping), then **P1** (Private exposure, tool choice and c
 | TEAM-1 (create team) | Also creates the orchestration agent; the S3 wizard gains a step |
 | TEAM-9 | Team deletion deletes the orchestration agent last, after workers, so the tool can still serve during teardown |
 | AGT-11 | Templates gain `orchestration` and `tool:*` capabilities; orchestration templates are not offered on T3 |
+| Agent `modelId` (AGT, API contract §4.5) | Becomes `models {access, modelIds, defaultModelId}` (MOD-3); `modelId` is a deprecated alias |
+| Team models (`team_models`, `PutTeamModels`, S3) | Gain the `all` mode, which becomes the default (MOD-2) |
+| Model catalog (S4, `admin:models`) | Gains the service-level `all` mode (default) and a daily Bedrock sync (MOD-1) |
+| Gateway contract §2 ("a model not enabled for the team → 403") | Checks service, team and agent sets and the price (MOD-5) |
 | Initial PRD §5.2, §5.3 | Navigation and screens per section 5; T16 and V3 are replaced by T17, T18 and V4; S10 *Collaboration* tab by S12 |
 
 ## 7. User stories and acceptance criteria
@@ -460,6 +516,23 @@ automatically. *(section 8)*
 - During the backfill, S12 shows progress and T17 shows "Orchestration agent being created" instead of an
   error.
 
+**US-41 · Give agents all, one or several models.** As a service admin and a team-admin, I want model access
+open by default and narrowable at each level, so that agents can use the right model for each task.
+*(MOD-1 to MOD-8, J 2026-11-23)*
+- Given a fresh environment, then `models.service_access = all`, new teams have `modelAccess = all`, and new
+  agents have `models.access = all` with the service's default model as default.
+- Given the daily sync adds a Bedrock model and a service admin approves its price, then within 60 s an agent
+  in a team and agent set to `all` can call it through the gateway, and its team has an inference profile for it.
+- Given an agent with `selected = [claude-sonnet, claude-haiku]`, when it calls `claude-opus`, then the gateway
+  returns `403 AccessDenied` with `details.reason = model_not_enabled_for_agent` and records the denial.
+- Given a model enabled with no approved price, when any agent calls it, then `403` with `model_not_priced`.
+- Given a service admin removes `claude-haiku` from a team's selection, then that agent's calls to it are refused
+  within 60 s, its stored selection still lists it (shown struck through with "Not available for this team"),
+  and adding it back to the team restores access with no agent change.
+- Given an agent's default model leaves its effective set, then `ModelUnavailable=True` names it, the team-admins
+  are notified, and calls to its other models still succeed.
+- `CreateAgent` with `modelId` only (1.0.1 clients) creates an agent with `access = all` and that default.
+
 ### 7.2 `-db` stories (migration 000022)
 
 **DB-US-58 · Orchestration role and the one-per-team rule.** *(refines US-34, US-40)*
@@ -503,6 +576,20 @@ automatically. *(section 8)*
   `instantiate_work_order_team` calls it.
 - Proven by: `TestEdgeRole/orchestration_routes`, `TestWorkOrderTeamHasOrchestrationAgent`.
 
+**DB-US-61 · Model access levels.** *(refines US-41)*
+- `teams.model_access text NOT NULL DEFAULT 'all' CHECK (… IN ('all','selected'))`, existing teams backfilled
+  to `selected` (they have explicit `team_models` rows), guarded like the other guardrail columns.
+- `agents.model_access` (`all`/`selected`, existing agents backfilled to `all`, which is today's gateway
+  behaviour), `agents.default_model_id` (renamed from `model_id` through a new column and a sync trigger until
+  2.0.0), and table `agent_models (team_id, agent_id, model_id)` with composite FK to the agent, FK to
+  `models`, RLS and isolation rows; the same for pools (`pool_models`).
+- View `afs.effective_agent_models` (service ∩ team ∩ agent ∩ callable), readable by `afs_gateway`,
+  `afs_reconciler` and `afs_app`; the change feed fires on any input change.
+- Settings `models.*` of section 6.8 seeded; `models.service_access` seeded `selected` on upgrade (keeps 1.0.1
+  behaviour) and `all` on a new install.
+- Proven by: `TestModelAccess/*` (each level's narrowing, empty selection, default outside the set),
+  `TestRowLevelSecurityIsolatesTeams/agent_models`, `TestCrossTeamWritesChangeNothing/agent_models`.
+
 ### 7.3 `-restapi` stories
 
 **RA-US-20 · Orchestration API.** *(refines US-34 to US-38)*
@@ -526,6 +613,14 @@ automatically. *(section 8)*
 - Managed registration for Buzz: keypair generated in the reconciler, private key written straight to Secrets
   Manager, public key registered with the relay (fake relay in tests), never logged.
 
+**RA-US-22 · Model access in the API, reconciler and gateway.** *(refines US-41)*
+- MOD-7 operations and fields in `api/openapi.yaml` with allowed and denied tests per role; deprecated `modelId`
+  mapping tests.
+- Reconciler: daily Bedrock sync against a recorded fixture; inference profiles follow the team's callable set
+  with the 7-day grace; `ModelUnavailable` condition and event; agent env and `/etc/afs/models.json` (envtest).
+- Gateway: the four `details.reason` values with a table test per level; cache refresh within 60 s on the
+  change feed; the gateway contract is updated in the same PR.
+
 **EDGE-US-3 · Private and public hostnames.** *(refines US-37, US-39)*
 - Host to (team, surface, level) from `orchestration_routes()`; a surface is served only on the hostname of
   its effective level; wrong-level host `404`; Buzz hosts `404`; kill switches within 60 seconds.
@@ -547,6 +642,10 @@ automatically. *(section 8)*
   marked `@deprecated` in TSDoc. A helper `orchestration.endpointUrls(o)` returns the effective Web UI and Web
   API URLs or `null` with the reason. Contract replay tests pass. Minor version.
 
+**WEB-US-49 · SDK model access.** *(refines US-41)* `agents.create()`/`update()` and `pools.*` accept `models`;
+`teams.models.put({access, modelIds})`; `admin.models.putServiceAccess()`; `models.list()` returns `callable`
+and `priceState`; `modelId` marked `@deprecated`.
+
 ### 7.5 Console stories
 
 **WEB-US-47 · Orchestration page and cards.** *(refines US-35, US-36, US-37, US-39)*
@@ -565,6 +664,11 @@ automatically. *(section 8)*
   *Role* step and with the *Collaboration* section. Playwright end-to-end specs and visual baselines for each
   new screen, regenerated in CI; the 1.0.1 baselines for T16, V3 and the T3 role step are retired.
 
+**WEB-US-50 · Model controls.** *(refines US-41)* The models control (all or chips, default model) on T3, T18,
+the agent edit panel and the pool form; S4's service access panel; S3 step 3 and S2 detail team access; each
+lists only what the level above allows and shows models that dropped out as struck through with the reason;
+axe-clean; CLI equivalents.
+
 ### 7.6 CLI stories
 
 **CLI-US-26 · Orchestration commands.** *(refines US-34, US-37, US-38)*
@@ -574,6 +678,9 @@ automatically. *(section 8)*
 **CLI-US-27 · Deprecations.** *(refines US-40)*
 - The deprecated commands of ORC-30 print one stderr line and still succeed; `invoke-api` follows the
   effective level and exits 254 for N/A surfaces with the AWS-style message.
+
+**CLI-US-28 · Model access options.** *(refines US-41)* The flags of MOD-8 with help, examples, goldens and
+`AccessDenied` tests; `--model-id` keeps working with a deprecation line on stderr.
 
 ## 8. Migration from the 1.0.1 design
 
@@ -588,6 +695,7 @@ CLI as 1.1.0. Removals happen in 2.0.0.
 | M3 | Backfill hook | Creates `orchestrator` on the default tool for every team without one; existing workers stay unconnected; team-admins notified | Agents can be removed only by a service admin runbook (they are mandatory afterwards) |
 | M4 | Console, SDK, CLI 1.1.0 | New screens and commands; old routes redirect; old commands warn | Yes |
 | M5 | Service admins | Set `private_base_domain`, lower `default_limit` to `private` for new teams, review existing teams whose 1.0.1 choice became `public` and lower their limit where wanted | Yes |
+| M5a | Service admins | Model access: upgraded environments keep `selected` at the service level and teams keep their lists; agents become `all` within their team's list (what the gateway already allowed). Service admins switch the service and teams to `all` when they choose | Yes |
 | M6 | 2.0.0 | Drop booleans, `may_expose_collaboration`, `collab_routes()`, `collab.base_domain` and `collab.public_endpoints`, deprecated operations, events and CLI commands | No (major release) |
 
 What does **not** change for existing teams: the agent's name, identity, volume and data, Paperclip boot
@@ -618,7 +726,7 @@ Service admins can lower the default resources (section 6.8); work order teams d
 | Milestone | Scope | Exit criteria |
 |---|---|---|
 | O0 Design review | This PRD and the mockups | J approves the UI and the decisions of section 12.1 |
-| O1 Mandatory orchestration | Contracts v1.4.0; `-db` 000022; ORC-1 to ORC-6, ORC-9 (Paperclip), ORC-13 (public and off), ORC-14, ORC-15, ORC-18 (public), ORC-19 to ORC-30, ORC-32; backfill; console T1, T2, T3, T17, T18, V4, S2, S3, S12 (public only) | Every dev team has an orchestration agent; 1.0.1 data intact; usability check of OG2 passed |
+| O1 Mandatory orchestration | Contracts v1.4.0; `-db` 000022; MOD-1 to MOD-8; ORC-1 to ORC-6, ORC-9 (Paperclip), ORC-13 (public and off), ORC-14, ORC-15, ORC-18 (public), ORC-19 to ORC-30, ORC-32; backfill; console T1, T2, T3, T17, T18, V4, S2, S3, S12 (public only) | Every dev team has an orchestration agent; 1.0.1 data intact; usability check of OG2 passed |
 | O2 Private endpoints | ORC-13 private, ORC-16, ORC-17, ORC-18 private, ORC-31; Terraform internal ALB | A team-admin moves the Web UI to Private and reaches it from the corporate network only; pen test of the private path booked |
 | O3 Tool choice | ORC-7, ORC-8 with the tool profile, ORC-11 (Paperclip to Paperclip version changes and the change flow, behind Buzz disabled) | *Change tool* round trip in dev with snapshot restore |
 | O4 Buzz | ORC-8 to ORC-12 for Buzz; Buzz runtime template; US-38, US-39 | A Buzz team's agents coordinate through the relay; both surfaces N/A and unreachable |
@@ -651,6 +759,9 @@ Service admins can lower the default resources (section 6.8); work order teams d
 | OR-D9 | Permissions | No new permissions; `collaboration:*` covers the orchestration resource. Adding `orchestration:*` would double the matrix for no new distinction |
 | OR-D10 | Versioning | 1.1.0 for every component (minor): refusing `role: collaboration` on create and refusing delete are behaviour changes, accepted as minor because 1.0.1 has no production users yet. Removals in 2.0.0 |
 | OR-D11 | Visual language | One accent (purple) and one mark (◆) reserved for orchestration across the console, so its separation is visual as well as structural |
+| OR-D13 | What does "all models" mean at each level? | A live rule, not a copy: `all` follows the level above as it changes, so a model the service adds and prices reaches agents with no team or agent edit. `selected` is a fixed list that never grows by itself |
+| OR-D14 | Why a default model per agent? | Runtimes need one model to start with; the harness may switch among the agent's allowed models per task. AFS enforces the set, not the choice |
+| OR-D15 | Upgrade behaviour for models | Keep 1.0.1 access: the service stays `selected`, teams keep their lists, agents get `all` within the team (the 1.0.1 gateway already allowed any team model). New installs start `all` everywhere (J's default) |
 | OR-D12 | Work order teams | Also get one (J: "every team"), with on-delete *delete* to avoid snapshot cost for short-lived teams |
 
 ### 12.2 Risks
@@ -676,6 +787,8 @@ Service admins can lower the default resources (section 6.8); work order teams d
 | OR-OQ-6 | Buzz object storage: per-team S3 prefix with the orchestrator's role (assumed), or in-pod MinIO on the volume? | `-restapi`, Agentic Teammates | O4 | S3 prefix (ORC-12) |
 | OR-OQ-7 | Should service admins be able to set a different tool per environment (dev Buzz, prod Paperclip)? | J | O3 | Yes, by `orchestration.tools` per environment; no extra feature |
 | OR-OQ-8 | Should *Change tool* be service-admin only? | J | O3 | Team-admin with typed confirmation (OR-D6) |
+| OR-OQ-9 | Should team-admins (not only service admins) narrow their own team's model list? | J | O1 | No; service admins only, as today (`teams:set-guardrails`); team-admins narrow per agent |
+| OR-OQ-10 | Should "all models" include models that need extra AWS terms (for example Marketplace or provider EULAs) automatically? | J, security | O1 | No: the sync adds them disabled until a service admin accepts the terms, even in `all` mode |
 
 ## 13. Glossary
 
@@ -699,13 +812,17 @@ contracts, then spec per repository).
 |---|---|---|
 | Problem clarity | ✅ Pass | Five concrete problems with the 1.0.1 flow, each tied to a screen or requirement; Buzz facts and assumptions separated |
 | Scope definition | ✅ Pass | Six goals with measures; seven explicit non-goals, including outside access to Buzz |
-| Functional completeness | ✅ Pass | ORC-1 to ORC-32 cover OG1 to OG6; section 6.9 names every 1.0.1 requirement that changes; section 8 covers migration per repository |
+| Functional completeness | ✅ Pass | ORC-1 to ORC-32 and MOD-1 to MOD-8 cover OG1 to OG7; section 6.10 names every 1.0.1 requirement that changes; section 8 covers migration per repository |
 | NFR coverage | ✅ Pass | Performance, scale, availability, security, privacy, observability, accessibility, compatibility, recovery; cost impact in section 8 |
 | Acceptance criteria | ✅ Pass | Given / When / Then per product story (US-34 to US-40) and repository story, with timings, error codes and `details.reason` values |
 | Dependency identification | ✅ Pass | Runtime images, Buzz upstream, network and DNS, identity providers, security approval |
 | Open questions | ✅ Pass | OR-OQ-1 to OR-OQ-8, each with owner, milestone and default |
 
-Fixed in this pass: permissions named `agents:delete` and `agents:create` do not exist (the contract has
+Second pass after J's model-access change (2026-11-23): MOD-1 to MOD-8, US-41, DB-US-61, RA-US-22, WEB-US-49,
+WEB-US-50, CLI-US-28, OR-D13 to OR-D15, OR-OQ-9 and OR-OQ-10 added; goal OG7 added; the existing per-model
+enabled flag, `team_models` and the gateway's team check are reused, not replaced.
+
+Fixed in the first pass: permissions named `agents:delete` and `agents:create` do not exist (the contract has
 `agents:write`); the reserved name `orchestrator` raised `409` in one place and `ValidationError` in another;
 the delete guard's error code was unclear; new teams in O1 would have had their Web UI effectively off,
 because the default limit is `private` before the private path exists (OR-D5 and ORC-14 now say how the

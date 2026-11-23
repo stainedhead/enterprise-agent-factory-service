@@ -24,6 +24,10 @@ CSS_ORCH = """
 .surf .url{font-family:"DejaVu Sans Mono",monospace;font-size:12.5px;margin:6px 0}
 .lvl{display:inline-block;border-radius:10px;padding:1px 9px;font-size:12px;font-weight:700}
 .lvl.pub{background:#fff1e6;color:#b45309}.lvl.prv{background:#e8f3ff;color:#004a9e}.lvl.off{background:#f3f3f7;color:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#f3f3f7;border-radius:14px;padding:2px 10px;font-size:12.5px;margin:0 6px 6px 0;font-family:"DejaVu Sans Mono",monospace}
+.chip b{font-family:"Open Sans",sans-serif;color:var(--muted);font-weight:400}
+.chip.def{border-color:var(--blue);background:#f0f7ff}
+.mset{border:1px solid #8c959f;border-radius:8px;padding:8px 10px 2px;background:#fff}
 .segnote{border-left:3px solid #7300e5;background:#faf7ff;padding:8px 12px;border-radius:0 8px 8px 0;font-size:13px;margin-bottom:14px}
 """
 
@@ -52,6 +56,19 @@ def expo(on, allowed=("off", "prv", "pub"), dis=False):
         cls = "on" if key == on else ("x" if key not in allowed else "")
         parts.append(f'<span class="{cls}">{label}</span>')
     return f'<span class="expo{" dis" if dis else ""}">{"".join(parts)}</span>'
+
+
+def models_field(mode="sel", chips=(("claude-sonnet", True), ("claude-haiku", False)), ro=False, hint="From the models this team may use (4). The agent may call only these; the default is the one its runtime uses unless told otherwise."):
+    allsel = mode == "all"
+    radios = (f'<span class="radio{" on" if allsel else ""}"></span> All team models &nbsp; '
+              f'<span class="radio{"" if allsel else " on"}"></span> Selected models')
+    if allsel:
+        body = '<div class="small muted">Every model the team may use, now and later (4 today).</div>'
+    else:
+        body = "".join(f'<span class="chip{" def" if d else ""}">{m}{" <b>default</b>" if d else ""} ✕</span>' for m, d in chips) + '<span class="chip" style="background:#fff;color:var(--link)">+ Add model</span>'
+    return f"""<div class="field"><label>Models</label><div class="hint">{hint}</div>
+<div style="margin-bottom:6px">{radios}</div><div class="mset">{body}</div></div>
+<div class="field"><label>Default model</label><div class="input" style="width:280px">claude-sonnet ▾</div></div>"""
 
 
 RO_BANNER = ('<div class="alert"><span class="ic">ⓘ</span><div><b>You have read-only access to this team.</b> '
@@ -222,9 +239,9 @@ def config_tab(ro):
 <div class="kv"><div class="k">Service account</div><div class="v mono">agent-orchestrator</div></div></div>
 <div class="field"><label>Persona and instructions</label><div class="input" style="height:54px">Plan the team's work on the board, split it into issues for the right agents, review results and keep people informed.</div></div></div></div>
 <div class="grid g2">
-<div class="card"><div class="ch"><h2>Model and resources</h2></div><div class="cb"><div class="grid g2">
-<div class="kv"><div class="k">Model</div><div class="v mono">claude-sonnet</div></div>
-<div class="kv"><div class="k">Resources</div><div class="v">2 vCPU · 8 GiB · one pod</div></div></div></div></div>
+<div class="card"><div class="ch"><h2>Models and resources</h2></div><div class="cb">
+<div class="kv"><div class="k">Models</div><div class="v"><span class="chip def">claude-sonnet <b>default</b></span><span class="chip">claude-opus</span><span class="chip">claude-haiku</span> <span class="muted small">Selected, 3 of 4 team models</span></div></div>
+<div class="kv"><div class="k">Resources</div><div class="v">2 vCPU · 8 GiB · one pod</div></div></div></div>
 <div class="card"><div class="ch"><h2>AWS identity</h2></div><div class="cb"><div class="grid g2">
 <div class="kv"><div class="k">IAM identity</div><div class="v">Dedicated <span class="muted small">always</span></div></div>
 <div class="kv"><div class="k">Role</div><div class="v mono small">afs/agents/afs-t-payments-factory/orchestrator</div></div></div></div></div></div>
@@ -277,7 +294,7 @@ opage("32-admin-create-team-orchestration", "admin", admin_nav("teams", orch=Tru
 <div class="field"><label>Hostname</label><div class="hint">From the team name. Private and public endpoints use separate domains set in service settings.</div><div class="input ro mono" style="width:520px">payments-factory.collab.corp.example</div></div>
 </div></div>
 <div class="card"><div class="ch"><h2>Orchestration agent</h2></div><div class="cb"><div class="grid g3">
-<div class="field"><label>Model</label><div class="hint">Service default; enabled for the team in step 3</div><div class="input">claude-sonnet ▾</div></div>
+<div class="field"><label>Models</label><div class="hint">Service default: all team models, default claude-sonnet</div><div class="input">All team models · default claude-sonnet ▾</div></div>
 <div class="field"><label>Resources</label><div class="hint">Service default</div><div class="input">1 vCPU · 4 GiB ▾</div></div>
 <div class="field"><label>Volume</label><div class="hint">Service default</div><div class="input">20 GiB · daily snapshots, keep 14</div></div></div>
 <div class="small muted">Named <span class="mono">orchestrator</span>, with its own IAM role. Its model calls count against the team budget.</div></div></div>
@@ -408,9 +425,9 @@ opage("40-ta-create-agent-collaboration", "ta", team_nav("agents", "ta", orch=Tr
 <div class="field"><label>Template</label><div class="hint">From the Agentic Teammates runtime catalog</div><div class="input">hermes-dev (v2.4) ▾</div></div></div>
 <div class="field"><label>Persona and instructions</label><div class="input" style="height:54px">Keeps payments services free of known-vulnerable dependencies; opens PRs, never merges.</div></div>
 </div></div>
-<div class="card"><div class="ch"><h2>Model and resources</h2></div><div class="cb"><div class="grid g2">
-<div class="field"><label>Model</label><div class="input">claude-sonnet ▾</div></div>
-<div class="field"><label>Resources</label><div class="input">2 vCPU · 8 GiB ▾</div></div></div></div></div>
+<div class="card"><div class="ch"><h2>Models and resources</h2></div><div class="cb">
+{models_field()}
+<div class="field"><label>Resources</label><div class="hint">One pod per agent. Add agents to add capacity.</div><div class="input" style="width:280px">2 vCPU · 8 GiB ▾</div></div></div></div>
 <div class="card"><div class="ch"><h2>Persistent storage · AWS identity · Configuration values · Secrets</h2></div><div class="cb small muted">Unchanged from today's Create agent (T3): storage, IAM identity, configuration values and secret bindings.</div></div>
 <div class="orch"><div class="oh"><div><h2><span class="oic">◆</span> Collaboration</h2><div class="sub">How this agent works with the team's orchestration agent. Settings for the tool itself are on Orchestration.</div></div></div>
 <div class="ob"><div class="field"><label>{tg(True)} Connect to Paperclip AI</label><div class="hint">On by default. The agent gets the tool's in-namespace address and its own Paperclip key by environment, and may open a connection to the orchestration agent only. It is never reachable from outside.</div></div>
@@ -420,7 +437,7 @@ opage("40-ta-create-agent-collaboration", "ta", team_nav("agents", "ta", orch=Tr
 <div style="display:flex;justify-content:flex-end;gap:8px"><span class="btn" style="border:0">Cancel</span><span class="btn p">Create agent</span></div>
 </div>
 <div style="width:360px"><div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb">
-<div class="code">afs agents create-agent \\<br>&nbsp; --team-id team_01JD3Z… \\<br>&nbsp; --name security-patcher \\<br>&nbsp; --template hermes-dev \\<br>&nbsp; --model-id claude-sonnet \\<br>&nbsp; --collaboration-connect</div>
+<div class="code">afs agents create-agent \\<br>&nbsp; --team-id team_01JD3Z… \\<br>&nbsp; --name security-patcher \\<br>&nbsp; --template hermes-dev \\<br>&nbsp; --models claude-sonnet claude-haiku \\<br>&nbsp; --default-model-id claude-sonnet \\<br>&nbsp; --collaboration-connect</div>
 <div class="small muted" style="margin-top:8px">There is no role option: every agent you create is a team agent.</div></div></div></div>
 </div>
 """)
@@ -433,3 +450,70 @@ opage("41-ta-orchestration-buzz", "ta2", team_nav("orch", "ta", team="data-contr
 # ----------------------------------------------------------------- Team viewer
 opage("42-tv-agents-orchestration", "tv", team_nav("agents", "tv", orch=True), agents_page(True))
 opage("43-tv-orchestration", "tv", team_nav("orch", "tv", orch=True), orch_header(True, "collab") + collab_tab(True))
+
+
+# ----------------------------------------------------------------- Model access (J, 2026-11-23)
+CATALOG = [
+    ("anthropic.claude-opus-…", "Anthropic", True, "15.00", "75.00", "18", ("ok", "Approved")),
+    ("anthropic.claude-sonnet-…", "Anthropic", True, "3.00", "15.00", "42", ("ok", "Approved")),
+    ("anthropic.claude-haiku-…", "Anthropic", True, "1.00", "5.00", "42", ("ok", "Approved")),
+    ("amazon.nova-pro-…", "Amazon", True, "0.80", "3.20", "40", ("ok", "Approved")),
+    ("amazon.titan-embed-…", "Amazon", True, "0.02", "—", "40", ("ok", "Approved")),
+    ("meta.llama-4-maverick-…", "Meta", True, "—", "—", "0", ("warn", "Waiting for approval")),
+]
+
+
+def catalog_rows():
+    out = []
+    for m, prov, en, i, o, teams, (sk, ps) in CATALOG:
+        out.append(f'<tr><td><span class="cb2"></span></td><td class="mono">{m}</td><td>{prov}</td><td>{st("ok","Enabled") if en else st("pend","Disabled")}</td>'
+                   f'<td>{st(sk, ps)}</td><td>{i}</td><td>{o}</td><td>{teams}</td></tr>')
+    return "".join(out)
+
+
+opage("44-admin-model-access", "admin", admin_nav("models", orch=True), f"""
+<div class="crumbs"><a>Agent Factory</a> › Model catalog & pricing</div>
+<div class="hdr"><div><h1>Model catalog & pricing <span class="info">Info</span></h1>
+<div class="desc">Bedrock models agents may call through the metering gateway. A model is callable only with an approved price.</div></div>
+<div class="btns"><span class="btn">Sync from Bedrock</span><span class="btn dd">Actions</span></div></div>
+<div class="card"><div class="ch"><div><h2>Models enabled for the service</h2><div class="sub">Teams choose from these. Each team's list is set on the team (default: all service models).</div></div><span class="btn sm">Edit</span></div><div class="cb">
+<div class="tiles">
+<div class="tile on"><b><span class="radio on"></span> All models <span class="badge b-per">Default</span></b><span>Every Bedrock model in the catalog, including models added by the daily sync. New models become callable when their price is approved.</span></div>
+<div class="tile"><b><span class="radio"></span> Selected models</b><span>Only the models switched on below. New models from the sync start disabled.</span></div>
+</div></div></div>
+<div class="card"><div class="ch"><div><h2>Catalog <span class="cnt">(6)</span></h2><div class="sub">Synced daily from Bedrock in this region. With <b>All models</b>, the Enabled column follows the catalog and cannot be switched per model.</div></div><div class="btns"><span class="btn dis">Disable</span><span class="btn dis">Enable</span></div></div>
+<div class="tools"><div class="filter">🔍 Find models</div><span class="sel">Any provider ▾</span><span class="sel">Any price state ▾</span><div class="pager">‹ <b>1</b> › &nbsp; ⚙</div></div>
+<table><tr><th></th><th>Model</th><th>Provider</th><th>Service</th><th>Price</th><th>Input $/MTok</th><th>Output $/MTok</th><th>Teams with access</th></tr>
+{catalog_rows()}</table></div>
+<div class="alert warn"><span class="ic">⚠</span><div><b>1 model is enabled but not callable yet.</b> meta.llama-4-maverick has no approved price, so the gateway refuses its calls (budgets need a price to reserve spend). <a>Review prices</a></div></div>
+""")
+
+opage("45-admin-team-models", "admin", admin_nav("teams", orch=True), f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>Teams</a> › Create team</div>
+<div class="wiz"><div class="steps">
+<div><div class="n">Step 1</div><b>Team details</b></div>
+<div><div class="n">Step 2</div><b>Orchestration</b></div>
+<div class="on"><div class="n">Step 3</div><b>Models & network</b></div>
+<div class="todo"><div class="n">Step 4</div><b>Budget</b></div>
+<div class="todo"><div class="n">Step 5</div><b>Members</b></div>
+<div class="todo"><div class="n">Step 6</div><b>Review and create</b></div></div>
+<div style="flex:1;max-width:860px">
+<div class="hdr"><div><h1>Models & network</h1><div class="desc">Which models this team's agents may call. Team-admins then choose all, one or several of these per agent.</div></div></div>
+<div class="card"><div class="ch"><div><h2>Models for this team <span class="badge b-orch-o">Service admins only</span></h2><div class="sub">From the models enabled for the service (6).</div></div></div><div class="cb">
+<div class="tiles">
+<div class="tile on"><b><span class="radio on"></span> All service models <span class="badge b-per">Default</span></b><span>Every model enabled for the service, now and later. Removing a model from the service removes it here.</span></div>
+<div class="tile"><b><span class="radio"></span> Selected models</b><span>Only the models you pick. Models the service adds later are not added.</span></div>
+</div>
+<table style="margin-top:12px"><tr><th>Model</th><th>Provider</th><th>Price</th><th>Inference profile</th></tr>
+<tr><td class="mono">anthropic.claude-opus-…</td><td>Anthropic</td><td>{st('ok','Approved')}</td><td class="muted">Created with the team</td></tr>
+<tr><td class="mono">anthropic.claude-sonnet-…</td><td>Anthropic</td><td>{st('ok','Approved')}</td><td class="muted">Created with the team</td></tr>
+<tr><td class="mono">anthropic.claude-haiku-…</td><td>Anthropic</td><td>{st('ok','Approved')}</td><td class="muted">Created with the team</td></tr>
+<tr><td class="mono">amazon.nova-pro-…</td><td>Amazon</td><td>{st('ok','Approved')}</td><td class="muted">Created with the team</td></tr>
+<tr><td class="mono">amazon.titan-embed-…</td><td>Amazon</td><td>{st('ok','Approved')}</td><td class="muted">Created with the team</td></tr>
+<tr><td class="mono">meta.llama-4-maverick-…</td><td>Meta</td><td>{st('warn','Waiting for approval')}</td><td class="muted">Created when the price is approved</td></tr></table>
+</div></div>
+<div class="card"><div class="ch"><h2>Network</h2></div><div class="cb small muted">Unchanged: isolation tier and external systems (S3 step 2 today).</div></div>
+<div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb"><div class="code">afs teams create-team … --model-access all</div></div></div>
+<div style="display:flex;justify-content:flex-end;gap:8px"><span class="btn" style="border:0">Cancel</span><span class="btn">Previous</span><span class="btn p">Next</span></div>
+</div></div>
+""")
