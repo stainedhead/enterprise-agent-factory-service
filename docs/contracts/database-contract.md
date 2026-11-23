@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract v1.3.2 (2026-11-22) at schema 000021: migration 000020 (Paperclip team collaboration, [paperclip-team-collaboration-PRD.md](../../paperclip-team-collaboration-PRD.md) DB-US-44 to DB-US-47, specified in §7.2) and 000021 (`collab_routes()` provider client ids, §7.2.10) are built in `-db` at `main` (0d87776) and ship in release 1.0.1, which `-db` and `-restapi` share. Earlier history: contract v1 at schema 000019. Corrected on 2026-11-22 (contract corrections round, PC-D20 to PC-D31) to match the `-db` PRD §9.1 decisions DB-D1 to DB-D16 and the `-restapi` gaps G1 to G10. 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). 000017 adds `afs.schema_version()` for the startup check of services that cannot read the tracking table, and `identity_providers.cli_client_id` (the CLI public client, D48; `client_id` is the console client). Planned first release containing 000011 to 000017: `v0.13.0` 000018 adds daily report rollups and the follow-ups `-restapi` asked for (X-DB-8 to X-DB-10, `agent_secret_bindings` triggers, ETag-stable report schedules); 000019 adds `afs.record_work_order_secret` (template secrets for remediation teams) and `afs.event_detail`, and gives the outbox payloads written by `afs.instantiate_work_order_team` the API contract §7 envelope. Schema 000019 is at `-db` `main` (83f0345) and is not yet tagged; `-restapi` pins its pseudo-version until the tag exists |
+| **Status** | Contract v1.4.0 (2026-11-23) adds migration **000022** (team orchestration agent and model access, [team-orchestration-agent-PRD.md](../../team-orchestration-agent-PRD.md) DB-US-58 to DB-US-61, specified in §7.3; release 1.1.0, lockstep with `-restapi`); not yet built. Contract v1.3.2 (2026-11-22) at schema 000021: migration 000020 (Paperclip team collaboration, [paperclip-team-collaboration-PRD.md](../../paperclip-team-collaboration-PRD.md) DB-US-44 to DB-US-47, specified in §7.2) and 000021 (`collab_routes()` provider client ids, §7.2.10) are built in `-db` at `main` (0d87776) and ship in release 1.0.1, which `-db` and `-restapi` share. Earlier history: contract v1 at schema 000019. Corrected on 2026-11-22 (contract corrections round, PC-D20 to PC-D31) to match the `-db` PRD §9.1 decisions DB-D1 to DB-D16 and the `-restapi` gaps G1 to G10. 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). 000017 adds `afs.schema_version()` for the startup check of services that cannot read the tracking table, and `identity_providers.cli_client_id` (the CLI public client, D48; `client_id` is the console client). Planned first release containing 000011 to 000017: `v0.13.0` 000018 adds daily report rollups and the follow-ups `-restapi` asked for (X-DB-8 to X-DB-10, `agent_secret_bindings` triggers, ETag-stable report schedules); 000019 adds `afs.record_work_order_secret` (template secrets for remediation teams) and `afs.event_detail`, and gives the outbox payloads written by `afs.instantiate_work_order_team` the API contract §7 envelope. Schema 000019 is at `-db` `main` (83f0345) and is not yet tagged; `-restapi` pins its pseudo-version until the tag exists |
 | **Provider** | [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db): migrations, roles, row-level security, `migrate` Go package, `afs-migrate` |
 | **Consumer** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi): `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing` |
 | **Full data dictionary** | `-db/docs/data-model.md` (every table, column rule and function). This document is the interface: who connects how, what each service may touch, and how failures surface |
@@ -29,9 +29,9 @@ authentication on RDS (no static passwords). Pool sizes are per service.
 | `afs_owner` | `afs-migrate`, `afs-api` at startup (migration step only, separate connection) | DDL | Be used for request traffic |
 | `afs_app` | `afs-api` | Read and write desired state; insert audit and outbox; read usage, costs, status, revisions, reports; before the caller's scope is known, `authenticate_api_key`, `resolve_workload` and `team_directory` (000016) | Write status, spend counters, usage, activity, traffic; update or delete audit |
 | `afs_reconciler` | `afs-reconciler` (incl. activity and traffic collectors, outbox publisher, teardown, work order intake and tracking) | Read everything except idempotent response bodies and API key hashes; `LISTEN afs_desired_state`; open spend periods (`ensure_spend_counter`), release expired reservations, clear expired ceiling overrides and lower budgets to the base ceiling, drop partitions older than 13 months; write `resource_status`, lifecycle `state`, teardown columns, inference profile ARNs, identity and role-link status (agents and pools), `org_aws_accounts`, snapshots, `agent_activity`, `external_traffic`, tag sets; insert work orders from EventBridge, assign them and create their remediation teams (`instantiate_work_order_team`, 000016) and record the secrets of their template (`record_work_order_secret`, 000019), run the report rollups (`rollup_reports_recent`, `rollup_reports_daily`, 000018), mark pools deleted (000016), update repository progress from GitHub, insert work order notifications; purge expired idempotency keys; mark outbox published; create partitions; insert audit (drift) | Change desired state chosen by people |
-| `afs_gateway` | `afs-gateway` | Read teams, agents, pools, models (incl. `max_output_tokens`), prices, budgets, effective tags; `ensure_spend_counter`, `reserve_spend_held` / `settle_reservation` (and the older `reserve_spend` / `settle_spend`); insert `usage_events` (stamped with `tag_set_id`), tag sets, threshold events, outbox; `resolve_workload` (000016) | Anything else |
+| `afs_gateway` | `afs-gateway` | Read teams, agents, pools, models (incl. `max_output_tokens`), prices, budgets, effective tags; (000022) `agent_models`, `pool_models`, `team_inference_profiles`, `service_settings (key, value)`, the view `afs.effective_agent_models` and `afs.model_admission` (§7.3.5); `ensure_spend_counter`, `reserve_spend_held` / `settle_reservation` (and the older `reserve_spend` / `settle_spend`); insert `usage_events` (stamped with `tag_set_id`), tag sets, threshold events, outbox; `resolve_workload` (000016) | Anything else |
 | `afs_billing` | `afs-billing` | Read usage, teams, agents, models, prices, budgets, activity, traffic; write `cost_daily`, `cost_reconciliations`, `cost_allocation_tag_status`, tag sets; insert and supersede `model_price_proposals`; (000018) read `service_settings (key, value)` and `team_models (team_id, model_id, inference_profile_arn)` and the daily rollups; read `report_schedules` and `notification_channels` and update a schedule's run columns; insert outbox | Approve prices; change desired state |
-| `afs_edge` (000020) | `afs-edge` | `EXECUTE` on the ten `SECURITY DEFINER` functions of §7.2.5 and §7.2.8 and `afs.schema_version()`; `LISTEN afs_desired_state` | Any table privilege, any other function |
+| `afs_edge` (000020) | `afs-edge` | `EXECUTE` on the ten `SECURITY DEFINER` functions of §7.2.5 and §7.2.8, (000022) `afs.orchestration_routes()` and `afs.orchestration_settings()` (§7.3.6), and `afs.schema_version()`; `LISTEN afs_desired_state` | Any table privilege, any other function |
 | `afs_readonly` | Reporting and support | Read everything except API key hashes and audit before/after payloads | Write |
 
 ## 3. Session settings (`afs-api` only)
@@ -209,7 +209,7 @@ layer maps those to the [API contract](api-contract.md) §6 codes.
 | `P0001` and others | Unexpected | `InternalError` |
 
 Constraint and trigger messages are written for people and may be shown in `message`, but clients
-must branch on `code`.
+must branch on `code`. 000022 adds the constraint-name mapping of §7.3.9; from 000022 the second collaboration agent case above reads `agents_team_orchestration_uq` (`orchestration_agent_exists`).
 
 ## 7. Known gaps
 
@@ -267,6 +267,19 @@ The same list as root PRD §6.13. The database refuses a value outside its range
 | `collab.content_scan` | `"block"` | `"block"`, `"warn"`, `"off"` | 000020 |
 | `collab.max_body_mb` | `25` | integer 1 to 100 | 000020 |
 | `collab.denied_spike_threshold` | `50` | integer 1 to 100000 | 000020 |
+| `orchestration.tools` | see §7.3.4 | each tool once with its fixed profile; exactly one default, enabled; template has `orchestration` and `tool:<tool>` | 000022 |
+| `orchestration.public_base_domain` | copy of `collab.base_domain` | as `collab.base_domain`; `collab.base_domain` becomes its read-only alias | 000022 |
+| `orchestration.private_base_domain` | `null` | as `collab.base_domain` | 000022 |
+| `orchestration.public_endpoints` | copy of `collab.public_endpoints` | boolean; `collab.public_endpoints` becomes its read-only alias | 000022 |
+| `orchestration.private_endpoints` | `true` | boolean | 000022 |
+| `orchestration.default_limit`, `.default_web_ui_exposure` | `"public"` when `collab.base_domain` is set at migration, else `"private"` (OR-D5) | `"off"`, `"private"`, `"public"`; levels not above the limit | 000022 |
+| `orchestration.default_web_api_exposure` | `"off"` | as above | 000022 |
+| `orchestration.default_resources` | `{"cpu": "1", "memory": "4Gi"}` | resources object | 000022 |
+| `orchestration.default_volume_gib` | `20` | integer 10 to 1000 | 000022 |
+| `models.service_access` | `"selected"` on an upgraded database (models exist), `"all"` on a fresh one | `"all"`, `"selected"` | 000022 |
+| `models.default_team_access` | `"all"` | `"all"`, `"selected"` | 000022 |
+| `models.default_team_models` | `[]` | array of at most 100 existing model ids | 000022 |
+| `models.default_model_id` | `null` | `null` or an existing model id | 000022 |
 
 ## 7.1 Idempotency for `afs-api`
 
@@ -559,6 +572,282 @@ binding, only for the three boot secret names and their environment variables (`
   writes no other type), `TestCollaborationAccess/*` (alignment, additive upsert, retention), `TestHostnameHold/*`, `TestEdgeSessions/*` (single-use handoff under concurrency, expiry, revoke, host binding),
   `TestCollabKeyFunctions/*` and `TestSwarmCollaboration/*`, and up/down/up with checksums.
 
+## 7.3 Migration 000022: team orchestration agent and model access (contract v1.4.0)
+
+Requirements: [team orchestration agent PRD](../../team-orchestration-agent-PRD.md) ORC-1 to ORC-19, ORC-28, ORC-31,
+MOD-1 to MOD-7 and section 8 (M1); stories DB-US-58 to DB-US-61; decisions OR-D1 to OR-D17 (approved by J, 2026-11-23).
+Minor release **1.1.0**, lockstep with `-restapi` 1.1.0. One transaction; additive except where a row is renamed or
+backfilled, as listed. `.down.sql` reverses it for local use and tests (the boolean and `collaboration` mappings are
+lossless, M1). Contract decisions taken here are CD-13 to CD-25 (§9). The migration header notes the lock impact of
+each statement, as summarised in §7.3.12.
+
+What stays until 2.0.0 and is kept in step by triggers: `team_collaboration.web_ui_enabled` and `rest_api_enabled`,
+`teams.may_expose_collaboration`, `agents.model_id` and `agent_pools.model_id`, `team_models.inference_profile_arn`,
+`afs.collab_routes()`, the settings `collab.base_domain` and `collab.public_endpoints` (as read-only aliases), and the
+capability value `paperclip` (rewritten on write). 2.0.0 drops them (PRD M6).
+
+**Pre-flight.** None beyond 000021: no new role is needed.
+
+### 7.3.1 Role rename and the one-per-team rule (DB-US-58)
+
+| Change | Definition | Lock and notes |
+|---|---|---|
+| Rename | `UPDATE afs.agents SET role = 'orchestration' WHERE role = 'collaboration'` with the triggers `agents_collaboration_guard`, `agents_touch`, `agents_revision` and `agents_notify` disabled for the statement (`ALTER TABLE … DISABLE TRIGGER`, owner only, re-enabled before the next statement), so `version`, ETags and revisions do not change (CD-22) | Row locks on the few converted agents |
+| `agents_role_check` | Replaced (`NOT VALID` then `VALIDATE`): `CHECK (role IN ('worker','orchestration'))` | `SHARE UPDATE EXCLUSIVE` while validating |
+| Index | `agents_team_collaboration_uq` dropped; `CREATE UNIQUE INDEX agents_team_orchestration_uq ON afs.agents (team_id) WHERE role = 'orchestration' AND deleted_at IS NULL`. A second live orchestration agent → `23505` | Plain build, `SHARE` lock for milliseconds (as 000020) |
+| `afs.agents_collaboration_guard()` | Replaced by `afs.agents_orchestration_guard()` (same trigger point, `BEFORE INSERT OR UPDATE OF role, name, template_id, iam_identity, snapshot_schedule`): role change → `23514` (`agents_role_immutable`, as today); `INSERT` with `role = 'orchestration'` while `current_user = 'afs_app'` → `23514` (`agents_role_reserved`), so only the `SECURITY DEFINER` functions of §7.3.7 create one; `role = 'orchestration'` needs a template whose `capabilities` contain `orchestration` (`agents_orchestration_capability`), `iam_identity = 'dedicated'` (`agents_orchestration_identity`) and `snapshot_schedule <> 'off'` (`agents_orchestration_snapshots`); `role = 'worker'` on an `orchestration` template → `23514` (`agents_worker_capability`) | Messages name the failed rule |
+| Reserved name | Same guard: `INSERT` of an agent named `orchestrator` with `role <> 'orchestration'` → `23514` (`agents_name_reserved`). A trigger on `agent_pools` (`BEFORE INSERT`) refuses a pool named `orchestrator` the same way (`agent_pools_name_reserved`), because agent and pool names share a namespace. Names are immutable, so only inserts are checked; a 1.0.1 worker or pool already named `orchestrator` keeps its name (CD-19) | |
+| Delete guard | Trigger `afs.agents_orchestration_required()` (`BEFORE UPDATE OF state, deleted_at`): an orchestration agent moving to `state IN ('deleting','deleted')` or getting `deleted_at` while its team's `state` is not `deleting` or `deleted` → `23514` (constraint name `agents_orchestration_required`) | |
+| Functions that named `'collaboration'` | Replaced to name `'orchestration'`, with no other change: `afs.agent_templates_capability_guard()` (now on the `orchestration` capability), `afs.agents_collaboration_cleanup()` and its trigger's `WHEN (NEW.role = 'orchestration')`, `afs.team_collaboration_guard()`, the hostname-hold trigger function on `teams` (any `agents` row with `role = 'orchestration'`, deleted ones included), `afs.record_work_order_secret`, `afs.record_collab_board_key`, `afs.collab_routes()` (§7.3.6). A test greps `pg_proc.prosrc` for the literal `'collaboration'` used as a role value and finds none | `CREATE OR REPLACE`, no table lock |
+| `teams.orchestration_required` | `boolean NOT NULL DEFAULT false`, then `ALTER COLUMN … SET DEFAULT true`: existing teams `false`, new teams `true`. Constraint trigger `teams_orchestration_required` (`AFTER INSERT OR UPDATE OF orchestration_required`, `DEFERRABLE INITIALLY DEFERRED`): at commit, a team with `orchestration_required` that is not `deleting` or `deleted` and has no live orchestration agent → `23514`. Only `afs_app` with `afs.caller_is_service_admin()` and the functions of §7.3.7 may set it (`42501` otherwise; added to `teams_guardrail_guard`'s column list) | Constant defaults, no rewrite |
+
+`afs-api` never deletes the orchestration agent: `DeleteTeam` moves the team to `deleting`, and the reconciler then marks
+the workers, then the orchestration agent, `deleting` and `deleted` (TEAM-9), which the delete guard allows.
+
+### 7.3.2 Tool, exposure levels and the limit (DB-US-59)
+
+| Change | Definition | Lock and notes |
+|---|---|---|
+| `team_collaboration.tool` | `text NOT NULL DEFAULT 'paperclip' CHECK (tool IN ('paperclip','buzz'))`. Adding a tool is a later migration (text plus CHECK) | Constant default |
+| `team_collaboration.web_ui_exposure`, `web_api_exposure` | `text NOT NULL DEFAULT 'off' CHECK (… IN ('off','private','public'))`; backfilled in the migration from the booleans (`true` → `public`, `false` → `off`) with the touch, revision and notify triggers disabled (CD-22) | Updates every row of a small table |
+| Booleans kept in step | Trigger `afs.team_collaboration_levels_sync()` (`BEFORE INSERT OR UPDATE`), until 2.0.0 (CD-16). **Insert:** the levels win and the booleans are derived (`enabled := exposure <> 'off'`). **Update:** if a level changed, the matching boolean is derived from it; else if a boolean changed, its level becomes `off` for `false` and, for `true`, the team's `max_collaboration_exposure` when the tool supports the surface (else `off`, which reads back `false`). A statement that changes both a level and its boolean inconsistently → the level wins | |
+| `teams.max_collaboration_exposure` | `text NOT NULL DEFAULT 'off' CHECK (… IN ('off','private','public'))`; backfilled from `may_expose_collaboration` (`true` → `public`, `false` → `off`) with the touch, revision and notify triggers disabled. Added to `teams_guardrail_guard` (only service admins, `42501`). `afs-api` always passes it on insert, from `CreateTeam` or `orchestration.default_limit` | The backfill updates every team row; `teams` holds hundreds of rows |
+| `may_expose_collaboration` kept in step | Trigger on `teams` (`BEFORE INSERT OR UPDATE`): insert, the limit wins (`may := limit <> 'off'`); update, a changed limit sets `may`, else a changed `may` sets the limit (`true` → `public`, `false` → `off`), as ORC-27 | |
+| Exposure check | Trigger `afs.team_collaboration_exposure_check()` (`BEFORE INSERT OR UPDATE OF web_ui_exposure, web_api_exposure, tool, registration_mode`, after the sync trigger). For each surface whose level is new (insert) or changed, or every surface when `tool` changed (CD-15): a level above `teams.max_collaboration_exposure` (order `off` < `private` < `public`) → `23514` (`team_collaboration_exposure_limit`); a level above `off` for a surface the tool's profile does not support → `23514` (`team_collaboration_surface_supported`). `registration_mode` not in the tool's `registration` list → `23514` (`team_collaboration_registration_supported`). The profile is read from `orchestration.tools` (§7.3.4), whose CHECK fixes it per tool: Paperclip supports both surfaces and `manual`, `managed`; Buzz supports neither surface and `managed` only. A stored level above a later-lowered limit is never re-checked, so lowering the limit keeps the team's choice (ORC-14) | |
+| Tool and template | Constraint trigger `team_collaboration_tool_template` (`AFTER INSERT OR UPDATE OF tool, agent_id` on `team_collaboration` and `AFTER UPDATE OF template_id` on orchestration agents; `DEFERRABLE INITIALLY DEFERRED`): at commit the agent's template must carry `tool:<tool>` → else `23514`. Deferred so `ChangeCollaborationTool` may update the row and the agent in either order | |
+| Generation | `afs.team_collaboration_generation()` replaced: also bumps `generation` when `tool`, `web_ui_exposure` or `web_api_exposure` changes | |
+| Grants | `afs_app`: `UPDATE (tool, web_ui_exposure, web_api_exposure, web_ui_enabled, rest_api_enabled, registration_mode)`; the `INSERT` grant is **revoked** (the row is created only by §7.3.7); `afs_reconciler`, `afs_readonly`: `SELECT` as today | |
+| Snapshots | `agent_volume_snapshots.reason` CHECK replaced (`NOT VALID` then `VALIDATE`) to add `pre_tool_change`; new nullable columns `tool text CHECK (tool IN ('paperclip','buzz'))` (the tool the volume held) and `retain_until timestamptz`. `CHECK (reason <> 'pre_tool_change' OR (tool IS NOT NULL AND retain_until IS NOT NULL))`. `afs-api` inserts the `requested` row in the `ChangeCollaborationTool` transaction with `retain_until = now() + 90 days`; the reconciler never prunes a snapshot before its `retain_until` (CD-23) | Nullable columns, no rewrite |
+| `collaboration_access.exposure` | `text NOT NULL DEFAULT 'public' CHECK (exposure IN ('public','private'))`; the primary key is dropped and re-created with `exposure` after `surface` (ORC-31) | `ACCESS EXCLUSIVE` on the partitioned table while the index rebuilds; the table holds at most weeks of 1.0.1 counts. Run during the upgrade window |
+
+### 7.3.3 Template capabilities
+
+| Change | Definition |
+|---|---|
+| `afs.capabilities_ok(text[])` | Replaced: known values `orchestration`, `tool:paperclip`, `tool:buzz` (and nothing else); at most 8, no duplicates, as before. Additionally a template with `orchestration` has exactly one `tool:*` value, and a `tool:*` value needs `orchestration` |
+| Rewrite | Existing `paperclip` values become `{orchestration, tool:paperclip}` in the migration (constraint dropped, rows updated with the touch, revision and notify triggers disabled, constraint re-added `NOT VALID` then `VALIDATE`). Until 2.0.0 a `BEFORE INSERT OR UPDATE OF capabilities` trigger rewrites a written `paperclip` the same way, so a 1.0.1 `PutAgentTemplate` keeps working (CD-24) |
+| Guard | `afs.agent_templates_capability_guard()` also refuses (`55000`) removing a `tool:*` value or `orchestration` while a live orchestration agent uses the template, or while `orchestration.tools` names the template for that tool |
+
+### 7.3.4 Settings (`orchestration.*`, `models.*`)
+
+New constraint `service_settings_orchestration_check` and `service_settings_models_check` (`NOT VALID` then
+`VALIDATE`), plus a `BEFORE INSERT OR UPDATE` trigger on `service_settings` for checks that read other tables. Values and
+seeds (rows inserted `ON CONFLICT (key) DO NOTHING`):
+
+| Key | Shape and range | Seed in 000022 |
+|---|---|---|
+| `orchestration.tools` | JSON object with exactly the keys `paperclip` and `buzz`; each `{enabled: boolean, default: boolean, templateId: "tpl_…"\|null, imageRepository: string\|null, webUi: boolean, webApi: boolean, registration: [..], inNamespacePort: integer}`. The profile members are fixed: `paperclip` `webUi true, webApi true, registration ["manual","managed"], inNamespacePort 3100`; `buzz` `false, false, ["managed"], 3000`. Exactly one `default`, and it is `enabled`. `imageRepository` is an OCI repository without tag or digest (`^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)+$`). The trigger checks that a non-null `templateId` names an existing template whose capabilities contain `orchestration` and `tool:<key>` (`23514`, `orchestration_tools_template`) (CD-17) | `paperclip`: enabled, default; `templateId` = the one enabled template with `paperclip` before the rewrite when exactly one exists, else `null`; `imageRepository` = the repository part (before `@`) of the newest live collaboration agent's `image`, else `null`. `buzz`: disabled, `templateId` and `imageRepository` `null` |
+| `orchestration.public_base_domain` | as `collab.base_domain` (`null` or DNS name) | copy of `collab.base_domain` |
+| `orchestration.private_base_domain` | as above | `null` |
+| `orchestration.public_endpoints` | boolean | copy of `collab.public_endpoints` |
+| `orchestration.private_endpoints` | boolean | `true` |
+| `orchestration.default_limit` | `"off"`, `"private"`, `"public"` | `"public"` when `collab.base_domain` is set (and, at migration time, `private_base_domain` is always unset), else `"private"` (OR-D5) |
+| `orchestration.default_web_ui_exposure` | same values, not above `default_limit` (the trigger checks both keys on either write, `23514`) | same rule as `default_limit` |
+| `orchestration.default_web_api_exposure` | same values, not above `default_limit` | `"off"` |
+| `orchestration.default_resources` | object `{cpu, memory}` as `agents.resources` | `{"cpu": "1", "memory": "4Gi"}` |
+| `orchestration.default_volume_gib` | integer 10 to 1000 | `20` |
+| `models.service_access` | `"all"`, `"selected"` | `"selected"` when `afs.models` has at least one row at migration time (an upgraded environment keeps 1.0.1 behaviour), else `"all"` (CD-18, OR-D15, DB-US-61) |
+| `models.default_team_access` | `"all"`, `"selected"` | `"all"` |
+| `models.default_team_models` | JSON array of at most 100 distinct model ids, each an existing `models.id` (trigger) | `[]` |
+| `models.default_model_id` | `null` or an existing `models.id` (trigger) | `null` (CD-18: there is no 1.0.1 "service default model" to copy; `afs-api` falls back as API contract §4.4d says) |
+
+**Aliases (CD-25).** A write of `orchestration.public_base_domain` or `orchestration.public_endpoints` also writes
+`collab.base_domain` or `collab.public_endpoints` to the same value (same trigger). A direct write of either `collab.*`
+key by `afs_app` → `23514` (`service_settings_alias_read_only`); `afs_owner` (the trigger) is exempt. The other five
+`collab.*` keys are unchanged and still writable. `afs.collab_settings()` keeps returning the seven `collab.*` keys;
+the new `afs.orchestration_settings()` (§7.3.6) returns the `orchestration.*` keys except `orchestration.tools`
+members `templateId` and `imageRepository`, which the edge does not need.
+
+### 7.3.5 Model access (DB-US-61)
+
+| Change | Definition | Lock and notes |
+|---|---|---|
+| `teams.model_access` | `text NOT NULL DEFAULT 'selected' CHECK (model_access IN ('all','selected'))`, then `SET DEFAULT 'all'`: existing teams `selected` (they have explicit `team_models` rows), new teams `all`. Added to `teams_guardrail_guard` (service admins only, `42501`, OR-D16) | Constant default |
+| `team_models` | Unchanged in shape. It is the team's **selection**, read only while `model_access = 'selected'`; rows are kept when the team moves to `all`, so moving back restores the list. Its restrictive service-admin policies stay | |
+| FKs to `team_models` | `agents (team_id, model_id) → team_models` and `agent_pools (team_id, model_id) → team_models` are dropped (CD-14): with `all` a team has no rows, and narrowing a team must not edit or block an agent (MOD-6). The FK of `model_id` to `models (id)` stays | Drop is instant |
+| `agents.model_access`, `agent_pools.model_access` | `text NOT NULL DEFAULT 'all' CHECK (… IN ('all','selected'))`; existing rows `all` (what the 1.0.1 gateway already allowed, OR-D15) | Constant default |
+| `agents.default_model_id`, `agent_pools.default_model_id` | `text REFERENCES afs.models (id)`; backfilled from `model_id` (triggers disabled, CD-22); then `CHECK (default_model_id IS NOT NULL)` `NOT VALID` then `VALIDATE`. Sync trigger until 2.0.0: insert, `default_model_id := coalesce(default_model_id, model_id)` and `model_id := default_model_id`; update, a changed `default_model_id` sets `model_id`, else a changed `model_id` sets `default_model_id` | Backfill touches every agent and pool row (thousands) in one statement |
+| `agent_models` | `team_id text NOT NULL`, `agent_id text NOT NULL`, `model_id text NOT NULL REFERENCES afs.models (id)`, `created_at timestamptz NOT NULL DEFAULT now()`, `created_by text NOT NULL DEFAULT afs.current_actor()`; `PRIMARY KEY (team_id, agent_id, model_id)`; `FOREIGN KEY (team_id, agent_id) REFERENCES afs.agents (team_id, id) ON DELETE CASCADE`. At most 50 rows per agent (`23514`) | New table |
+| `pool_models` | Same with `pool_id` and `FOREIGN KEY (team_id, pool_id) REFERENCES afs.agent_pools (team_id, id) ON DELETE CASCADE` | New table |
+| Selection rules | `BEFORE INSERT` on `agent_models` and `pool_models`: the model must be enabled for the service (`23514`, `agent_models_service`) and allowed for the team (`23514`, `agent_models_team`) at write time. Constraint trigger `agents_models_check` (`AFTER INSERT OR UPDATE OF model_access, default_model_id` on `agents` and `AFTER INSERT OR DELETE` on `agent_models`, `DEFERRABLE INITIALLY DEFERRED`; the same on pools): at commit, for each agent whose model fields changed in the transaction, `selected` needs at least one row (`23514`, `agents_models_selection_nonempty`) and the default model must be in the stored selection (when `selected`) and enabled for the service and allowed for the team (`23514`, `agents_default_model_allowed`). A price is not required at write time (CD-14) | |
+| `afs.team_inference_profiles` | `team_id text NOT NULL REFERENCES afs.teams (id) ON DELETE CASCADE`, `model_id text NOT NULL REFERENCES afs.models (id)`, `inference_profile_arn text CHECK (inference_profile_arn ~ '^arn:aws[a-z-]*:bedrock:[a-z0-9-]+:[0-9]{12}:application-inference-profile/[a-z0-9]+$')`, `state text NOT NULL DEFAULT 'creating' CHECK (state IN ('creating','active','retiring'))`, `retire_after timestamptz` (`CHECK ((state = 'retiring') = (retire_after IS NOT NULL))`), `created_at`, `updated_at`; `PRIMARY KEY (team_id, model_id)`. Written by the reconciler only; one row per model callable for the team, `retiring` for 7 days after it stops (MOD-2). Backfilled from `team_models.inference_profile_arn IS NOT NULL` as `active`. Until 2.0.0 a trigger copies the ARN into the matching `team_models` row when one exists, so 1.0.1 readers keep working (CD-13) | New table |
+| `models` | New columns `origin text NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual','bedrock_sync'))` and `synced_at timestamptz`. The reconciler's daily sync inserts new models with `origin = 'bedrock_sync'` and `enabled = false` (with `all` the flag is ignored; in `selected` new models start disabled, MOD-1). A change of `enabled` by `afs_app` while `models.service_access = 'all'` → `55000` (`models_enabled_fixed`) | Constant default |
+| `afs.effective_agent_models` | View `WITH (security_invoker = true)` so the caller's RLS applies: one row `(team_id, subject_kind ('agent'\|'pool'), subject_id, model_id, is_default boolean)` per live agent or pool of a team that is not `deleted` and per model in **service ∩ team ∩ subject ∩ callable**. Service: every model when `models.service_access = 'all'`, else `models.enabled`. Team: service set when `model_access = 'all'`, else ∩ `team_models`. Subject: team set when `model_access = 'all'`, else ∩ `agent_models` / `pool_models`. Callable: a `model_prices` row with `effective_from <= now()` exists | |
+| `afs.model_admission(p_subject_kind text, p_subject_id text)` | `STABLE`, `SECURITY INVOKER`, returns `(model_id text, reason text)` for every catalog model: `reason` NULL when admitted, else the first failed level in the order `model_not_enabled_for_service`, `model_not_enabled_for_team`, `model_not_enabled_for_agent` (also for a pool), `model_not_priced`. The gateway caches its result per subject (gateway contract §2.1) | |
+| Grants and RLS | `agent_models`, `pool_models`: RLS `app_team_scope` and `service_roles_all`; `afs_app` `SELECT, INSERT, DELETE`; `afs_reconciler`, `afs_gateway`, `afs_readonly` `SELECT`. `team_inference_profiles`: RLS as other team tables with a `SELECT`-only policy for `afs_app`; `afs_reconciler` `SELECT, INSERT, UPDATE, DELETE`; `afs_gateway`, `afs_billing`, `afs_readonly` `SELECT`. The view and `afs.model_admission`: `SELECT`/`EXECUTE` to `afs_app`, `afs_reconciler`, `afs_gateway`, `afs_readonly`. `afs_reconciler` gains `INSERT (id, provider, display_name, enabled, context_window, max_output_tokens, origin, synced_at)` and `UPDATE (synced_at)` on `models`. `afs_gateway` gains `SELECT` on `agent_models`, `pool_models` and `team_inference_profiles` and `SELECT (key, value)` on `service_settings`, because the view runs with the caller's rights and reads `models.service_access` (no setting holds a secret) | |
+| Change feed and revisions | `agent_models` and `pool_models` get revision triggers (keys `<team_id>/<agent_id>/<model_id>` and `<team_id>/<pool_id>/<model_id>`, explicit cases in `afs.record_revision()`) and notify triggers (payload `agent_models:<team_id>:` and `pool_models:<team_id>:`, empty id part as DB-D2). `team_inference_profiles` and `model_prices` get notify triggers only. `service_settings` gets a notify trigger for keys `models.%` and `orchestration.%` (payload `service_settings::<key>`). `teams`, `agents`, `agent_pools`, `models` and `team_models` already notify. Every input of the view therefore notifies (DB-US-61) | |
+| `seedOtherTeams` | Gains rows in `agent_models`, `pool_models` and `team_inference_profiles` (the last read-only for `afs_app`) | |
+
+### 7.3.6 Edge functions (DB-US-60)
+
+`afs_edge` gains `EXECUTE` on `afs.orchestration_routes()` and `afs.orchestration_settings()` (now **twelve** functions plus
+`afs.schema_version()`); still no table privilege.
+
+**`afs.orchestration_routes()`** returns **two rows per team** (surfaces `web_ui` and `web_api`) for each team that is not
+`deleting` or `deleted` and has a `team_collaboration` row:
+
+| Column | Type | Meaning |
+|---|---|---|
+| `team_id`, `slug`, `namespace`, `team_state` | `text` | as `collab_routes()` |
+| `agent_id`, `agent_state` | `text` | the orchestration agent |
+| `tool` | `text` | `paperclip` or `buzz` |
+| `service_name`, `port` | `text`, `integer` | the tool's in-namespace Service (`paperclip`, `buzz`) and `inNamespacePort` |
+| `surface` | `text` | `web_ui` or `web_api` (CD-20) |
+| `supported` | `boolean` | the tool's profile has the surface |
+| `exposure` | `text` | stored choice |
+| `limit_exposure` | `text` | `teams.max_collaboration_exposure` |
+| `effective` | `text` | `off`, `private` or `public`, computed below |
+| `reasons` | `text[]` | every condition that lowered `exposure` to `effective`: `tool_not_supported`, `team_limit`, `service_switch_public`, `service_switch_private`, `base_domain_unset`, `provider_without_collab_client` (web UI only, as 1.0.1). Empty when `effective = exposure` |
+| `public_hostname`, `private_hostname` | `text` | `slug || '.' || <base domain>`, NULL while that base domain is unset (both returned so the edge can answer a wrong-level host with `404`) |
+| `hostname` | `text` | the hostname of `effective`, NULL when `off` |
+| `ready`, `not_ready_reason` | `boolean`, `text` | as `collab_routes()` |
+| `provider_id`, `issuer_url`, `groups_claim`, `collab_client_id`, `collab_client_secret_arn`, `provider_client_id`, `provider_cli_client_id` | `text` | as `collab_routes()` (000021) |
+
+Effective level: start from `exposure`; `off` if the tool does not support the surface (`tool_not_supported`); then
+`min(level, limit)` (`team_limit` when it lowered); then `public` → `off` when `orchestration.public_endpoints` is false
+(`service_switch_public`) or `orchestration.public_base_domain` is unset (`base_domain_unset`); `private` → `off` when
+`orchestration.private_endpoints` is false (`service_switch_private`) or `orchestration.private_base_domain` is unset
+(`base_domain_unset`); for `web_ui`, `off` when the provider has no `collab_client_id`. A lowered level never falls to the
+other non-off level: a public choice capped by a `private` limit is `private`, but a public surface under the public kill
+switch is `off`, not `private`.
+
+**`afs.collab_routes()`** stays for the 1.0.1 edge during a rolling upgrade and is recomputed from the new columns: one row
+per team as before, `web_ui_enabled`/`rest_api_enabled` are the booleans, `web_ui_effective`/`rest_api_effective` are
+`effective = 'public'` of the matching surface, `may_expose` is `limit <> 'off'`, `hostname` uses
+`orchestration.public_base_domain`, and `service_name`, `port` follow the tool. Dropped in 2.0.0.
+
+**`afs.orchestration_settings()`** returns `(key text, value jsonb)` for `orchestration.public_base_domain`,
+`orchestration.private_base_domain`, `orchestration.public_endpoints` and `orchestration.private_endpoints`.
+
+**`afs.record_collab_access(p_rows jsonb)`** accepts an optional `exposure` member (`public` or `private`; absent means
+`public`, which is what a 1.0.1 edge sends; anything else `23514`) and a `surface` of `web_ui`, `rest_api` or `web_api`
+(`web_api` is stored as `rest_api`, CD-20). Same limits and return value as 000020.
+
+### 7.3.7 Creating the orchestration agent
+
+**`afs.create_orchestration_agent(p_team_id text, p_agent_id text, p_name text, p_tool text, p_web_ui_exposure text,
+p_web_api_exposure text, p_registration_mode text, p_model_access text, p_model_ids text[], p_default_model_id text,
+p_resources jsonb, p_storage_size_gib integer, p_storage_on_delete text) → text`**: `SECURITY DEFINER`, owned by
+`afs_owner`, `SET search_path = pg_catalog, afs`, `EXECUTE` for `afs_app` only. Used by `CreateTeam` (in its transaction,
+after the team row) and by the backfill (RA-US-21). It:
+
+1. Requires `afs.caller_is_service_admin()` (`42501`); the team to exist and not be `deleting` or `deleted` (`55000`);
+   `p_agent_id` to be an `agt_` ULID (the API generates it first, because the boot secret paths derive from the agent).
+2. Reads `orchestration.tools`: `p_tool` not `enabled` → `23514` (`orchestration_tool_not_enabled`); its `templateId` or
+   `imageRepository` `null`, or the template disabled → `55000` (`orchestration_runtime_unset`).
+3. Inserts the agent: `role = 'orchestration'`, `name = coalesce(p_name, 'orchestrator')`, the tool's template
+   (`template_id`, `template = harness`), `image = imageRepository || '@' || current_image_digest`, `iam_identity =
+   'dedicated'`, `snapshot_schedule = 'daily'`, `snapshot_retain_count = 14`, `storage_on_delete =
+   coalesce(p_storage_on_delete, 'snapshot_then_delete')`, `storage_size_gib = coalesce(p_storage_size_gib,
+   orchestration.default_volume_gib)`, `resources = coalesce(p_resources, orchestration.default_resources)`,
+   `model_access`, `default_model_id` and the `agent_models` rows from the model arguments. A second live orchestration
+   agent → `23505` (`agents_team_orchestration_uq`).
+4. Inserts `team_collaboration` (`tool`, both levels, `registration_mode`, default `manual` for Paperclip and `managed`
+   for Buzz); the checks of §7.3.2 apply.
+5. Sets `teams.orchestration_required = true` (a no-op for new teams; the backfill relies on it).
+6. Writes one `audit_log` row (`CreateOrchestrationAgent`, actor `afs.current_actor()`, `after` without secrets) and the
+   outbox events `agent.created` and `orchestration.created` with the API contract §7 envelope (`afs.event_detail`)
+   (CD-21). Returns the agent id.
+
+The boot secret rows (`managed_by = 'afs'`) and their bindings are inserted by `afs-api` after the call, in the same
+transaction, as 000020 allows. The backfill passes `p_name = 'orchestrator'`, or `team-orchestrator` when a live worker
+or pool of the team already holds `orchestrator` (CD-19); actor `system:migration` with `afs.service_admin = 'on'`.
+
+**`afs.instantiate_work_order_team(work_order_id)`** is replaced: the swarm template's optional `spec.collaboration`
+(PC-D29) is superseded by optional `spec.orchestration {tool?, webUiExposure?, webApiExposure?, defaultModelId?}`
+(defaults: the service default tool, `orchestration.default_web_*_exposure` capped by the team limit, which is
+`orchestration.default_limit`). It always calls the logic of `create_orchestration_agent` (as owner, so the
+`afs_app` grant does not apply) with `storage_on_delete = 'delete'` (ORC-7, OR-D12), `model_access = 'all'` and
+`defaultModelId` defaulting to the first pool's model. The work order team itself is `model_access = 'selected'` with the
+pools' models, as today. A template whose spec still has `collaboration {templateId}` is accepted until 2.0.0 and read as
+`orchestration {tool: 'paperclip'}`; the `templateId` is ignored in favour of `orchestration.tools`. If the tool's runtime
+is unset the function raises `55000` and creates nothing (the work order stays `open`, as for other instantiation
+failures). `afs.record_work_order_secret` accepts the work order team's orchestration agent id as before (000020),
+for the tool's boot secret names.
+
+### 7.3.8 Reserved secret names for Buzz (ORC-10)
+
+`secrets.managed_by` CHECK gains `buzz` (`'user','afs','paperclip','buzz'`), and `afs.secrets_managed_guard()` is
+replaced: the name `buzz` is refused (`23514`); `buzz-agent-private-key` is `managed_by = 'afs'` only, agent scope, on a
+worker of a team whose tool is `buzz` (no manual mode); other `buzz-*` names are `managed_by = 'buzz'`, agent scope, on the
+orchestration agent, with the ARN under `afs.secret_path(team_id, agent_id, 'buzz') || '/'` and `origin = 'registered'`,
+exactly as the `paperclip` rules of §7.2.4 (name derivation, the partial unique index widened to
+`managed_by IN ('paperclip','buzz')`, the reconciler-only write rule). `afs.record_collab_agent_key` and
+`afs.remove_collab_agent_key` accept the Buzz key: in a Buzz team they write `buzz-agent-private-key` bound as
+`BUZZ_PRIVATE_KEY` instead of the Paperclip key. Buzz content and keys are never stored in the database.
+
+### 7.3.9 Error mapping (additions to §6)
+
+`-restapi` maps by constraint name, including errors returned by `COMMIT` for the deferred triggers.
+
+| SQLSTATE | Constraint or source | API code | `details.reason` |
+|---|---|---|---|
+| `23514` | `agents_role_reserved`, `agents_role_check` (value `collaboration`) | `ValidationError` | `role_reserved` |
+| `23514` | `agents_name_reserved`, `agent_pools_name_reserved` | `ValidationError` | `name_reserved` |
+| `23514` | `agents_orchestration_required` | `409 Conflict` | `orchestration_agent_required` |
+| `23505` | `agents_team_orchestration_uq` | `409 Conflict` | `orchestration_agent_exists` |
+| `23514` | `team_collaboration_exposure_limit` | `ValidationError` | `exposure_above_limit` |
+| `23514` | `team_collaboration_surface_supported` | `ValidationError` | `surface_not_supported_by_tool` |
+| `23514` | `team_collaboration_registration_supported` | `ValidationError` | `registration_mode_not_supported` |
+| `23514` | `orchestration_tool_not_enabled` | `ValidationError` | `tool_not_enabled` |
+| `55000` | `orchestration_runtime_unset` | `409 Conflict` | `orchestration_runtime_unset` |
+| `23514` | `agent_models_service`, `agent_models_team` | `ValidationError` | `model_not_enabled_for_service`, `model_not_enabled_for_team` |
+| `23514` | `agents_models_selection_nonempty` | `ValidationError` | `models_selection_empty` |
+| `23514` | `agents_default_model_allowed` | `ValidationError` | `default_model_not_allowed` |
+| `55000` | `models_enabled_fixed` | `409 Conflict` | `service_model_access_all` |
+| `23514` | `service_settings_alias_read_only` | `ValidationError` | `setting_renamed` |
+| `23514` | `orchestration_tools_template`, `service_settings_orchestration_check`, `service_settings_models_check` | `ValidationError` | none (field `value`) |
+| `23514` | `teams_orchestration_required`, `team_collaboration_tool_template` (deferred) | `InternalError` | none: `afs-api` broke an invariant; logged with the constraint name |
+
+### 7.3.10 What each service touches (additions to §4)
+
+| Object | api | reconciler | gateway | billing | edge |
+|---|---|---|---|---|---|
+| `team_collaboration` new columns | R, U(cols) | R | | | via functions |
+| `teams.max_collaboration_exposure`, `model_access`, `orchestration_required` | R, W (guarded) | R | R | R | via functions |
+| `agents.model_access`, `default_model_id`; `agent_pools` same | R, W | R | R | R | |
+| `agent_models`, `pool_models` | R, I, D | R | R | | |
+| `team_inference_profiles` | R | R, W | R | R | |
+| `models.origin`, `synced_at` | R | R, I (sync) | R | R | |
+| `afs.effective_agent_models`, `afs.model_admission` | R, F | R, F | R, F | | |
+| `afs.create_orchestration_agent` | F | | | | |
+| `afs.orchestration_routes`, `afs.orchestration_settings` | | | | | F |
+
+### 7.3.11 Tests that prove each rule
+
+- `TestOrchestrationAgent/*`: second live orchestration agent `23505`; team without one at commit `23514`; direct
+  `afs_app` insert of `role = 'orchestration'` `23514`; delete guard (live team refused, `deleting` team allowed);
+  reserved name for agents and pools; role migration of a seeded `collaboration` row with unchanged `version`; no
+  function source names the `collaboration` role.
+- `TestCreateOrchestrationAgent/*`: happy path writes agent, `team_collaboration`, `agent_models`, audit and both outbox
+  rows; disabled tool `23514`; unset runtime `55000`; non-admin `42501`; `orchestration_required` set.
+- `TestCollaborationExposure/*`: booleans and levels in step in both directions (including `true` under a `private` limit
+  and under limit `off`); limit refusal; Buzz refusal for both surfaces and for `manual`; a stored level above a lowered
+  limit survives an unrelated update; tool change re-checks both surfaces; deferred tool/template check.
+- `TestServiceSettingRanges/orchestration.*` and `/models.*`: every range, exactly one default tool, template
+  capability check, default levels not above the default limit, aliases read-only, OR-D5 and DB-US-61 seeds on an
+  upgraded and on a fresh database.
+- `TestEdgeRole/orchestration_routes`: the effective-level table for every combination of choice, limit, tool, kill
+  switches, base domains and provider client; `collab_routes()` still matches 1.0.1 for 1.0.1 data; `afs_edge` reads no
+  table; `record_collab_access` with and without `exposure`.
+- `TestWorkOrderTeamHasOrchestrationAgent`: with and without `spec.orchestration`, legacy `spec.collaboration`,
+  `storage_on_delete = 'delete'`, runtime unset leaves the work order `open`.
+- `TestModelAccess/*`: each level's narrowing (service `selected`, team `selected`, agent and pool `selected`), the price
+  rule, an empty selection, a default outside the set at write time, narrowing a team leaves `agent_models` unchanged,
+  `model_admission` reason order, `enabled` fixed under `all`, sync insert grant.
+- `TestManagedSecrets/buzz_*`, `TestToolChangeSnapshot/*`.
+- `TestRowLevelSecurityIsolatesTeams/agent_models`, `/pool_models`, `/team_inference_profiles`;
+  `TestCrossTeamWritesChangeNothing/agent_models`, `/pool_models`, `/team_collaboration`; up/down/up with checksums.
+
+### 7.3.12 Lock impact summary
+
+`agents`, `agent_pools`, `teams`, `team_collaboration`, `agent_templates`: constant-default columns (no rewrite), CHECKs
+`NOT VALID` then `VALIDATE`, one plain unique index (`SHARE` for milliseconds), and backfill `UPDATE`s of every row of
+`teams` (hundreds), `team_collaboration` (at most one per team), `agent_templates` (tens) and `agents`/`agent_pools`
+(thousands, `default_model_id`) with triggers disabled. `collaboration_access`: primary key rebuilt under `ACCESS
+EXCLUSIVE` (small). `service_settings`: two CHECKs and seeded rows. Functions and views: `CREATE OR REPLACE`. Expected
+run time well under the 10 s `lock_timeout`; run it in the upgrade window that also runs the backfill hook.
+
 ## 8. Change process
 
 1. Schema change: a `-db` PR with the migration, integration tests (rejected case for every new
@@ -569,5 +858,25 @@ binding, only for the three boot secret names and their environment variables (`
 3. A breaking change follows expand and contract across two `-db` releases.
 
 ## 9. Change log
+
+- **v1.4.0 (2026-11-23), team orchestration agent and model access ([PRD](../../team-orchestration-agent-PRD.md), approved by J):** migration 000022 (§7.3): role `collaboration` renamed `orchestration` with `agents_team_orchestration_uq`; `teams.orchestration_required` and its deferred check; reserved name `orchestrator`; delete guard; `team_collaboration.tool`, `web_ui_exposure`, `web_api_exposure` and `teams.max_collaboration_exposure`, kept in step with the 1.0.1 booleans; exposure check trigger; capabilities `orchestration`, `tool:paperclip`, `tool:buzz`; `orchestration.*` and `models.*` settings; `afs.orchestration_routes()`, `afs.orchestration_settings()`, `exposure` in `record_collab_access` and `collaboration_access`; `afs.create_orchestration_agent`; work order teams get an orchestration agent; Buzz reserved secret names; model access columns and tables (`teams.model_access`, `agents`/`agent_pools.model_access` and `default_model_id`, `agent_models`, `pool_models`, `team_inference_profiles`), view `afs.effective_agent_models` and `afs.model_admission`. Minor (1.1.0); removals in 2.0.0.
+
+Contract decisions recorded with v1.4.0 (the PRD is silent on these; the API contract continues the numbering at CD-26):
+
+| # | Decision |
+|---|---|
+| CD-13 | `team_models` stays the team's *selection* and is read only in `selected` mode. Inference profiles move to the reconciler-owned `team_inference_profiles` (one row per callable model, 7-day `retiring` grace), because a team in `all` mode has no `team_models` rows to hold an ARN. `team_models.inference_profile_arn` is kept in step until 2.0.0 for 1.0.1 readers |
+| CD-14 | The composite FKs from `agents` and `agent_pools` to `team_models` are dropped and replaced by write-time checks (service and team allow the model; the default is in the stored selection), deferred to commit. A price is not required at write time; the gateway refuses an unpriced model with `model_not_priced` and the reconciler sets `ModelUnavailable` |
+| CD-15 | The exposure check runs only for a surface whose level is new or changed, and for both surfaces when the tool changes. A stored level above a lowered limit is never re-checked, so lowering a limit cannot block an unrelated update (ORC-14 "keeps the choice") |
+| CD-16 | Booleans and levels: on insert the levels win; on update a changed level wins, else a changed boolean maps `false` → `off` and `true` → the team's limit (or `off` when the tool lacks the surface or the limit is `off`). The same pattern keeps `may_expose_collaboration` and `max_collaboration_exposure` in step |
+| CD-17 | `orchestration.tools` entries carry the tool's fixed capability profile (`webUi`, `webApi`, `registration`, `inNamespacePort`) and an `imageRepository`. The orchestration agent's image is `imageRepository@<template current digest>`, so `CreateTeam` needs no image from the caller. This replaces DB-D18 for orchestration agents. A tool whose `templateId` or `imageRepository` is unset cannot create an agent (`orchestration_runtime_unset`) |
+| CD-18 | "Upgrade" for the `models.service_access` seed means `afs.models` has at least one row when 000022 runs. `models.default_model_id` is seeded `null`, because 1.0.1 has no service default model |
+| CD-19 | The name `orchestrator` is reserved on insert only (names are immutable). A 1.0.1 worker or pool already named `orchestrator` keeps it; the backfill then names that team's agent `team-orchestrator` |
+| CD-20 | `collaboration_access.surface` keeps the 1.0.1 value `rest_api` for the Web API; the new functions say `web_api` and `record_collab_access` accepts both |
+| CD-21 | `afs.create_orchestration_agent` writes the agent, its `team_collaboration` row and model rows, the audit record and the `agent.created` and `orchestration.created` outbox rows, and sets `orchestration_required`, so `CreateTeam`, the backfill and work order teams share one code path. It needs a service admin session |
+| CD-22 | Backfill statements in 000022 run with the touch, revision and notify triggers of the table disabled, so `version` and ETags do not change and no revision is recorded for a mechanical rename; reconcilers resync at start-up |
+| CD-23 | A *Change tool* snapshot is an `agent_volume_snapshots` row with reason `pre_tool_change`, the old `tool` and `retain_until = now() + 90 days`, inserted by `afs-api` in the `ChangeCollaborationTool` transaction |
+| CD-24 | The capability value `paperclip` written by a 1.0.1 client is rewritten to `orchestration` + `tool:paperclip` by trigger until 2.0.0 |
+| CD-25 | `collab.base_domain` and `collab.public_endpoints` become read-only aliases: the new keys write them; a direct write is refused (`setting_renamed`). The other five `collab.*` keys stay as they are |
 
 - **v1.3.2 (2026-11-22), build of the Paperclip collaboration change:** migration 000021 (`collab_routes()` returns `provider_client_id` and `provider_cli_client_id`), §7.2.10 records facts about 000020 (change feed payload, revision key, deny-all edge session policies, `PUBLIC` execute revoked on partition helpers, team group bindings carry no provider), and §7.2.9 states that a swarm collaboration agent takes the first pool's model and image (DB-D18).
