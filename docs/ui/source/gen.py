@@ -1,6 +1,6 @@
 """Generates console-style mockup screens for the Agent Factory PRD.
 
-Each screen is a standalone HTML file; shoot.js renders them to PNG.
+Each screen is a standalone HTML file; shoot.mjs renders them to PNG (node shoot.mjs [prefix ...]).
 """
 import html
 import pathlib
@@ -169,7 +169,7 @@ ROLE_PILL = {
 USER = {"admin": "Priya Raman", "ta": "Marcus Chen", "tv": "Dana Ortiz", "so": "Sam Okafor", "sw": "Marcus Chen"}
 
 
-def admin_nav(on):
+def admin_nav(on, orch=False):
     items = [
         ("grp", "Service"), ("dash", "Dashboard"), ("teams", "Teams"), ("wo", "Work orders"),
         ("grp", "Governance"), ("budgets", "Budgets & ceilings"), ("reports", "Reports & analytics"), ("costs", "Cost reconciliation"), ("tags", "Cost allocation tags"),
@@ -177,10 +177,12 @@ def admin_nav(on):
         ("grp", "Platform"), ("models", "Model catalog & pricing"), ("templates", "Agent templates"), ("swarmt", "Swarm templates"),
         ("external", "External systems"), ("settings", "Service settings"), ("export", "Export & import"),
     ]
+    if orch:
+        items.insert(items.index(("external", "External systems")), ("orch", "Orchestration"))
     return nav("Agent Factory", items, on)
 
 
-def team_nav(on, role, team="payments-factory", swarm=False, collab=False):
+def team_nav(on, role, team="payments-factory", swarm=False, collab=False, orch=False):
     items = [
         ("grp", "Team"), ("overview", "Overview"), ("agents", "Agents"), ("members", "Members & access"),
         ("grp", "Configuration"), ("secrets", "Secrets"), ("config", "Configuration values"), ("identities", "Agent identities"),
@@ -195,6 +197,8 @@ def team_nav(on, role, team="payments-factory", swarm=False, collab=False):
         items.insert(3, ("pools", "Pools & stages"))
     if collab:
         items.insert(items.index(("agents", "Agents")) + 1, ("collab", "Collaboration"))
+    if orch:
+        items.insert(items.index(("agents", "Agents")), ("orch", "Orchestration"))
     switch = f'<div class="team-switch"><span><b>{team}</b></span><span class="muted">▾</span></div>'
     return nav("Agent Factory", items, on, switch)
 
@@ -1211,5 +1215,8 @@ def collab_page(ro):
 
 page("30-ta-collaboration", "ta", team_nav("collab", "ta", collab=True), collab_page(False))
 page("31-tv-collaboration", "tv", team_nav("collab", "tv", collab=True), collab_page(True))
+
+# Orchestration agent redesign screens (team-orchestration-agent-PRD.md)
+exec((pathlib.Path(__file__).parent / "orch_screens.py").read_text())
 
 print("\n".join(sorted(p.name for p in OUT.glob("*.html"))))
