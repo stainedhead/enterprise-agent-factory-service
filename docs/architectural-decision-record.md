@@ -302,3 +302,41 @@ Accepted, Proposed (needs review), Superseded.
   before production, kill switches); a new role `team_collaborator` and five permissions in the API contract; migration
   `-db` 000020; contracts updated (database §7.2, API §4.4b and §4.4c, gateway: no change). Alternatives rejected: a load
   balancer or Ingress per team (breaks TEAM-4 and multiplies cost), and trusting Paperclip's login (no SSO, no RBAC).
+
+## ADR-017 Team orchestration agent, graded exposure and model access
+
+- Status: Accepted (J, 2026-11-23; decisions OR-D1 to OR-D17 of the
+  [team orchestration agent PRD](../team-orchestration-agent-PRD.md)). Changes ADR-016 and the 1.0.1 collaboration design;
+  release 1.1.0 in every repository, `-db` and `-restapi` in lockstep; removals in 2.0.0.
+- Context: in 1.0.1 a team-admin could optionally create one collaboration agent among the workers. Teams ran without one,
+  its endpoints (the only openings in a team's isolation) were configured on a page that did not say which agent owned them,
+  a surface was either internet-facing or off, Paperclip was hard-wired, and each agent named exactly one model.
+- Decision:
+  - **Mandatory orchestration agent (OR-D1, OR-D2, OR-D12).** Every team, including work order teams, gets one agent with
+    role `orchestration` (named `orchestrator`; converted 1.0.1 agents keep their names) in the same transaction as the team.
+    The database enforces at most one (unique index) and, for new teams, at least one (deferred constraint trigger). It cannot
+    be created through `CreateAgent` or deleted apart from the team; pause, restart and configuration work as for any agent.
+  - **Hidden harness, chosen tool (OR-D3, OR-D6, OR-D7).** The agent runs a harness plus a collaboration tool, Paperclip AI
+    (default) or Buzz (preview). Service admins map each tool to an orchestration runtime template; team screens show the tool,
+    never the harness. Team-admins may change the tool: AFS snapshots the volume (kept 90 days) and starts the new tool empty.
+    Buzz has no browser client and no REST API, so both its surfaces are N/A and fixed off.
+  - **Graded exposure (OR-D4, OR-D5).** Each surface is `off`, `private` (internal ALB, corporate and peered networks) or
+    `public` (internet ALB), within a per-team limit set by service admins, with separate kill switches per level. Both ALBs
+    front the same `afs-edge`, which serves a surface only on the hostname of its effective level. New teams target limit
+    `private`; environments without a private base domain seed `public` until the private path is built.
+  - **Regrouped console (OR-D11).** The orchestration agent has its own page and card (one purple accent and ◆ mark used for
+    nothing else); the shared agent configuration screen never shows tool settings, and the *Collaboration* tab never shows
+    agent configuration.
+  - **API shape (OR-D8, OR-D9, OR-D10).** A new `/orchestration` resource; `/collaboration` and the booleans stay as
+    deprecated aliases with `Deprecation` and `Sunset` headers until 2.0.0; no new permission.
+  - **Model access (OR-D13 to OR-D17).** Service, team and agent (or pool) each choose *all* (a live rule that follows the
+    level above) or a fixed selection, plus one default model per agent. Service admins set the service and team levels;
+    team-admins narrow per agent. The gateway admits service ∩ team ∩ agent and requires an approved price; a daily Bedrock
+    sync adds only models the account can invoke (terms are accepted outside AFS). Upgrades keep 1.0.1 access; new installs
+    start *all* everywhere.
+- Consequences: one more pod per team (counted in its budget); `-db` 000022 renames a role, adds exposure, limit, tool and
+  model access columns and tables, and keeps the 1.0.1 columns in step until 2.0.0 (database contract §7.3); a one-time
+  backfill hook in `-restapi`; an internal ALB, private hosted zone and certificate in platform Terraform; API contract
+  v1.4.0 (§4.4d) and gateway contract v1.1.0 (§2.1). Alternatives rejected: keeping the agent optional (teams without
+  coordination), a CIDR allow list on the public ALB as "private" (still internet-facing), letting team-admins pick the
+  harness (harness choice is a platform concern), and one model per agent (forces tickets for every task change).

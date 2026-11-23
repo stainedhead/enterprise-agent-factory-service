@@ -170,7 +170,8 @@ fifth kind of caller, a *workload* principal, that may only report progress on t
 Service admin (global navigation)            Team context (team-admin / team viewer)
 ├─ Service                                    ├─ Team
 │  ├─ Dashboard                               │  ├─ Overview
-│  ├─ Teams                                   │  ├─ Agents
+│  ├─ Teams                                   │  ├─ Orchestration         (1.1.0)
+│  │                                          │  ├─ Agents
 │  │                                          │  ├─ Pools & stages          (swarms)
 │  └─ Work orders                             │  └─ Members & access        (API keys tab: team-admin)
 ├─ Governance                                 │
@@ -182,6 +183,7 @@ Service admin (global navigation)            Team context (team-admin / team vie
    ├─ Model catalog & pricing                 │  ├─ Models
    ├─ Agent templates                         │  ├─ Log delivery
    ├─ Swarm templates                         │  │
+   ├─ Orchestration         (1.1.0)           │  │
    ├─ External systems                        │  └─ Notifications
    ├─ Service settings                        ├─ Cost
    └─ Export & import                         │  ├─ Budget & usage
@@ -208,7 +210,9 @@ Every navigation item opens one screen below:
 | Swarm templates, External systems, Export & import | P5, S7, S11 |
 | Team: Overview, Agents, Pools & stages, Members & access | T1 (V1), T2, P4, T6 |
 | Configuration: Secrets, Agent identities, Configuration values, External systems, Models | T4 (V2), T8, T7, T9, T1 *Models* tab |
-| Team: Collaboration (Paperclip, added by the [Paperclip change](paperclip-team-collaboration-PRD.md)) | T16 (V3) |
+| Team: Collaboration (Paperclip, added by the [Paperclip change](paperclip-team-collaboration-PRD.md)) | T16 (V3), **replaced in 1.1.0** by Team: Orchestration; `/teams/{teamId}/collaboration` redirects |
+| Team: Orchestration (1.1.0, [team orchestration agent PRD](team-orchestration-agent-PRD.md) §5) | T17 *Collaboration* tab, T18 *Agent configuration* tab (V4 read-only); orchestration card on T1 and T2 |
+| Platform: Orchestration (1.1.0, same PRD) | S12 (replaces the S10 *Collaboration* tab) |
 | Configuration: Log delivery, Notifications | T14 |
 | Cost: Budget & usage, Reports, Cost tags | T5, T11, T13 |
 | History: Activity & audit, Config revisions | T15 |
@@ -430,7 +434,7 @@ revisions* lists revisions per resource with a diff of any two; *Restore* runs a
 and restores on confirmation (CFG-3, CFG-6). Team viewers see both read-only; *Restore* is disabled for
 them.
 
-**T16 · Collaboration (Paperclip).** Added by the [Paperclip change PRD](paperclip-team-collaboration-PRD.md) (section 5 there
+**T16 · Collaboration (Paperclip).** *Replaced in 1.1.0 by T17 and T18 ([team orchestration agent PRD](team-orchestration-agent-PRD.md) §5.3).* Added by the [Paperclip change PRD](paperclip-team-collaboration-PRD.md) (section 5 there
 describes the panels): status and conditions, the *Web UI* and *REST API* switches, connected agents with link state,
 Paperclip-managed secrets, recent access. *Open Paperclip* opens the team hostname.
 
@@ -449,9 +453,32 @@ are used, so they can troubleshoot, but cannot create, rotate or bind them, and 
 
 ![Secrets, team viewer](docs/ui/13-tv-secrets.png)
 
-**V3 · Collaboration, read-only.** The T16 page with every control disabled ("Requires team-admin"); *Open Paperclip* works for anyone with `collaboration:access`.
+**V3 · Collaboration, read-only.** *Replaced in 1.1.0 by V4.* The T16 page with every control disabled ("Requires team-admin"); *Open Paperclip* works for anyone with `collaboration:access`.
 
 ![Collaboration, team viewer](docs/ui/31-tv-collaboration.png)
+
+#### Orchestration and model access (1.1.0)
+
+Specified in the [team orchestration agent PRD](team-orchestration-agent-PRD.md) §5, which this section only indexes. Every
+team has one orchestration agent shown apart from its other agents; model access is *all* or a selection at service, team and
+agent level.
+
+| Screen | Mockup |
+|---|---|
+| S3 *Create team*, step 2 *Orchestration* | [32](docs/ui/32-admin-create-team-orchestration.png) |
+| S2 *Teams* with orchestration columns | [33](docs/ui/33-admin-teams-orchestration.png) |
+| S12 *Orchestration* (service) | [34](docs/ui/34-admin-orchestration.png) |
+| T1 *Team overview* with the orchestration card | [35](docs/ui/35-ta-team-overview-orchestration.png) |
+| T2 *Agents*: orchestration card and team agents | [36](docs/ui/36-ta-agents-orchestration.png) |
+| T17 *Orchestration*, *Collaboration* tab (replaces T16) | [37](docs/ui/37-ta-orchestration-collaboration.png) |
+| T18 *Orchestration*, *Agent configuration* tab | [38](docs/ui/38-ta-orchestration-agent-config.png) |
+| T17 *Edit endpoints* | [39](docs/ui/39-ta-orchestration-edit-endpoints.png) |
+| T3 *Create agent* with the *Collaboration* section | [40](docs/ui/40-ta-create-agent-collaboration.png) |
+| T17 with Buzz (Web UI and Web API N/A) | [41](docs/ui/41-ta-orchestration-buzz.png) |
+| T2 read-only | [42](docs/ui/42-tv-agents-orchestration.png) |
+| V4 *Orchestration*, read-only (replaces V3) | [43](docs/ui/43-tv-orchestration.png) |
+| S4 *Model catalog* with service model access | [44](docs/ui/44-admin-model-access.png) |
+| S3 *Create team*, step 3 *Models for this team* | [45](docs/ui/45-admin-team-models.png) |
 
 #### Budgeted workloads, swarms and CVE remediation
 
