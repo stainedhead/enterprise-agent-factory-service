@@ -7,6 +7,7 @@ as SVG (used in the READMEs) and as a 2x PNG (for slides and documents).
 | Diagram | Shows | Used in |
 |---|---|---|
 | [architecture-overview](architecture-overview.svg) | Clients, control plane, database, EKS tenancy and AWS services | Root README |
+| [orchestration-agent](orchestration-agent.svg) | Each team's orchestration agent, public and private endpoints through afs-edge, and model admission (service ∩ team ∩ agent) | Root README |
 | [tenant-isolation](tenant-isolation.svg) | One team's namespace and the eight isolation layers | Root README, adoption guide |
 | [budget-enforcement](budget-enforcement.svg) | Reserve, invoke, settle; fail closed; IAM deny; daily CUR reconciliation | Root and -restapi READMEs |
 | [desired-state](desired-state.svg) | API transaction, change feed, reconcile loop, status back to clients | Root and -restapi READMEs |
