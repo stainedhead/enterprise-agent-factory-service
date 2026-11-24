@@ -25,7 +25,7 @@ through a gateway that (a) holds the provider credential, (b) is the only thing 
 (c) reads the token usage that every OpenAI-compatible server returns, it can be metered and capped with the same
 reserve-and-settle math AFS already uses for Bedrock.
 
-**Recommendation, in five decisions (details in section 12):**
+**Recommendation, in six decisions (details in section 13):**
 
 1. **Run the gateway per namespace** ("team gateway"), not as one shared service with per-team routing. The decisive
    reasons are credential isolation (a team's upstream keys live only in its own namespace and IAM scope), blast radius
@@ -47,6 +47,10 @@ reserve-and-settle math AFS already uses for Bedrock.
 5. **Cost and caps by pricing mode** (section 9): token-priced endpoints (OpenAI, OpenRouter, an internal platform with a
    transfer price) are metered **and hard-capped**; self-hosted capacity is metered in tokens, costed from EKS split
    cost allocation, and limited by an optional token quota rather than a USD cap.
+6. **Inference telemetry comes with it** (section 10, J 2026-11-24): latency, time to first token, errors and token
+   throughput per route, model and team (and per agent from the ledger and traces), emitted as OpenTelemetry with the
+   GenAI semantic conventions, landing in the platform's metrics and trace stores, the `usage_events` ledger and,
+   optionally, the team's own log destination. Route health becomes a status condition and a notification.
 
 This partly reverses D7 / EXT-6 / RPT-7: a non-Bedrock LLM reached **through a route** is metered and capped; one
 reached directly as an external system stays *Unmetered*. Whether direct access stays allowed at all is open
@@ -108,7 +112,9 @@ table to be rechecked against each server's current docs before the contract is 
   team's credentials are reachable only by that team's gateway.
 - G5. Route access follows service → team → agent narrowing, defaulting the way model access does (OR-D16, OR-D17).
 - G6. One team's gateway trouble does not affect any other team.
-- G7. Existing agents keep working: Bedrock paths, environment variable names and error codes of gateway contract
+- G7. The inference layer is observable: latency, time to first token, errors and token throughput per route, model,
+  team and agent, in standard OpenTelemetry form, without storing content (section 10).
+- G8. Existing agents keep working: Bedrock paths, environment variable names and error codes of gateway contract
   v1.1.0 do not change.
 
 ### Non-goals (this change)
@@ -166,7 +172,7 @@ Permissions (proposed): `model-endpoints:read`, `model-endpoints:write` (service
 | **Database connections** | Few pools | Many small pools: 600 pods × 4 connections ≈ 2,400. Needs RDS Proxy (or PgBouncer in transaction mode) in front of the spend functions, or the Redis/Valkey spend counter already planned for scale (solution design §3.1) |
 | **Operations** | One Deployment to upgrade, watch and scale | One image and one setting (`gateway.image`), rolled by the reconciler; version skew across teams for up to one ring interval; per-team dashboards come from the same metrics with a `namespace` label |
 | **Caller identity** | Pod IP → any namespace | Pod IP → its own namespace only; a caller from another namespace is refused by network policy before it reaches the gateway |
-| **Change from today** | Small | Medium: reconciler renders new objects, `AFS_GATEWAY_URL` value changes per team (name unchanged), migration window with both gateways (section 11) |
+| **Change from today** | Small | Medium: reconciler renders new objects, `AFS_GATEWAY_URL` value changes per team (name unchanged), migration window with both gateways (section 12.6) |
 
 ### 5.3 Why B
 
@@ -250,7 +256,7 @@ All tables in schema `afs`, team-scoped tables with `team_id`, composite foreign
 | `endpoint_models` | `(endpoint_id, model_name)`, `max_output_tokens`, `context_tokens`, `enabled` | `model_name` is what the client sends in `model`; free text, validated as printable ≤ 200 chars |
 | `endpoint_model_prices` | `(endpoint_id, model_name, effective_from)`, `input_per_mtok_usd`, `output_per_mtok_usd`, `cached_input_per_mtok_usd`, `request_fee_usd` (optional per-call fee), `source` (`manual`, `price_list`, `transfer`) | `numeric`, USD. Effective-dated like `model_prices` |
 | `endpoint_price_proposals` | as `model_price_proposals` | From LiteLLM's list or a provider's published prices; approved by a service admin |
-| `endpoint_credentials` | `(endpoint_id, team_id NULL)`, `secret_arn`, `rotated_at`, `status` | ARN at the managed path of section 10; `team_id` set for `per_team` and team endpoints |
+| `endpoint_credentials` | `(endpoint_id, team_id NULL)`, `secret_arn`, `rotated_at`, `status` | ARN at the managed path of section 11; `team_id` set for `per_team` and team endpoints |
 | `team_model_endpoints` | `(team_id, endpoint_id)` | Selection rows when `teams.route_access = selected` |
 | `agent_model_endpoints`, `pool_model_endpoints` | `(team_id, agent_id\|pool_id, endpoint_id)` | Selection rows when the agent's or pool's `route_access = selected` |
 | `endpoint_capacity_costs` | `(endpoint_id, team_id, effective_from)`, `monthly_usd` or `hourly_usd`, `allocation` (`by_tokens`, `by_agent`) | Optional, for `capacity` routes not costed by CUR (section 9.3) |
@@ -259,7 +265,7 @@ All tables in schema `afs`, team-scoped tables with `team_id`, composite foreign
 Column additions: `teams.route_access`, `teams.may_add_model_endpoints` (service-admin only, guarded like
 `may_add_external_systems`); `agents.route_access`, `agent_pools.route_access`; `usage_events.endpoint_id` (NULL for
 Bedrock), `usage_events.model_name` (text, for route calls, since `model_id` is an FK to Bedrock `models`),
-`usage_events.usage_source` (`response`, `estimated`, `provider_cost`), `usage_events.reasoning_tokens`;
+`usage_events.usage_source` (`response`, `estimated`, `provider_cost`), `usage_events.reasoning_tokens`, the timing columns `ttft_ms`, `upstream_ms`, `gateway_ms` and `http_status` (§10.4);
 `cost_daily.source` gains `route` and `route_capacity`. View `effective_agent_routes` (security invoker), like
 `effective_agent_models`. All on online-safe terms (nullable columns, `usage_events` is partitioned; lock impact noted
 in the migration header).
@@ -376,7 +382,85 @@ Usage, cost and activity reports gain `groupBy=route` and a `route` filter; the 
 mode show tokens, allocated cost and effective $/1M tokens. RPT-7 changes from "non-Bedrock LLMs are unmetered" to
 "non-Bedrock LLMs reached directly are unmetered".
 
-## 10. Credentials (Secrets Manager and ESO)
+## 10. Inference telemetry and observability
+
+J, 2026-11-24: the gateway also gives AFS **telemetry for the inference layer**. Every model call, to Bedrock or a
+route, already passes one component that knows the team, the agent or pool, the route, the model, the tokens and the
+timings, so it is the natural place to measure the health and performance of every model backend, including ones
+AFS does not run. Nothing here stores prompt or completion content.
+
+### 10.1 What is measured
+
+| Signal | Definition | Why it matters |
+|---|---|---|
+| Request latency | Gateway receipt to last byte, split into gateway overhead and upstream time | SLOs per route; overhead keeps the < 25 ms p99 TTFB budget of gateway contract §5 honest |
+| Time to first token (TTFT) | Receipt to first content chunk on streams | What agents and people feel; the first sign of an overloaded backend |
+| Inter-token latency / output throughput | Mean time between output chunks; output tokens per second per call | Compares backends and models; detects a self-hosted server that is saturating |
+| Token throughput | Input, output, cached and reasoning tokens per second and per period | Capacity planning for self-hosted inference; demand per team and route |
+| Request rate and concurrency | Calls per second and in-flight calls | Load per route; sizing of team gateways |
+| Errors | By outcome and code: upstream 4xx/5xx, `429` throttles with `Retry-After`, timeouts, client disconnects, AFS refusals (`402`, `403` reason, `429 QuotaExceeded`) | Separates "the provider is failing" from "AFS refused it" |
+| Usage completeness | Share of calls settled with `usage_source = estimated` | A backend that omits usage is a cost-accuracy risk |
+| Cost rate | USD per hour per route and team (from settlements) | Spend anomalies before the daily report |
+| Backend saturation (in-namespace servers only, optional) | Scraped from the server's own `/metrics` (for vLLM: queue length, running requests, KV-cache use) | Explains TTFT growth on self-hosted inference |
+
+### 10.2 OpenTelemetry GenAI semantic conventions
+
+The gateway emits OpenTelemetry traces and metrics following the GenAI semantic conventions, so standard dashboards
+and backends understand them, plus AFS attributes for tenancy:
+
+| Kind | Name (GenAI conventions) | AFS additions |
+|---|---|---|
+| Span | One client span per call, name `{gen_ai.operation.name} {gen_ai.request.model}` (for example `chat gpt-4.1`), attributes `gen_ai.operation.name`, `gen_ai.provider.name` (`aws.bedrock`, `openai`, or the endpoint's declared provider), `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.request.max_tokens`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `server.address`, `error.type` | `afs.team.id`, `afs.agent.id` or `afs.pool.id`, `afs.route`, `afs.endpoint.location`, `afs.pricing_mode`, `afs.cost_usd`, `afs.reserved_usd`, `afs.usage_source`, `afs.request_id` |
+| Histogram | `gen_ai.client.operation.duration` (s) | Label set below |
+| Histogram | `gen_ai.client.token.usage` (tokens, `gen_ai.token.type` = `input` / `output`) | Plus `afs.token.type` = `cached` / `reasoning` as a separate AFS histogram, because the convention has only input and output |
+| Histogram | `afs.gateway.time_to_first_token`, `afs.gateway.time_per_output_token` (s). The conventions define `gen_ai.server.*` versions for servers to report; the gateway measures from the client side, so it uses AFS names rather than claim server-side figures | Label set below |
+| Counter | `afs_gateway_requests_total{outcome, code}`, the existing `afs_gateway_*` metrics (added latency, reservation and settle failures, model denials, dropped usage rows) | Route label added |
+
+Trace context: the gateway accepts an incoming W3C `traceparent` from the agent's runtime and continues it, so a
+runtime that traces its own work (Hermes, Paperclip AI) sees the model call as a child span; it propagates
+`traceparent` upstream only to `in_namespace` and `corporate` endpoints, never to external providers. Content
+capture (the conventions' opt-in prompt and completion events) is **off and not configurable** in 1.2.0, in line with
+"no prompt or completion content is stored or logged" (gateway contract §8).
+
+The semantic conventions for GenAI are still marked *development* in OpenTelemetry; the gateway pins one version and
+records it in `X-Afs-Gateway-Contract-Version` notes, and attribute names are rechecked at contract time
+(MEG-OQ-14).
+
+### 10.3 Labels and cardinality
+
+Metrics carry `team_id` (and `namespace`), `route`, `model`, `operation`, `outcome` and status class. **Agent and pool
+ids are not metric labels**: hundreds of teams × agents × models × routes would explode series counts in the metrics
+store. Per-agent views come from two places that are built for that cardinality: spans (every span carries the agent
+id) and the `usage_events` ledger, which already rolls up into five-minute activity rows per agent. Models are bounded
+by the route's model list, so `model` is safe as a label.
+
+### 10.4 Where the data lands
+
+| Data | Destination | Who sees it |
+|---|---|---|
+| Metrics | Each team gateway exposes `/metrics` and pushes OTLP to the cluster's OpenTelemetry Collector (ADOT), which writes to the platform's Prometheus-compatible store (for example Amazon Managed Service for Prometheus) | Platform operators: dashboards and SLO burn-rate alerts per route and team. The console reads aggregated figures through the API (below) |
+| Traces | Collector → the platform trace backend (for example AWS X-Ray or Grafana Tempo), tail-sampled: every error, every refused call, every call slower than the route's latency objective, and a 5% sample of the rest | Platform operators; support by `afs.request_id` |
+| Per-call ledger | `afs.usage_events` (gains `ttft_ms`, `upstream_ms`, `gateway_ms`, `http_status`) | Reports API, console, CSV exports, by team, agent, route, model and tag, 13-month retention as today |
+| Team copy | Optional: the collector forwards a team's spans and gateway log records to the team's own log delivery destination (Fluent Bit / CloudWatch / S3, solution design §7.3), filtered by `afs.team.id` | The team, in its own tools, without access to anyone else's data |
+| Health state | The reconciler derives a route condition per team (`Ready`, `Degraded` when the error rate or TTFT objective is breached over 5 minutes, `Unavailable` when every call fails) and writes it to `resource_status`; it emits `model_endpoint.degraded` and `model_endpoint.recovered` outbox events for notification channels | Console route pages, `afs model-endpoints describe-model-endpoint`, notifications |
+
+### 10.5 What people see
+
+- **Service admins**: an *Inference* report (all teams) with latency percentiles, TTFT, error rate, tokens per
+  second and cost rate per route and model, and the effective $/1M tokens of self-hosted routes beside priced
+  ones; route health on the *Model endpoints* catalog.
+- **Team-admins and viewers**: the same for their team, filterable by agent (from `usage_events`), plus route health
+  badges on agent pages. A team sees only its own calls, including on service-level routes.
+- **Reports API**: `GET …/reports/inference` with `groupBy` `route`, `model`, `agent`, `hour`, `day` and percentiles
+  computed from `usage_events` (p50, p95, p99 of latency and TTFT), JSON or CSV, same permissions as the other reports.
+
+### 10.6 Objectives
+
+Proposed defaults, per route, settable by service admins on service endpoints and team-admins on team endpoints:
+error rate < 2% and p95 TTFT < 5 s over 30 days; gateway added latency p99 < 25 ms (existing). Breaches drive the
+`Degraded` condition and burn-rate alerts; they never block calls.
+
+## 11. Credentials (Secrets Manager and ESO)
 
 | Credential | Secrets Manager name (AFS-managed, ADR-006) | Who reads it |
 |---|---|---|
@@ -399,30 +483,33 @@ mode show tokens, allocated cost and effective $/1M tokens. RPT-7 changes from "
   in the database, never returned, never logged; the gateway redacts upstream auth headers in debug logs.
 - An endpoint with `auth_kind = none` (typical for an in-namespace vLLM) needs no secret; network policy is its guard.
 
-## 11. Impact by layer
+## 12. Impact by layer
 
-### 11.1 Gateway contract (v1.2.0, minor)
+### 12.1 Gateway contract (v1.2.0, minor)
 
 New paths (§8.1), route admission reasons, `429 QuotaExceeded`, `AFS_LLM_*` variables and `/etc/afs/llm-routes.json`.
 `AFS_GATEWAY_URL` keeps its name; its value is documented as opaque (it was already only consumed as a variable), so
 moving it to the team gateway is not a major change. Bedrock paths, error codes and identity rules are unchanged.
 
-### 11.2 `-db` (000023, release 1.2.0)
+### 12.2 `-db` (000023, release 1.2.0)
 
 Tables and columns of section 7.3, `afs.route_admission`, `effective_agent_routes`, the `_gateway` secret path in
 `afs.secret_path`, change-feed triggers on the new tables, RLS and grants (`afs_gateway` reads its team's rows only;
 from B, the per-namespace gateway connects as `afs_gateway` with `SET LOCAL afs.team_ids` to its team), isolation
 tests and `seedOtherTeams` rows for every new team-owned table.
 
-### 11.3 `-restapi`
+### 12.3 `-restapi`
 
 - `afs-gateway`: OpenAI-protocol adapter (Chat, Responses, Embeddings, SSE streaming), route resolution, upstream auth
   from files, usage parsing per §9.2, `GET /v1/models`, route admission cache, a mode flag so the same binary runs as
-  the shared gateway or a team gateway (`--team-namespace`).
+  the shared gateway or a team gateway (`--team-namespace`); GenAI-convention spans and metrics, `traceparent`
+  handling and the new timing columns (§10).
 - `afs-reconciler`: renders the team gateway (Deployment, Service, PDB, certificate, ServiceAccount and Pod Identity to
   the team's Bedrock role, ExternalSecret, CiliumNetworkPolicy egress to route hosts and in-namespace Services, ingress
   from the team's agents only), route ConfigMap content per agent, ring-based gateway image rollout, credential
   secrets at create time.
+- `afs-reconciler` (telemetry): route health conditions and `model_endpoint.degraded` / `recovered` events; OTel
+  Collector routing of team spans to team log destinations when opted in.
 - `afs-billing`: endpoint price proposals from LiteLLM's list and provider pages; optional provider cost pulls;
   capacity allocation; reports by route.
 - `afs-api`: about 16 operations (contract v1.5.0): `ListModelEndpoints`, `GetModelEndpoint`, `CreateModelEndpoint`,
@@ -431,7 +518,7 @@ tests and `seedOtherTeams` rows for every new team-owned table.
   `RotateModelEndpointCredential`, `PutTeamRouteAccess`, agent and pool `routes` in the existing model access body,
   `PutTokenQuota`, plus report parameters. Each mutation writes audit and outbox (`model_endpoint.*` events).
 
-### 11.4 `-website`
+### 12.4 `-website`
 
 - SDK regenerated from the contract.
 - Console, service admin: **Model endpoints** page beside *Models* (catalog table with protocol, location, pricing
@@ -440,10 +527,11 @@ tests and `seedOtherTeams` rows for every new team-owned table.
 - Team-admin: **Model endpoints** under the team (service routes with opt-out state, team endpoints when allowed),
   agent configuration's *Model access* tab gains *Routes* (all or selected, default route and model) and shows the
   env var names an agent will receive.
-- Reports: route group-by and badges; *Unmetered* badge kept only for direct `llm` external systems.
+- Reports: route group-by and badges; an *Inference* report (latency, TTFT, errors, tokens per second, cost rate)
+  for service admins and per team; *Unmetered* badge kept only for direct `llm` external systems.
 - New mockups are needed (`docs/ui/46-…`), to be drawn once J approves the direction.
 
-### 11.5 `-cli`
+### 12.5 `-cli`
 
 New service `model-endpoints` (`list-model-endpoints`, `describe-model-endpoint`, `create-model-endpoint`,
 `update-model-endpoint`, `delete-model-endpoint`, `put-endpoint-models`, `put-endpoint-model-price`,
@@ -451,7 +539,7 @@ New service `model-endpoints` (`list-model-endpoints`, `describe-model-endpoint`
 file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team-route-access`, route options on
 `agents update-agent-models`, `budgets put-token-quota`; one command per operation, goldens and AccessDenied tests.
 
-### 11.6 Migration from the shared gateway
+### 12.6 Migration from the shared gateway
 
 1. Ship the team gateway behind `gateway.deployment = shared | per_namespace` (default `shared`).
 2. Turn on per namespace for canary teams: the reconciler creates the team gateway, then rolls agents with the new
@@ -460,9 +548,9 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team
    scaled to zero. Rollback per team is the reverse (flip the team back and roll agents).
 4. Routes are offered only on teams with a team gateway (they need the namespace-scoped credentials).
 
-## 12. Decisions, risks and open questions
+## 13. Decisions, risks and open questions
 
-### 12.1 Proposed decisions (Claude, for J's review)
+### 13.1 Proposed decisions (Claude, for J's review)
 
 | # | Decision | Why |
 |---|---|---|
@@ -475,8 +563,9 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team
 | MEG-D7 | Upstream credentials at `<prefix>/<namespace>/_gateway/<route>`, gateway-only; `per_team` default for service endpoints | Isolation, revocation and provider-side attribution per team |
 | MEG-D8 | Route hosts are reachable from the team gateway only | Without this, caps are advisory |
 | MEG-D9 | Pass-through only in 1.2.0; no protocol translation, fail-over or content inspection | Keep the first release small and the cap guarantee simple |
+| MEG-D10 | The gateway emits OpenTelemetry with the GenAI semantic conventions plus `afs.*` tenancy attributes; agent ids on spans and in the ledger, never as metric labels; content capture off | One standard signal for every backend, at a cardinality the metrics store can hold (§10) |
 
-### 12.2 Risks
+### 13.2 Risks
 
 | Risk | Mitigation |
 |---|---|
@@ -487,7 +576,7 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team
 | Version skew during ring rollout | `X-Afs-Gateway-Contract-Version`; minor-only changes inside a release |
 | Price data from third-party lists is wrong | Proposals only; a service admin approves every price |
 
-### 12.3 Open questions for J
+### 13.3 Open questions for J
 
 | # | Question | Recommended answer |
 |---|---|---|
@@ -507,8 +596,10 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team
 | MEG-OQ-14 | Recheck vendor facts (§2.3, §6) before contracts are written | Yes, at contract time |
 | MEG-OQ-15 | RDS Proxy now, or move spend counters to Valkey with the team gateway? | RDS Proxy now; Valkey when load tests say so |
 | MEG-OQ-16 | Does the orchestration agent (Hermes, Paperclip AI) get routes like any agent? | Yes, same model access screen; the collaboration tool's own model calls go through its routes too |
+| MEG-OQ-17 | Forward a team's spans and gateway log records to the team's own log destination? | Yes, opt-in per team |
+| MEG-OQ-18 | Scrape self-hosted servers' own metrics (vLLM queue, KV cache) for in-namespace routes? | Yes, optional per endpoint, read-only |
 
-## 13. Glossary
+## 14. Glossary
 
 | Term | Meaning |
 |---|---|
@@ -519,6 +610,7 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team
 | Pricing mode | How a route's calls are costed: `per_token`, `capacity` or `free` |
 | Transfer price | A per-token internal price service admins set for a shared internal inference platform |
 
-## 14. Review record
+## 15. Review record
 
-- 2026-11-24: drafted from J's question in the project thread; proposal only, awaiting J's answers to section 12.3.
+- 2026-11-24: drafted from J's question in the project thread; proposal only, awaiting J's answers to section 13.3.
+- 2026-11-24: J added inference-layer telemetry as a goal; section 10 added (G7, MEG-D10, MEG-OQ-17, MEG-OQ-18).
