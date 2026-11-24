@@ -234,13 +234,12 @@ td.num{white-space:nowrap}
 <div class="tile"><b><span class="radio"></span> Free</b><span>No cost recorded. Tokens are metered.</span></div></div>
 <table style="margin-top:12px"><tr><th>Model name</th><th class="num">Max output tok</th><th class="num">Context tok</th></tr>
 <tr><td class="mono">Qwen/Qwen3-Coder-30B</td><td class="num">16,384</td><td class="num">131,072</td></tr></table>
-<div class="field" style="margin-top:12px"><label>Token quota (optional)</label><div class="hint">A hard limit in tokens per month for this route. Calls over it get <span class="mono">402 QuotaExceeded</span>.</div><div class="input" style="width:240px">50,000,000 per month</div></div>
-</div></div>
+<div class="small muted" style="margin-top:12px">Capacity routes are metered and reported per agent, with no hard limit. GPU pods in this namespace appear in the team's EKS cost.</div></div></div>
 <div style="display:flex;justify-content:flex-end;gap:8px"><span class="btn" style="border:0">Cancel</span><span class="btn p">Create endpoint</span></div>
 </div>
 <div style="width:360px"><div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb">
 <div class="code">afs model-endpoints create-model-endpoint \<br>&nbsp; --team-id team_01JD3Z… \<br>&nbsp; --slug coder-vllm \<br>&nbsp; --location in_namespace \<br>&nbsp; --base-url http://vllm-coder:8000/v1 \<br>&nbsp; --protocol openai_chat openai_embeddings \<br>&nbsp; --auth-kind none \<br>&nbsp; --pricing-mode capacity \<br>&nbsp; --owner marcus.chen \<br>&nbsp; --purpose "Cheap code completion"</div>
-<div class="code" style="margin-top:8px">afs budgets put-token-quota \<br>&nbsp; --team-id team_01JD3Z… \<br>&nbsp; --route coder-vllm --period monthly \<br>&nbsp; --max-tokens 50000000</div></div></div>
+</div></div>
 <div class="card"><div class="ch"><h2>What agents get</h2></div><div class="cb small">Agents with this route receive <span class="mono">AFS_LLM_CODER_VLLM_BASE_URL</span> and an entry in <span class="mono">/etc/afs/llm-routes.json</span> on their next restart. They never call <span class="mono">vllm-coder</span> directly: network policy lets only the team gateway reach it.</div></div></div>
 </div>
 </main></div></body></html>

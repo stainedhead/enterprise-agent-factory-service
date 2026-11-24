@@ -208,26 +208,20 @@ td.num{white-space:nowrap}
 .envbox b{color:#9ccaff;font-weight:400}
 </style><div class="proposal">PROPOSAL · not built</div>
 <div class="crumbs"><a>Agent Factory</a> › <a>Teams</a> › <a>payments-factory</a> › Model endpoints</div>
-<div class="hdr"><div><h1>payments-factory · Model endpoints <span class="info">Info</span></h1><div class="desc">Which service routes this team may use, whether it may declare its own endpoints, and its token quotas.</div></div>
+<div class="hdr"><div><h1>payments-factory · Model endpoints <span class="info">Info</span></h1><div class="desc">The service endpoints this team opted in to, extra-terms selections, and whether it may declare its own endpoints.</div></div>
 <div class="btns"><span class="btn">Edit</span></div></div>
 <div class="grid g2">
-<div class="card"><div class="ch"><div><h2>Service routes for this team <span class="badge b-orch-o">Service admins only</span></h2><div class="sub">From the routes switched on for the service (4)</div></div></div><div class="cb">
-<div class="tiles">
-<div class="tile on"><b><span class="radio on"></span> All service routes <span class="badge b-per">Default</span></b><span>Every route switched on for the service, now and later, except routes that need extra terms.</span></div>
-<div class="tile"><b><span class="radio"></span> Selected routes</b><span>Only the routes you pick.</span></div>
-</div>
-<table style="margin-top:12px"><tr><th>Route</th><th>Included</th><th>Credential</th></tr>
-<tr><td class="rt">bedrock</td><td><span class="st ok">By All</span></td><td class="small muted">Team Bedrock role</td></tr>
-<tr><td class="rt">openai-prod</td><td><span class="st ok">By All</span></td><td><span class="st ok">Set</span></td></tr>
-<tr><td class="rt">ml-platform</td><td><span class="st ok">By All</span></td><td class="small">Shared key</td></tr>
-<tr><td class="rt">openrouter <span class="badge b-terms">Extra terms</span></td><td><span class="cb2 on"></span> Selected by a service admin</td><td><span class="st ok">Set</span></td></tr></table></div></div>
+<div class="card"><div class="ch"><div><h2>Service endpoints for this team <span class="cnt">(4)</span></h2><div class="sub">Teams opt in themselves. Only endpoints with extra terms need a service admin.</div></div><span class="btn sm">Select extra-terms endpoint</span></div>
+<table><tr><th>Route</th><th>Opted in</th><th>By</th><th>Credential</th></tr>
+<tr><td class="rt">bedrock</td><td><span class="st ok">Always</span></td><td class="small muted">Built-in</td><td class="small muted">Team Bedrock role</td></tr>
+<tr><td class="rt">openai-prod</td><td><span class="st ok">Yes</span></td><td class="small">Marcus Chen (team-admin)</td><td><span class="st ok">Set</span></td></tr>
+<tr><td class="rt">ml-platform</td><td><span class="st ok">Yes</span></td><td class="small">Marcus Chen (team-admin)</td><td class="small">Shared key</td></tr>
+<tr><td class="rt">openrouter <span class="badge b-terms">Extra terms</span></td><td><span class="st ok">Yes</span></td><td class="small">Priya Raman (service admin)</td><td><span class="st ok">Set</span></td></tr>
+<tr><td class="rt">eval-sandbox</td><td><span class="st pend">No</span></td><td class="small muted">Off for the service</td><td class="small muted">—</td></tr></table></div>
 <div>
 <div class="card"><div class="ch"><h2>Team endpoints</h2></div><div class="cb">
 <div class="field"><label><span class="tg on"></span> Team may declare its own model endpoints</label><div class="hint">Team-admins can add endpoints (for example a vLLM server in the namespace) with an owner and a purpose. Off removes nothing that exists; it stops new ones.</div></div>
 <div class="kv"><div class="k">Declared</div><div class="v"><span class="rt">coder-vllm</span> · <span class="loc ns">In namespace</span> · Capacity</div></div></div></div>
-<div class="card"><div class="ch"><div><h2>Token quotas</h2><div class="sub">Hard limits in tokens for routes without a per-token price</div></div><span class="btn sm">Add quota</span></div>
-<table><tr><th>Route</th><th>Period</th><th class="num">Limit</th><th>Used</th></tr>
-<tr><td class="rt">coder-vllm</td><td class="small">Monthly</td><td class="num">50 M</td><td><div class="hbar"><div class="bar "><i style="width:62%"></i></div><span class="small">31.0 M</span></div></td></tr></table></div>
-<div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb"><div class="code">afs teams put-team-route-access --team-id team_01JD3Z… \<br>&nbsp; --route-access all --extra-routes openrouter</div></div></div>
+<div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb"><div class="code">afs teams put-team-model-endpoints --team-id team_01JD3Z… \<br>&nbsp; --endpoint-ids mep_openai… mep_mlplat… mep_openrtr…</div></div></div>
 </div></div>
 </main></div></body></html>

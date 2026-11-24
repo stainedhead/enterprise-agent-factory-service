@@ -219,8 +219,8 @@ td.num{white-space:nowrap}
 <div class="card"><div class="ch"><div><h2>Pricing mode</h2><div class="sub">Decides how calls are costed and whether hard caps apply.</div></div></div><div class="cb">
 <div class="grid g3">
 <div class="tile on"><b><span class="radio on"></span> Per token</b><span>Each model has an input and output price. The gateway reserves the worst case before the call and settles to actual usage. <b>Counts against budgets and hard caps.</b></span></div>
-<div class="tile"><b><span class="radio"></span> Capacity</b><span>Cost is hardware (CUR or a monthly amount), allocated by token share. Tokens metered; optional token quota instead of a USD cap.</span></div>
-<div class="tile"><b><span class="radio"></span> Free</b><span>Charged elsewhere. Tokens metered, cost zero; optional token quota.</span></div>
+<div class="tile"><b><span class="radio"></span> Capacity</b><span>Cost is hardware (CUR or a monthly amount), allocated by token share. Tokens metered and reported; no hard limit.</span></div>
+<div class="tile"><b><span class="radio"></span> Free</b><span>Charged elsewhere. Tokens metered, cost zero.</span></div>
 </div></div></div>
 <div class="card"><div class="ch"><div><h2>Models on this route <span class="cnt">(3)</span></h2><div class="sub">Agents may call only listed models. A model without a price in force is refused (model_not_priced).</div></div><div class="btns"><span class="btn sm">Import from LiteLLM price list</span><span class="btn sm">Add model</span></div></div>
 <table><tr><th>Model name (sent in <span class="mono">model</span>)</th><th class="num">Max output tok</th><th class="num">Input $/MTok</th><th class="num">Cached input $/MTok</th><th class="num">Output $/MTok</th><th>Price source</th></tr>

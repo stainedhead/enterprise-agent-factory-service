@@ -65,6 +65,7 @@ SVC_ROUTES = [
     ("openai-prod", "OpenAI", "Chat, Responses, Embeddings", "ext", "Per token", ("met", "cap"), "18", ("ok", "Healthy"), "Per team (18 of 18 set)"),
     ("openrouter", "OpenRouter", "Chat", "ext", "Per token", ("met", "cap", "terms"), "3", ("ok", "Healthy"), "Per team (2 of 3 set)"),
     ("ml-platform", "Enterprise ML platform", "Chat, Embeddings", "corp", "Per token · transfer price", ("met", "cap"), "26", ("warn", "Degraded"), "Shared key"),
+    ("nous-portal", "Nous Portal (Hermes models)", "Chat", "ext", "Per token", ("met", "cap"), "4", ("ok", "Healthy"), "Per team (4 of 4 set)"),
     ("eval-sandbox", "Evaluation sandbox", "Chat", "corp", "Free", ("met",), "0", ("pend", "Disabled"), "None"),
 ]
 
@@ -86,7 +87,7 @@ gpage("56-admin-model-endpoints", "admin", admin_nav_gw("endpoints"), f"""
 <div class="desc">OpenAI-compatible model services agents reach through their team gateway, by route name. Every call through a route is metered; per-token routes count against team budgets and hard caps.</div></div>
 <div class="btns"><span class="btn dd">Actions</span><span class="btn p">Create endpoint</span></div></div>
 <div class="alert warn"><span class="ic">⚠</span><div><b>ml-platform is degraded for 4 teams.</b> p95 time to first token is 7.8 s over the last 15 minutes (objective 5 s). Calls still flow; teams were notified. <a>Open inference report</a></div></div>
-<div class="card"><div class="ch"><div><h2>Service endpoints <span class="cnt">(5)</span></h2><div class="sub">Teams with route access <b>All</b> get every endpoint switched on here, except ones that need extra terms. Off means off for every team.</div></div>
+<div class="card"><div class="ch"><div><h2>Service endpoints <span class="cnt">(6)</span></h2><div class="sub">Switched-on endpoints are offered to every team; each team opts in. Endpoints with extra terms are selected per team by a service admin. Off means off for every team.</div></div>
 <div class="btns"><span class="btn dis">Turn off</span><span class="btn">Edit</span></div></div>
 <div class="tools"><div class="filter">🔍 Find endpoints</div><span class="sel">Any location ▾</span><span class="sel">Any pricing mode ▾</span><div class="pager">‹ <b>1</b> › &nbsp; ⚙</div></div>
 <table><tr><th></th><th>Route</th><th>Protocol</th><th>Location</th><th>Pricing</th><th>Budget control</th><th>Service</th><th class="num">Teams</th><th>Health (15 min)</th><th>Credential</th></tr>
@@ -94,14 +95,15 @@ gpage("56-admin-model-endpoints", "admin", admin_nav_gw("endpoints"), f"""
 <div class="grid g2">
 <div class="card"><div class="ch"><div><h2>Team-declared endpoints <span class="cnt">(4)</span></h2><div class="sub">Declared by teams you allow to add endpoints. Read here; managed by each team.</div></div><a>Teams allowed (6)</a></div>
 <table><tr><th>Team</th><th>Route</th><th>Location</th><th>Pricing</th><th>Health</th></tr>
-<tr><td><a>payments-factory</a></td><td class="rt">coder-vllm</td><td>{loc('ns')}</td><td class="small">Capacity · quota 50 M tok/mo</td><td>{st('ok','Healthy')}</td></tr>
+<tr><td><a>payments-factory</a></td><td class="rt">coder-vllm</td><td>{loc('ns')}</td><td class="small">Capacity</td><td>{st('ok','Healthy')}</td></tr>
 <tr><td><a>search-relevance</a></td><td class="rt">rerank-tgi</td><td>{loc('ns')}</td><td class="small">Capacity</td><td>{st('ok','Healthy')}</td></tr>
 <tr><td><a>data-platform</a></td><td class="rt">azure-oai-east</td><td>{loc('ext')}</td><td class="small">Per token</td><td>{st('ok','Healthy')}</td></tr>
 <tr><td><a>mobile-platform</a></td><td class="rt">ollama-test</td><td>{loc('ns')}</td><td class="small">Free</td><td>{st('err','Unavailable')}</td></tr></table></div>
 <div class="card"><div class="ch"><div><h2>Direct LLM access</h2><div class="sub">External systems of category LLM that agents could call without a route</div></div></div><div class="cb">
 <table><tr><th>External system</th><th>Linked route</th><th>Direct access</th></tr>
 <tr><td>OpenAI {mb('unm')}</td><td class="rt">openai-prod</td><td>{st('pend','Blocked while route exists')}</td></tr>
-<tr><td>OpenRouter {mb('unm')}</td><td class="rt">openrouter</td><td>{st('warn','Override for 1 team')}</td></tr></table>
+<tr><td>OpenRouter {mb('unm')}</td><td class="rt">openrouter</td><td>{st('warn','Override for 1 team')}</td></tr>
+<tr><td>Nous Portal {mb('unm')}</td><td class="rt">nous-portal</td><td>{st('pend','Blocked while route exists')}</td></tr></table>
 <div class="small muted" style="margin-top:8px">A route host is reachable only from team gateways, so calls through a route cannot bypass metering. Direct access stays <b>Unmetered</b> and is off by default.</div></div></div>
 </div>
 <div class="card"><div class="ch"><h2>Pending price proposals <span class="cnt">(2)</span></h2><a>Review all</a></div>
@@ -123,8 +125,8 @@ gpage("57-admin-create-model-endpoint", "admin", admin_nav_gw("endpoints"), f"""
 <div class="card"><div class="ch"><div><h2>Pricing mode</h2><div class="sub">Decides how calls are costed and whether hard caps apply.</div></div></div><div class="cb">
 <div class="grid g3">
 <div class="tile on"><b><span class="radio on"></span> Per token</b><span>Each model has an input and output price. The gateway reserves the worst case before the call and settles to actual usage. <b>Counts against budgets and hard caps.</b></span></div>
-<div class="tile"><b><span class="radio"></span> Capacity</b><span>Cost is hardware (CUR or a monthly amount), allocated by token share. Tokens metered; optional token quota instead of a USD cap.</span></div>
-<div class="tile"><b><span class="radio"></span> Free</b><span>Charged elsewhere. Tokens metered, cost zero; optional token quota.</span></div>
+<div class="tile"><b><span class="radio"></span> Capacity</b><span>Cost is hardware (CUR or a monthly amount), allocated by token share. Tokens metered and reported; no hard limit.</span></div>
+<div class="tile"><b><span class="radio"></span> Free</b><span>Charged elsewhere. Tokens metered, cost zero.</span></div>
 </div></div></div>
 <div class="card"><div class="ch"><div><h2>Models on this route <span class="cnt">(3)</span></h2><div class="sub">Agents may call only listed models. A model without a price in force is refused (model_not_priced).</div></div><div class="btns"><span class="btn sm">Import from LiteLLM price list</span><span class="btn sm">Add model</span></div></div>
 <table><tr><th>Model name (sent in <span class="mono">model</span>)</th><th class="num">Max output tok</th><th class="num">Input $/MTok</th><th class="num">Cached input $/MTok</th><th class="num">Output $/MTok</th><th>Price source</th></tr>
@@ -150,19 +152,19 @@ gpage("58-admin-endpoint-detail", "admin", admin_nav_gw("endpoints"), f"""
 <div class="btns"><span class="btn dd">Actions</span><span class="btn">Edit</span></div></div>
 <div class="tabs"><span>Details</span><span>Models & prices</span><span class="on">Teams & credentials</span><span>Health</span><span>Usage</span><span>Revisions</span></div>
 <div class="grid g4 kpi">
-<div class="card"><div class="cb"><div class="small muted">Teams with this route</div><div class="big">18</div><div class="small muted">16 by <b>All</b>, 2 selected · 24 teams opted out</div></div></div>
+<div class="card"><div class="cb"><div class="small muted">Teams with this route</div><div class="big">18</div><div class="small muted">opted in: 17 by their team-admins, 1 by a service admin</div></div></div>
 <div class="card"><div class="cb"><div class="small muted">Credential mode</div><div class="big g" style="font-size:20px;margin:6px 0">Per team</div><div class="small muted">One OpenAI project key per team, so OpenAI's invoice splits by team</div></div></div>
 <div class="card"><div class="cb"><div class="small muted">Spend, month to date</div><div class="big">$9,412</div><div class="small muted">4.1 B tokens · 0.3% estimated usage</div></div></div>
 <div class="card"><div class="cb"><div class="small muted">Provider reconciliation</div><div class="big g" style="font-size:20px;margin:6px 0">{st('ok','Within 1.2%')}</div><div class="small muted">OpenAI organization costs, yesterday</div></div></div>
 </div>
 <div class="card"><div class="ch"><div><h2>Teams <span class="cnt">(18)</span></h2><div class="sub">Credential values are write-only and never shown. Each lives at <span class="mono">afs/&lt;namespace&gt;/_gateway/openai-prod</span>, readable only by that team's gateway.</div></div><div class="btns"><span class="btn dis">Rotate credential</span><span class="btn">Set credential</span></div></div>
 <div class="tools"><div class="filter">🔍 Find teams</div><span class="sel">Any credential state ▾</span><div class="pager">‹ <b>1</b> 2 › &nbsp; ⚙</div></div>
-<table><tr><th></th><th>Team</th><th>Access</th><th>Credential</th><th>Last rotated</th><th>Team gateway</th><th class="num">Spend MTD</th><th class="num">Calls (24 h)</th><th class="num">Errors (24 h)</th></tr>
-<tr><td><span class="cb2"></span></td><td><a>payments-factory</a></td><td class="small">All</td><td>{st('ok','Set')}</td><td class="small">2026-11-02</td><td>{st('ok','Ready · v1.2.0')}</td><td class="num">$2,180</td><td class="num">14,210</td><td class="num">0.2%</td></tr>
-<tr><td><span class="cb2"></span></td><td><a>search-relevance</a></td><td class="small">All</td><td>{st('ok','Set')}</td><td class="small">2026-10-19</td><td>{st('ok','Ready · v1.2.0')}</td><td class="num">$3,040</td><td class="num">22,904</td><td class="num">0.4%</td></tr>
-<tr><td><span class="cb2"></span></td><td><a>data-platform</a></td><td class="small">Selected</td><td>{st('ok','Set')}</td><td class="small">2026-11-20</td><td>{st('ok','Ready · v1.2.0')}</td><td class="num">$1,377</td><td class="num">6,018</td><td class="num">0.1%</td></tr>
-<tr><td><span class="cb2"></span></td><td><a>cve-2026-41873-swarm</a></td><td class="small">All</td><td>{st('err','Missing')}</td><td class="small muted">—</td><td>{st('ok','Ready · v1.2.0')}</td><td class="num">$0</td><td class="num">0</td><td class="num muted">—</td></tr>
-<tr><td><span class="cb2"></span></td><td><a>mobile-platform</a></td><td class="small">All</td><td>{st('ok','Set')}</td><td class="small">2026-09-30</td><td>{st('inf','Rolling · v1.2.1 (ring 2)')}</td><td class="num">$812</td><td class="num">3,330</td><td class="num">0.3%</td></tr></table></div>
+<table><tr><th></th><th>Team</th><th>Opted in by</th><th>Credential</th><th>Last rotated</th><th>Team gateway</th><th class="num">Spend MTD</th><th class="num">Calls (24 h)</th><th class="num">Errors (24 h)</th></tr>
+<tr><td><span class="cb2"></span></td><td><a>payments-factory</a></td><td class="small">Team-admin</td><td>{st('ok','Set')}</td><td class="small">2026-11-02</td><td>{st('ok','Ready · v1.2.0')}</td><td class="num">$2,180</td><td class="num">14,210</td><td class="num">0.2%</td></tr>
+<tr><td><span class="cb2"></span></td><td><a>search-relevance</a></td><td class="small">Team-admin</td><td>{st('ok','Set')}</td><td class="small">2026-10-19</td><td>{st('ok','Ready · v1.2.0')}</td><td class="num">$3,040</td><td class="num">22,904</td><td class="num">0.4%</td></tr>
+<tr><td><span class="cb2"></span></td><td><a>data-platform</a></td><td class="small">Service admin</td><td>{st('ok','Set')}</td><td class="small">2026-11-20</td><td>{st('ok','Ready · v1.2.0')}</td><td class="num">$1,377</td><td class="num">6,018</td><td class="num">0.1%</td></tr>
+<tr><td><span class="cb2"></span></td><td><a>cve-2026-41873-swarm</a></td><td class="small">Team-admin</td><td>{st('err','Missing')}</td><td class="small muted">—</td><td>{st('ok','Ready · v1.2.0')}</td><td class="num">$0</td><td class="num">0</td><td class="num muted">—</td></tr>
+<tr><td><span class="cb2"></span></td><td><a>mobile-platform</a></td><td class="small">Team-admin</td><td>{st('ok','Set')}</td><td class="small">2026-09-30</td><td>{st('inf','Rolling · v1.2.1 (ring 2)')}</td><td class="num">$812</td><td class="num">3,330</td><td class="num">0.3%</td></tr></table></div>
 <div class="alert warn"><span class="ic">⚠</span><div class="small"><b>cve-2026-41873-swarm has the route but no credential.</b> Its agents get <span class="mono">503 Unavailable</span> with reason <span class="mono">credential_missing</span> on this route until a team-admin or service admin sets one.</div></div>
 """)
 
@@ -186,12 +188,13 @@ gpage("59-admin-inference-report", "admin", admin_nav_gw("reports"), f"""
 <div class="card"><div class="cb"><div class="small muted">Errors and refusals</div><div class="big">1.3%</div><div class="small muted">upstream 0.6% · throttled 0.4% · AFS refused 0.3%</div></div></div>
 <div class="card"><div class="cb"><div class="small muted">Gateway overhead p99</div><div class="big">11 ms</div><div class="small muted">objective 25 ms · 42 team gateways</div></div></div>
 </div>
-<div class="card"><div class="ch"><div><h2>Routes <span class="cnt">(9)</span></h2><div class="sub">Percentiles from the usage ledger. Effective $/MTok for capacity routes = allocated cost ÷ tokens.</div></div></div>
+<div class="card"><div class="ch"><div><h2>Routes <span class="cnt">(10)</span></h2><div class="sub">Percentiles from the usage ledger. Effective $/MTok for capacity routes = allocated cost ÷ tokens.</div></div></div>
 <table><tr><th>Route</th><th>Pricing</th><th class="num">Calls</th><th class="num">p50 latency</th><th class="num">p95 TTFT</th><th class="num">Out tok/s per call</th><th class="num">Error rate</th><th class="num">Est. usage</th><th class="num">Cost</th><th class="num">Effective $/MTok</th><th>Health</th></tr>
 <tr><td class="rt">bedrock</td><td class="small">Per token</td><td class="num">354 K</td><td class="num">2.4 s</td><td class="num">1.1 s</td><td class="num">71</td><td class="num">0.9%</td><td class="num">0.0%</td><td class="num">$3,118</td><td class="num">5.92</td><td>{st('ok','Healthy')}</td></tr>
 <tr><td class="rt">openai-prod</td><td class="small">Per token</td><td class="num">31.2 K</td><td class="num">3.0 s</td><td class="num">1.6 s</td><td class="num">64</td><td class="num">0.3%</td><td class="num">0.3%</td><td class="num">$402</td><td class="num">2.70</td><td>{st('ok','Healthy')}</td></tr>
 <tr><td class="rt">ml-platform</td><td class="small">Transfer price</td><td class="num">18.9 K</td><td class="num">5.8 s</td><td class="num warn"><b>7.8 s</b></td><td class="num">22</td><td class="num">2.4%</td><td class="num">0.0%</td><td class="num">$96</td><td class="num">0.80</td><td>{st('warn','Degraded')}</td></tr>
 <tr><td class="rt">openrouter</td><td class="small">Per token</td><td class="num">2.1 K</td><td class="num">4.1 s</td><td class="num">2.2 s</td><td class="num">48</td><td class="num">1.1%</td><td class="num">0.0%</td><td class="num">$31</td><td class="num">3.40</td><td>{st('ok','Healthy')}</td></tr>
+<tr><td class="rt">nous-portal</td><td class="small">Per token</td><td class="num">1.4 K</td><td class="num">3.6 s</td><td class="num">1.9 s</td><td class="num">55</td><td class="num">0.6%</td><td class="num">0.0%</td><td class="num">$12 <span class="small muted">not reconciled</span></td><td class="num">1.10</td><td>{st('ok','Healthy')}</td></tr>
 <tr><td class="rt">coder-vllm <span class="small muted">payments-factory</span></td><td class="small">Capacity</td><td class="num">5.4 K</td><td class="num">1.9 s</td><td class="num">0.4 s</td><td class="num">88</td><td class="num">0.1%</td><td class="num">0.0%</td><td class="num">$58 <span class="small muted">EKS</span></td><td class="num">0.61</td><td>{st('ok','Healthy')}</td></tr>
 <tr><td class="rt">ollama-test <span class="small muted">mobile-platform</span></td><td class="small">Free</td><td class="num">212</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num err">100%</td><td class="num">—</td><td class="num">$0</td><td class="num muted">—</td><td>{st('err','Unavailable')}</td></tr></table></div>
 <div class="grid g2">
@@ -202,44 +205,38 @@ gpage("59-admin-inference-report", "admin", admin_nav_gw("reports"), f"""
 <tr><td class="mono">502 UpstreamError</td><td class="small">Upstream</td><td class="num">2,210</td><td class="rt">ml-platform</td></tr>
 <tr><td class="mono">402 BudgetExceeded</td><td class="small">AFS (cap)</td><td class="num">604</td><td class="rt">bedrock</td></tr>
 <tr><td class="mono">403 route_not_enabled_for_agent</td><td class="small">AFS (access)</td><td class="num">318</td><td class="rt">openai-prod</td></tr>
-<tr><td class="mono">402 QuotaExceeded</td><td class="small">AFS (quota)</td><td class="num">96</td><td class="rt">coder-vllm</td></tr></table></div>
+<tr><td class="mono">400 unsupported_parameter</td><td class="small">AFS (request)</td><td class="num">41</td><td class="rt">bedrock</td></tr></table></div>
 </div>
 <div class="small muted">Per-agent figures are on each team's report. Traces for any call can be found by request id in the platform trace store.</div>
 """)
 
 gpage("60-admin-team-routes", "admin", admin_nav_gw("teams"), f"""
 <div class="crumbs"><a>Agent Factory</a> › <a>Teams</a> › <a>payments-factory</a> › Model endpoints</div>
-<div class="hdr"><div><h1>payments-factory · Model endpoints <span class="info">Info</span></h1><div class="desc">Which service routes this team may use, whether it may declare its own endpoints, and its token quotas.</div></div>
+<div class="hdr"><div><h1>payments-factory · Model endpoints <span class="info">Info</span></h1><div class="desc">The service endpoints this team opted in to, extra-terms selections, and whether it may declare its own endpoints.</div></div>
 <div class="btns"><span class="btn">Edit</span></div></div>
 <div class="grid g2">
-<div class="card"><div class="ch"><div><h2>Service routes for this team <span class="badge b-orch-o">Service admins only</span></h2><div class="sub">From the routes switched on for the service (4)</div></div></div><div class="cb">
-<div class="tiles">
-<div class="tile on"><b><span class="radio on"></span> All service routes <span class="badge b-per">Default</span></b><span>Every route switched on for the service, now and later, except routes that need extra terms.</span></div>
-<div class="tile"><b><span class="radio"></span> Selected routes</b><span>Only the routes you pick.</span></div>
-</div>
-<table style="margin-top:12px"><tr><th>Route</th><th>Included</th><th>Credential</th></tr>
-<tr><td class="rt">bedrock</td><td>{st('ok','By All')}</td><td class="small muted">Team Bedrock role</td></tr>
-<tr><td class="rt">openai-prod</td><td>{st('ok','By All')}</td><td>{st('ok','Set')}</td></tr>
-<tr><td class="rt">ml-platform</td><td>{st('ok','By All')}</td><td class="small">Shared key</td></tr>
-<tr><td class="rt">openrouter {mb('terms')}</td><td><span class="cb2 on"></span> Selected by a service admin</td><td>{st('ok','Set')}</td></tr></table></div></div>
+<div class="card"><div class="ch"><div><h2>Service endpoints for this team <span class="cnt">(4)</span></h2><div class="sub">Teams opt in themselves. Only endpoints with extra terms need a service admin.</div></div><span class="btn sm">Select extra-terms endpoint</span></div>
+<table><tr><th>Route</th><th>Opted in</th><th>By</th><th>Credential</th></tr>
+<tr><td class="rt">bedrock</td><td>{st('ok','Always')}</td><td class="small muted">Built-in</td><td class="small muted">Team Bedrock role</td></tr>
+<tr><td class="rt">openai-prod</td><td>{st('ok','Yes')}</td><td class="small">Marcus Chen (team-admin)</td><td>{st('ok','Set')}</td></tr>
+<tr><td class="rt">ml-platform</td><td>{st('ok','Yes')}</td><td class="small">Marcus Chen (team-admin)</td><td class="small">Shared key</td></tr>
+<tr><td class="rt">openrouter {mb('terms')}</td><td>{st('ok','Yes')}</td><td class="small">Priya Raman (service admin)</td><td>{st('ok','Set')}</td></tr>
+<tr><td class="rt">eval-sandbox</td><td>{st('pend','No')}</td><td class="small muted">Off for the service</td><td class="small muted">—</td></tr></table></div>
 <div>
 <div class="card"><div class="ch"><h2>Team endpoints</h2></div><div class="cb">
 <div class="field"><label>{tg(True)} Team may declare its own model endpoints</label><div class="hint">Team-admins can add endpoints (for example a vLLM server in the namespace) with an owner and a purpose. Off removes nothing that exists; it stops new ones.</div></div>
 <div class="kv"><div class="k">Declared</div><div class="v"><span class="rt">coder-vllm</span> · {loc('ns')} · Capacity</div></div></div></div>
-<div class="card"><div class="ch"><div><h2>Token quotas</h2><div class="sub">Hard limits in tokens for routes without a per-token price</div></div><span class="btn sm">Add quota</span></div>
-<table><tr><th>Route</th><th>Period</th><th class="num">Limit</th><th>Used</th></tr>
-<tr><td class="rt">coder-vllm</td><td class="small">Monthly</td><td class="num">50 M</td><td><div class="hbar">{bar(62)}<span class="small">31.0 M</span></div></td></tr></table></div>
-<div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb"><div class="code">afs teams put-team-route-access --team-id team_01JD3Z… \\<br>&nbsp; --route-access all --extra-routes openrouter</div></div></div>
+<div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb"><div class="code">afs teams put-team-model-endpoints --team-id team_01JD3Z… \\<br>&nbsp; --endpoint-ids mep_openai… mep_mlplat… mep_openrtr…</div></div></div>
 </div></div>
 """)
 
 # ---------------------------------------------------------------------------------------------- Team-admin
 def team_routes_page(ro):
-    edit = '<span class="btn dis">Turn off for team</span>' if ro else '<span class="btn">Turn off for team</span>'
+    edit = ('<span class="btn dis">Remove from team</span><span class="btn dis">Add service endpoint</span>' if ro else '<span class="btn">Remove from team</span><span class="btn">Add service endpoint</span>')
     create = ('<span class="tip"><span class="btn p dis">Create endpoint</span><span class="tipbox">Needs team-admin</span></span>' if ro
               else '<span class="btn p">Create endpoint</span>')
     banner = ('<div class="alert"><span class="ic">ⓘ</span><div><b>You have read-only access to this team.</b> You can see routes, health and usage. Credentials show only whether they are set; changes need a team-admin (Marcus Chen).</div></div>' if ro else "")
-    svc_sub = ('Given to this team by service admins. Team-admins can turn a route off for the whole team.' if ro else 'Given to this team by service admins. You can turn a route off for the whole team; only service admins add routes.')
+    svc_sub = ('Endpoints switched on by service admins that this team opted in to. Team-admins add and remove them.' if ro else 'Endpoints switched on by service admins that this team opted in to. Add one to make it available to agents; endpoints with extra terms need a service admin.')
     cred_col = (lambda s: st("ok", "Set") if s else st("pend", "Not needed"))
     return f"""
 <div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › Model endpoints</div>
@@ -253,7 +250,7 @@ def team_routes_page(ro):
 <div class="card"><div class="cb"><div class="small muted">Route spend, month to date</div><div class="big">$2,412</div><div class="small muted">of $31,880 total team spend · counts toward the $40,000 cap</div></div></div>
 <div class="card"><div class="cb"><div class="small muted">Calls, 24 h</div><div class="big">22.1 K</div><div class="small muted">error rate 0.4%</div></div></div>
 </div>
-<div class="card"><div class="ch"><div><h2>Service routes <span class="cnt">(4)</span></h2><div class="sub">{svc_sub}</div></div><div class="btns">{edit}</div></div>
+<div class="card"><div class="ch"><div><h2>Service endpoints <span class="cnt">(4)</span></h2><div class="sub">{svc_sub}</div></div><div class="btns">{edit}</div></div>
 <table><tr><th></th><th>Route</th><th>Provider</th><th>Location</th><th>Budget control</th><th>Agents using</th><th>Credential</th><th>Health</th><th class="num">Spend MTD</th></tr>
 <tr><td><span class="radio"></span></td><td class="rt">bedrock</td><td class="small">Amazon Bedrock</td><td>{loc('aws')}</td><td>{mb('met')} {mb('cap')}</td><td class="small">12 of 12</td><td class="small muted">Team Bedrock role</td><td>{st('ok','Healthy')}</td><td class="num">$29,468</td></tr>
 <tr class="sel"><td><span class="radio on"></span></td><td class="rt">openai-prod</td><td class="small">OpenAI</td><td>{loc('ext')}</td><td>{mb('met')} {mb('cap')}</td><td class="small">5 of 12</td><td>{cred_col(True)}</td><td>{st('ok','Healthy')}</td><td class="num">$2,180</td></tr>
@@ -261,7 +258,7 @@ def team_routes_page(ro):
 <tr><td><span class="radio"></span></td><td class="rt">openrouter</td><td class="small">OpenRouter</td><td>{loc('ext')}</td><td>{mb('met')} {mb('cap')} {mb('terms')}</td><td class="small">1 of 12</td><td>{cred_col(True)}</td><td>{st('ok','Healthy')}</td><td class="num">$58</td></tr></table></div>
 <div class="card"><div class="ch"><div><h2>Team endpoints <span class="cnt">(1)</span></h2><div class="sub">Declared by this team (allowed by service admins). Owner and purpose are shown to service admins.</div></div></div>
 <table><tr><th></th><th>Route</th><th>Address</th><th>Location</th><th>Pricing</th><th>Budget control</th><th>Agents using</th><th>Health</th><th>Owner</th></tr>
-<tr><td><span class="radio"></span></td><td class="rt">coder-vllm</td><td class="mono small">http://vllm-coder:8000/v1</td><td>{loc('ns')}</td><td class="small">Capacity · EKS cost</td><td>{mb('met')} {mb('quo')}</td><td class="small">4 of 12</td><td>{st('ok','Healthy')}</td><td class="small">Marcus Chen</td></tr></table></div>
+<tr><td><span class="radio"></span></td><td class="rt">coder-vllm</td><td class="mono small">http://vllm-coder:8000/v1</td><td>{loc('ns')}</td><td class="small">Capacity · EKS cost</td><td>{mb('met')}</td><td class="small">4 of 12</td><td>{st('ok','Healthy')}</td><td class="small">Marcus Chen</td></tr></table></div>
 <div class="alert warn"><span class="ic">⚠</span><div class="small"><b>ml-platform is degraded.</b> p95 time to first token 7.8 s (objective 5 s) since 13:10. Calls still flow. Agents with another route may switch per call; AFS does not move traffic for them.</div></div>
 """
 
@@ -296,13 +293,12 @@ gpage("62-ta-create-team-endpoint", "ta", team_nav_gw("endpoints", "ta"), f"""
 <div class="tile"><b><span class="radio"></span> Free</b><span>No cost recorded. Tokens are metered.</span></div></div>
 <table style="margin-top:12px"><tr><th>Model name</th><th class="num">Max output tok</th><th class="num">Context tok</th></tr>
 <tr><td class="mono">Qwen/Qwen3-Coder-30B</td><td class="num">16,384</td><td class="num">131,072</td></tr></table>
-<div class="field" style="margin-top:12px"><label>Token quota (optional)</label><div class="hint">A hard limit in tokens per month for this route. Calls over it get <span class="mono">402 QuotaExceeded</span>.</div><div class="input" style="width:240px">50,000,000 per month</div></div>
-</div></div>
+<div class="small muted" style="margin-top:12px">Capacity routes are metered and reported per agent, with no hard limit. GPU pods in this namespace appear in the team's EKS cost.</div></div></div>
 <div style="display:flex;justify-content:flex-end;gap:8px"><span class="btn" style="border:0">Cancel</span><span class="btn p">Create endpoint</span></div>
 </div>
 <div style="width:360px"><div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb">
 <div class="code">afs model-endpoints create-model-endpoint \\<br>&nbsp; --team-id team_01JD3Z… \\<br>&nbsp; --slug coder-vllm \\<br>&nbsp; --location in_namespace \\<br>&nbsp; --base-url http://vllm-coder:8000/v1 \\<br>&nbsp; --protocol openai_chat openai_embeddings \\<br>&nbsp; --auth-kind none \\<br>&nbsp; --pricing-mode capacity \\<br>&nbsp; --owner marcus.chen \\<br>&nbsp; --purpose "Cheap code completion"</div>
-<div class="code" style="margin-top:8px">afs budgets put-token-quota \\<br>&nbsp; --team-id team_01JD3Z… \\<br>&nbsp; --route coder-vllm --period monthly \\<br>&nbsp; --max-tokens 50000000</div></div></div>
+</div></div>
 <div class="card"><div class="ch"><h2>What agents get</h2></div><div class="cb small">Agents with this route receive <span class="mono">AFS_LLM_CODER_VLLM_BASE_URL</span> and an entry in <span class="mono">/etc/afs/llm-routes.json</span> on their next restart. They never call <span class="mono">vllm-coder</span> directly: network policy lets only the team gateway reach it.</div></div></div>
 </div>
 """)
@@ -312,6 +308,7 @@ ENV = """<b>AFS_GATEWAY_URL</b>=https://afs-gateway.afs-t-payments-factory.svc:8
 <b>AFS_LLM_DEFAULT_ROUTE</b>=openai-prod &nbsp; <b>AFS_LLM_DEFAULT_MODEL</b>=gpt-4.1<br>
 <b>AFS_LLM_OPENAI_PROD_BASE_URL</b>=${AFS_GATEWAY_URL}/r/openai-prod/v1<br>
 <b>AFS_LLM_CODER_VLLM_BASE_URL</b>=${AFS_GATEWAY_URL}/r/coder-vllm/v1<br>
+<b>AFS_LLM_BEDROCK_BASE_URL</b>=${AFS_GATEWAY_URL}/r/bedrock/v1 <span style="color:#8c959f"># OpenAI protocol → Converse</span><br>
 <b>OPENAI_BASE_URL</b>=${AFS_LLM_OPENAI_PROD_BASE_URL} &nbsp; <b>OPENAI_API_KEY</b>=afs-gateway <span style="color:#8c959f"># placeholder</span><br>
 <b>AWS_ENDPOINT_URL_BEDROCK_RUNTIME</b>, <b>ANTHROPIC_BASE_URL</b> <span style="color:#8c959f"># unchanged, now the team gateway</span><br>
 <span style="color:#8c959f"># file: /etc/afs/llm-routes.json (routes, models, limits, metered/capped)</span>"""
@@ -332,9 +329,9 @@ def agent_models_page(ro):
 <div class="card"><div class="ch"><div><h2>Routes</h2><div class="sub">From the routes this team may use (5). The agent may call only these, through the team gateway.</div></div></div><div class="cb">
 <div style="margin-bottom:8px"><span class="radio"></span> All team routes &nbsp; <span class="radio on"></span> Selected routes</div>
 <table><tr><th>Route</th><th>Selected</th><th>Models on route</th><th>Budget control</th><th>Calls (7 d)</th><th class="num">Cost (7 d)</th></tr>
-<tr><td class="rt">bedrock</td><td><span class="cb2 on{dis}"></span></td><td class="small">2 (from Bedrock models above)</td><td>{mb('met')} {mb('cap')}</td><td class="num">3,412</td><td class="num">$212.40</td></tr>
+<tr><td class="rt">bedrock</td><td><span class="cb2 on{dis}"></span></td><td class="small">2 (above), also by OpenAI protocol</td><td>{mb('met')} {mb('cap')}</td><td class="num">3,412</td><td class="num">$212.40</td></tr>
 <tr><td class="rt">openai-prod</td><td><span class="cb2 on{dis}"></span></td><td class="small">gpt-4.1, gpt-4.1-mini, text-embedding-3-large</td><td>{mb('met')} {mb('cap')}</td><td class="num">1,906</td><td class="num">$48.10</td></tr>
-<tr><td class="rt">coder-vllm</td><td><span class="cb2 on{dis}"></span></td><td class="small">Qwen/Qwen3-Coder-30B</td><td>{mb('met')} {mb('quo')}</td><td class="num">4,880</td><td class="num">$9.20 <span class="small muted">alloc.</span></td></tr>
+<tr><td class="rt">coder-vllm</td><td><span class="cb2 on{dis}"></span></td><td class="small">Qwen/Qwen3-Coder-30B</td><td>{mb('met')}</td><td class="num">4,880</td><td class="num">$9.20 <span class="small muted">alloc.</span></td></tr>
 <tr><td class="rt">ml-platform</td><td><span class="cb2{dis}"></span></td><td class="small muted">not selected</td><td>{mb('met')} {mb('cap')}</td><td class="num muted">—</td><td class="num muted">—</td></tr>
 <tr><td class="rt">openrouter</td><td><span class="cb2{dis}"></span></td><td class="small muted">not selected</td><td>{mb('met')} {mb('cap')}</td><td class="num muted">—</td><td class="num muted">—</td></tr></table>
 <div class="grid g2" style="margin-top:12px"><div class="field"><label>Default route</label><div class="input{' ro' if ro else ''}" style="width:260px">openai-prod ▾</div></div>
@@ -359,8 +356,8 @@ def team_inference_body():
 <div class="grid g4 kpi">
 <div class="card"><div class="cb"><div class="small muted">Model calls · 7 d</div><div class="big">148 K</div><div class="small muted">bedrock 71% · coder-vllm 18% · openai-prod 9%</div></div></div>
 <div class="card"><div class="cb"><div class="small muted">p95 time to first token</div><div class="big">1.3 s</div><div class="small muted">best: coder-vllm 0.4 s</div></div></div>
-<div class="card"><div class="cb"><div class="small muted">Errors and refusals</div><div class="big">0.6%</div><div class="small muted">96 over token quota · 0 over budget</div></div></div>
-<div class="card"><div class="cb"><div class="small muted">coder-vllm quota, Nov</div><div class="big">62%</div>{bar(62, 'w')}<div class="small muted" style="margin-top:6px">31.0 M of 50 M tokens · forecast 47 M</div></div></div>
+<div class="card"><div class="cb"><div class="small muted">Errors and refusals</div><div class="big">0.6%</div><div class="small muted">0 over budget · 12 unsupported parameters</div></div></div>
+<div class="card"><div class="cb"><div class="small muted">Bedrock via OpenAI protocol</div><div class="big">22%</div><div class="small muted">of Bedrock calls · same budget, tags and profiles</div></div></div>
 </div>
 <div class="card"><div class="ch"><div><h2>Agents <span class="cnt">(12)</span></h2><div class="sub">Calls and timings by agent across all routes</div></div></div>
 <table><tr><th>Agent</th><th>Main route</th><th class="num">Calls</th><th class="num">Tokens in / out</th><th class="num">p50 latency</th><th class="num">p95 TTFT</th><th class="num">Errors</th><th class="num">Cost</th></tr>
@@ -391,7 +388,7 @@ gpage("65-ta-budget-routes", "ta", team_nav_gw("budget", "ta"), f"""
 <div class="grid g3 kpi">
 <div class="card"><div class="cb"><div class="small muted">Spent, month to date</div><div class="big">$31,880</div>{bar(80,'w')}<div class="small muted" style="margin-top:6px">80% · $8,120 left · forecast $41,300 <span class="warn">(over cap 2 days before month end)</span></div></div></div>
 <div class="card"><div class="cb"><div class="small muted">Reserved in flight</div><div class="big">$14.20</div><div class="small muted">9 calls across bedrock and openai-prod</div></div></div>
-<div class="card"><div class="cb"><div class="small muted">Not in the cap</div><div class="big g">31.0 M tok</div><div class="small muted">coder-vllm (capacity) · limited by its token quota instead</div></div></div>
+<div class="card"><div class="cb"><div class="small muted">Not in the cap</div><div class="big g">31.0 M tok</div><div class="small muted">coder-vllm (capacity) · reported only, no hard limit</div></div></div>
 </div>
 <div class="card"><div class="ch"><div><h2>What counts against the cap</h2><div class="sub">Every per-token route is reserved before the call and settled to actual usage, like Bedrock</div></div></div>
 <table><tr><th>Source</th><th>Budget control</th><th class="num">Spend MTD</th><th>Share of spend</th><th class="num">Estimated usage</th></tr>
@@ -399,9 +396,9 @@ gpage("65-ta-budget-routes", "ta", team_nav_gw("budget", "ta"), f"""
 <tr><td class="rt">openai-prod</td><td>{mb('met')} {mb('cap')}</td><td class="num">$2,180</td><td><div class="hbar">{bar(7)}<span class="small">7%</span></div></td><td class="num">0.3%</td></tr>
 <tr><td class="rt">ml-platform</td><td>{mb('met')} {mb('cap')}</td><td class="num">$174</td><td><div class="hbar">{bar(1)}<span class="small">&lt;1%</span></div></td><td class="num">0.0%</td></tr>
 <tr><td class="rt">openrouter</td><td>{mb('met')} {mb('cap')}</td><td class="num">$58</td><td><div class="hbar">{bar(0)}<span class="small">&lt;1%</span></div></td><td class="num">0.0%</td></tr>
-<tr><td class="rt">coder-vllm</td><td>{mb('met')} {mb('quo')}</td><td class="num muted">— (capacity)</td><td class="small muted">Not in the cap · quota 62% used</td><td class="num">0.0%</td></tr>
+<tr><td class="rt">coder-vllm</td><td>{mb('met')} <span class="small muted">Reported only</span></td><td class="num muted">— (capacity)</td><td class="small muted">Not in the cap · cost in EKS compute</td><td class="num">0.0%</td></tr>
 <tr><td class="muted">EKS compute, incl. team gateway and GPU pods</td><td class="small muted">Reported, not capped</td><td class="num">$2,904</td><td class="small muted">CUR, daily</td><td class="num muted">—</td></tr></table></div>
-<div class="alert"><span class="ic">ⓘ</span><div class="small">At 100% the team gateway answers <span class="mono">402 BudgetExceeded</span> on every per-token route and Bedrock alike; capacity and free routes keep working until their token quota. Direct calls to providers outside a route are not possible for this team (no LLM external system is on).</div></div>
+<div class="alert"><span class="ic">ⓘ</span><div class="small">At 100% the team gateway answers <span class="mono">402 BudgetExceeded</span> on every per-token route and Bedrock alike; capacity and free routes keep working (they have no hard limit in 1.2.0). Direct calls to providers outside a route are not possible for this team (no LLM external system is on).</div></div>
 """)
 
 # ---------------------------------------------------------------------------------------------- Team viewer

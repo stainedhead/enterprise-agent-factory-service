@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Proposed, for J's review (2026-11-24).** Design proposal only: nothing here is built, and no contract, schema or release changes until J approves. Release 1.1.0 is not changed by this document. Target release if approved: 1.2.0 in every repository (`-db` and `-restapi` in lockstep) |
+| **Status** | **Proposed; J answered every open question on 2026-11-24 (§13.3)**, awaiting approval to implement. Nothing here is built, and no contract, schema or release changes until J approves. Release 1.1.0 is not changed by this document. Target release if approved: 1.2.0 in every repository (`-db` and `-restapi` in lockstep) |
 | **Kind** | Change PRD to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md) (BUD-2, BUD-3, EXT-6, RPT-7), the [team orchestration agent PRD](team-orchestration-agent-PRD.md) (model access, section 6.9) and the [gateway contract](docs/contracts/gateway-contract.md) v1.1.0 |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
@@ -38,23 +38,25 @@ reserve-and-settle math AFS already uses for Bedrock.
    teams, orgs) that would become a second source of truth beside AFS's role bindings and model access. The existing
    Go gateway already has identity, admission, reservation, settlement, usage rows and tag handling; adding an
    OpenAI-compatible pass-through is the smallest change (section 6). We borrow from them: LiteLLM's published price
-   list as a seed for price proposals, and Envoy AI Gateway as a later option if protocol translation is wanted.
-3. **Model endpoints are a catalog with the same service → team → agent narrowing** as external systems and models:
-   service admins publish endpoints (and may let a team declare its own), teams narrow, agents narrow again (section 7).
+   list as a seed for price proposals. The gateway also translates OpenAI Chat Completions to Bedrock Converse, so one
+   OpenAI client can reach every model (J, MEG-OQ-8, MEG-OQ-20; section 8.3).
+3. **Model endpoints are a catalog with service → team → agent levels**: service admins publish endpoints (and may let
+   a team declare its own); **teams opt in** to the endpoints they want (team-admins choose, except endpoints with extra
+   terms, which a service admin selects); agents narrow again (section 7; J, MEG-OQ-4, MEG-OQ-19).
 4. **Each endpoint gets a route name**, a DNS-label slug such as `openai-prod` or `coder-vllm`. Agents receive one base
    URL per route as an environment variable (`AFS_LLM_OPENAI_PROD_BASE_URL`), a list (`AFS_LLM_ROUTES`) and a file
    (`/etc/afs/llm-routes.json`). Standard OpenAI SDKs work by setting the base URL; no code change (section 8).
 5. **Cost and caps by pricing mode** (section 9): token-priced endpoints (OpenAI, OpenRouter, an internal platform with a
-   transfer price) are metered **and hard-capped**; self-hosted capacity is metered in tokens, costed from EKS split
-   cost allocation, and limited by an optional token quota rather than a USD cap.
+   transfer price) are metered **and hard-capped**; self-hosted capacity is metered in tokens and costed from EKS split
+   cost allocation or an allocated amount, without a hard limit in 1.2.0 (J, MEG-OQ-7).
 6. **Inference telemetry comes with it** (section 10, J 2026-11-24): latency, time to first token, errors and token
    throughput per route, model and team (and per agent from the ledger and traces), emitted as OpenTelemetry with the
    GenAI semantic conventions, landing in the platform's metrics and trace stores, the `usage_events` ledger and,
    optionally, the team's own log destination. Route health becomes a status condition and a notification.
 
 This partly reverses D7 / EXT-6 / RPT-7: a non-Bedrock LLM reached **through a route** is metered and capped; one
-reached directly as an external system stays *Unmetered*. Whether direct access stays allowed at all is open
-decision MEG-OQ-5.
+reached directly as an external system stays *Unmetered*, and direct access to a provider is blocked while a route for
+it exists, unless a service admin allows it for one team (J, MEG-OQ-5).
 
 ## 2. Problem and context
 
@@ -110,7 +112,8 @@ table to be rechecked against each server's current docs before the contract is 
   cap only by one in-flight call per pod.
 - G4. Upstream credentials are never visible to agents, are stored only in Secrets Manager at AFS-managed paths, and a
   team's credentials are reachable only by that team's gateway.
-- G5. Route access follows service → team → agent narrowing, defaulting the way model access does (OR-D16, OR-D17).
+- G5. Route access has three levels: the service switch, each team's opt-in (team-admins; service admins for endpoints
+  with extra terms) and each agent's selection.
 - G6. One team's gateway trouble does not affect any other team.
 - G7. The inference layer is observable: latency, time to first token, errors and token throughput per route, model,
   team and agent, in standard OpenTelemetry form, without storing content (section 10).
@@ -119,10 +122,11 @@ table to be rechecked against each server's current docs before the contract is 
 
 ### Non-goals (this change)
 
-- Hosting inference servers as an AFS resource kind (GPU node pools, model weights, autoscaling). The endpoint can
-  point at a team-run server; how the team runs it is a separate PRD (MEG-OQ-13).
-- Translating between protocols (OpenAI ↔ Bedrock Converse ↔ Anthropic Messages). Routes are pass-through
-  (MEG-OQ-8).
+- Hosting inference servers, now or later (J, MEG-OQ-13). AFS routes to and meters servers that teams or a central
+  ML platform run; it does not manage GPU node pools, model weights or autoscaling for them.
+- Translating to providers other than Bedrock, or from Anthropic Messages. Routes to OpenAI-compatible endpoints are
+  pass-through; the one translation is OpenAI Chat Completions → Bedrock Converse (section 8.3).
+- Token quotas or other non-USD hard limits in 1.2.0 (J, MEG-OQ-7). Capacity and free routes are metered and reported.
 - Prompt or response content inspection, guardrails, caching of completions, or semantic routing across providers.
 - Fail-over between routes. An agent picks a route; AFS does not silently move its traffic.
 - Metering traffic that does not pass a route (direct provider access stays *Unmetered*).
@@ -138,7 +142,8 @@ No new roles. New permissions mirror external systems and models.
 | Allow a team to declare its own endpoints (`teams.may_add_model_endpoints`) | Yes | No | No | No |
 | Declare, change, delete a team endpoint (when allowed) | Yes | Yes | No | No |
 | Set a team endpoint's prices or pricing mode | Yes | Yes, except a transfer price on a service endpoint | No | No |
-| Narrow the team's routes (opt out of a service endpoint) | Yes | Yes | No | No |
+| Opt the team in to, or out of, a switched-on service endpoint | Yes | Yes, except endpoints with extra terms | No | No |
+| Select an endpoint with extra terms for a team | Yes | No | No | No |
 | Narrow an agent's or pool's routes | Yes | Yes | No | No |
 | Set an endpoint credential (write-only) | Yes (service), Yes (team) | Yes (team endpoints) | No | No |
 | See routes, models, prices, usage and cost | Yes | Yes | Yes (no credential metadata beyond name and last rotation) | Own routes via `/etc/afs/llm-routes.json` |
@@ -230,17 +235,17 @@ service admin still approves every price). Envoy AI Gateway, if translation is e
   reports can show all model spend in one list, but its catalog remains `models` and its paths remain the
   gateway contract §2 paths.
 
-### 7.2 Narrowing (service → team → agent)
+### 7.2 Levels: service switch, team opt-in, agent narrowing
 
 | Level | Rule |
 |---|---|
 | Service | A service endpoint is `enabled` or not. Off means off for every team. New service endpoints ship **off** |
-| Team | Service endpoints reach a team by the team's `routeAccess`: `all` (every enabled service endpoint, live rule, as with models) or `selected` (a list). Only service admins narrow a team's service routes (same rule as team model lists, OR-D16). A team with `may_add_model_endpoints` declares its own endpoints, which are always part of its set |
+| Team | **Opt-in** (J, MEG-OQ-4, MEG-OQ-19): a switched-on service endpoint reaches no team until it is selected for that team. Team-admins select it themselves; an endpoint flagged `requires_terms` can be selected only by a service admin. There is no *All* rule for teams, so a newly switched-on endpoint never reaches a team by itself. A team with `may_add_model_endpoints` (set by service admins, MEG-OQ-12) declares its own endpoints, which are always part of its set |
 | Agent or pool | `routes.access` `all` (the team set) or `selected`, set by team-admins, like `models.access` |
-| Model on route | The model is listed on the endpoint and is callable: it has a price in force on a `per_token` route, or the route is `capacity` / `free` (section 9) |
-| Terms | An endpoint flagged `requires_terms` (a provider with its own contract) never joins *All* automatically; it must be selected at the team level by a service admin (mirrors OR-D17) |
+| Model on route | The model is listed on the endpoint and is callable: it has a price in force on a `per_token` route, or the route is `capacity` / `free` (section 9). A model not listed is refused (`model_not_on_route`, MEG-OQ-10) |
+| Terms | An endpoint flagged `requires_terms` (a provider with its own contract) is selected per team by a service admin only (mirrors OR-D17) |
 
-Effective set = service ∩ team ∩ agent (∩ pool), plus the team's own endpoints ∩ agent. The gateway reads it from a
+Effective set = (switched-on service endpoints the team opted in to, plus the team's own endpoints) ∩ agent (∩ pool). The gateway reads it from a
 new `afs.route_admission(subject_kind, subject_id)` with the same 60 s cache and change-feed invalidation as model
 admission. Denials use `403 AccessDenied` with `details.reason` in fixed order: `route_not_enabled_for_service`,
 `route_not_enabled_for_team`, `route_not_enabled_for_agent`, `model_not_on_route`, `model_not_priced`.
@@ -252,17 +257,17 @@ All tables in schema `afs`, team-scoped tables with `team_id`, composite foreign
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `model_endpoints` | `id` (`mep_…`), `team_id` (NULL = service), `slug` (route name, `^[a-z][a-z0-9-]{1,30}$`, unique across the service and each team; a team cannot reuse a service slug; `bedrock` reserved), `display_name`, `description`, `owner`, `purpose` (required for team endpoints), `protocol` (`openai_chat` in 1.2.0; `openai_responses`, `openai_embeddings` allowed as additional paths), `location` (`external` internet FQDN, `corporate` host on the corporate network, `in_namespace` a Service name in the team namespace; `in_namespace` only for team endpoints), `base_url` (https except `in_namespace`, which may be http inside WireGuard, recorded like PC-D7), `ca_bundle` (optional PEM, not a secret), `auth_kind` (`none`, `bearer`, `header` with `auth_header`), `credential_mode` (`shared` one credential, `per_team` one per team for service endpoints), `pricing_mode` (`per_token`, `capacity`, `free`), `requires_terms`, `enabled`, `timeout_seconds`, `max_body_mib` | No credential value, only metadata. `external_system_id` optional link to the external systems catalog entry of the same provider, used for direct-access policy (MEG-OQ-5) |
+| `model_endpoints` | `id` (`mep_…`), `team_id` (NULL = service), `slug` (route name, `^[a-z][a-z0-9-]{1,30}$`, unique across the service and each team; a team cannot reuse a service slug; `bedrock` reserved), `display_name`, `description`, `owner`, `purpose` (required for team endpoints), `protocol` (`openai_chat` in 1.2.0; `openai_responses`, `openai_embeddings` allowed as additional paths), `location` (`external` internet FQDN, `corporate` host on the corporate network, `in_namespace` a Service name in the team namespace; `in_namespace` only for team endpoints), `base_url` (https except `in_namespace`, which may be http inside WireGuard, recorded like PC-D7), `ca_bundle` (optional PEM, not a secret), `auth_kind` (`none`, `bearer`, `header` with `auth_header`), `metrics_port` (optional, `in_namespace` only, MEG-OQ-18), `credential_mode` (`shared` one credential, `per_team` one per team for service endpoints), `pricing_mode` (`per_token`, `capacity`, `free`), `requires_terms`, `enabled`, `timeout_seconds`, `max_body_mib` | No credential value, only metadata. `external_system_id` optional link to the external systems catalog entry of the same provider, used for direct-access policy (MEG-OQ-5) |
 | `endpoint_models` | `(endpoint_id, model_name)`, `max_output_tokens`, `context_tokens`, `enabled` | `model_name` is what the client sends in `model`; free text, validated as printable ≤ 200 chars |
 | `endpoint_model_prices` | `(endpoint_id, model_name, effective_from)`, `input_per_mtok_usd`, `output_per_mtok_usd`, `cached_input_per_mtok_usd`, `request_fee_usd` (optional per-call fee), `source` (`manual`, `price_list`, `transfer`) | `numeric`, USD. Effective-dated like `model_prices` |
 | `endpoint_price_proposals` | as `model_price_proposals` | From LiteLLM's list or a provider's published prices; approved by a service admin |
 | `endpoint_credentials` | `(endpoint_id, team_id NULL)`, `secret_arn`, `rotated_at`, `status` | ARN at the managed path of section 11; `team_id` set for `per_team` and team endpoints |
-| `team_model_endpoints` | `(team_id, endpoint_id)` | Selection rows when `teams.route_access = selected` |
+| `team_model_endpoints` | `(team_id, endpoint_id)`, `selected_by` (`team_admin` or `service_admin`) | The team's opt-in rows. Insert of a `requires_terms` endpoint by a caller who is not a service admin → `42501` |
 | `agent_model_endpoints`, `pool_model_endpoints` | `(team_id, agent_id\|pool_id, endpoint_id)` | Selection rows when the agent's or pool's `route_access = selected` |
 | `endpoint_capacity_costs` | `(endpoint_id, team_id, effective_from)`, `monthly_usd` or `hourly_usd`, `allocation` (`by_tokens`, `by_agent`) | Optional, for `capacity` routes not costed by CUR (section 9.3) |
-| `token_quotas` | `(team_id, endpoint_id NULL, period)`, `max_tokens`, counters as `spend_counters` | Optional non-USD cap (MEG-OQ-7) |
 
-Column additions: `teams.route_access`, `teams.may_add_model_endpoints` (service-admin only, guarded like
+
+Column additions: `teams.may_add_model_endpoints` (service-admin only, guarded like
 `may_add_external_systems`); `agents.route_access`, `agent_pools.route_access`; `usage_events.endpoint_id` (NULL for
 Bedrock), `usage_events.model_name` (text, for route calls, since `model_id` is an FK to Bedrock `models`),
 `usage_events.usage_source` (`response`, `estimated`, `provider_cost`), `usage_events.reasoning_tokens`, the timing columns `ttft_ms`, `upstream_ms`, `gateway_ms` and `http_status` (§10.4);
@@ -304,6 +309,24 @@ access rolls the pod; team and service changes update the file and environment o
 enforces at once (same rule as gateway contract §3 for models). A route name that would collide with an existing
 config value name is refused at create time.
 
+### 8.3 OpenAI protocol to Bedrock (J, MEG-OQ-8, MEG-OQ-20)
+
+The built-in route `bedrock` also accepts the OpenAI protocol: `POST ${AFS_GATEWAY_URL}/r/bedrock/v1/chat/completions`
+with `"model": "<AFS model id>"` (stream or not), so an agent can reach every Bedrock model in its effective model set
+with one OpenAI client. Agents with Bedrock models receive `AFS_LLM_BEDROCK_BASE_URL` like any route.
+
+- `afs-gateway` maps Chat Completions to Bedrock **Converse** / **ConverseStream**: `messages` (system, user, assistant,
+  tool), images as content blocks, `tools` and `tool_choice` to `toolConfig`, `tool_calls` and tool results both ways,
+  `max_completion_tokens` / `max_tokens` to `inferenceConfig.maxTokens`, `temperature`, `top_p`, `stop`; `stopReason` to
+  `finish_reason`; Converse `usage` to the OpenAI `usage` object; ConverseStream events to SSE chunks.
+- It is the same call as a native Converse call for everything that matters to AFS: model admission (§2.1 of the
+  gateway contract), reservation and settlement, the team's application inference profile, `requestMetadata` tags and
+  usage rows (`endpoint_id` NULL, model id as today).
+- Not supported on this path, answered `400 ValidationError` with `details.reason = unsupported_parameter` naming the
+  field: `n` > 1, `logprobs`, `response_format` types the model cannot honour, audio. `GET /v1/models` lists the
+  agent's Bedrock models.
+- Responses and Embeddings on `bedrock` are not in 1.2.0 (`404`); embeddings stay on `InvokeModel`.
+
 ## 9. Cost tracking and hard caps
 
 ### 9.1 Pricing modes
@@ -311,8 +334,8 @@ config value name is refused at create time.
 | Mode | Use for | Metered | USD cost per call | Hard cap |
 |---|---|---|---|---|
 | `per_token` | OpenAI, OpenRouter, Azure OpenAI, any priced provider; an internal platform with a **transfer price** set by service admins | Yes | From `endpoint_model_prices` (+ optional request fee) | **Yes**, reserve and settle against the team budget |
-| `capacity` | Self-hosted inference whose cost is the hardware (team GPU nodes, a reserved cluster) | Yes, tokens | Zero per call; cost comes from CUR (EKS split cost by namespace) or `endpoint_capacity_costs`, allocated daily | No USD cap; optional token quota |
-| `free` | Internal services charged elsewhere, evaluation endpoints | Yes, tokens | Zero | Optional token quota |
+| `capacity` | Self-hosted inference whose cost is the hardware (team GPU nodes, a reserved cluster) | Yes, tokens | Zero per call; cost comes from CUR (EKS split cost by namespace) or `endpoint_capacity_costs`, allocated daily | No (reported only, MEG-OQ-7) |
+| `free` | Internal services charged elsewhere, evaluation endpoints | Yes, tokens | Zero | No (reported only) |
 
 ### 9.2 Reservation and settlement on `per_token` routes
 
@@ -352,17 +375,36 @@ case, at most one in-flight call per pod. It holds **only if agents cannot reach
 - **On a corporate or central platform** (`corporate`): either a transfer price (`per_token`, capped) set by service
   admins from the platform's chargeback rate, or `capacity` with a monthly or hourly amount in
   `endpoint_capacity_costs`, allocated to agents by token share each day.
-- Token quotas (`token_quotas`) give `capacity` and `free` routes a hard limit that is not money: reserve output-token
-  worst case, settle actual, refuse with `402` and code `QuotaExceeded` (a distinct code from `BudgetExceeded`, because no money is involved;
-  `402` rather than `429` because OpenAI SDKs retry `429` by default, and a quota does not clear on retry; MEG-OQ-7).
+- `capacity` and `free` routes have no hard limit in 1.2.0 (J, MEG-OQ-7): tokens are metered and reported per agent,
+  so a team sees which agent saturates its server. Token quotas are recorded as a candidate for a later release; if
+  added, they should refuse with `402` and a distinct code `QuotaExceeded`, because OpenAI SDKs retry `429`.
 
 ### 9.4 Reconciliation against the provider's bill
 
-CUR reconciles Bedrock. For external providers, `afs-billing` gains an optional daily pull per endpoint with an admin
-credential: OpenAI's organization usage and costs API (per project) and OpenRouter's key usage; other providers
-(for example Azure OpenAI) are out of scope for 1.2.0. Attribution is clean when the endpoint uses `credential_mode = per_team` with one
-provider project or key per team, so the provider's own invoice splits by team. Variance over
-`billing.variance_alert_pct` raises the same `cost.variance_detected` event (MEG-OQ-11).
+CUR reconciles Bedrock. For external providers, `afs-billing` reconciles the gateway's settled cost against the
+provider's own figures once a day and raises the same `cost.variance_detected` event above
+`billing.variance_alert_pct` (J, MEG-OQ-11). Attribution is clean when the endpoint uses `credential_mode = per_team`
+with one provider project or key per team, so the provider's figures split by team.
+
+| Provider | How AFS reaches it | Reconciliation source in 1.2.0 |
+|---|---|---|
+| OpenAI | Route, OpenAI protocol | Organization usage and costs API, per project, pulled daily with an admin key at `<prefix>/_service/billing/<route>` |
+| OpenRouter | Route, OpenAI protocol; `usage.cost` per call | Key usage and credits API, pulled daily; per-call `usage.cost` already settles each call (§9.2) |
+| **Nous Portal** (J, 2026-11-24) | Route, OpenAI protocol (Nous describes its inference API as OpenAI-compatible chat completions) | **No usage or cost API is documented** (checked 2026-11-24): usage, credits and teams are managed in the portal UI only. Fallback, MEG-OQ-21: a service admin uploads the portal's monthly usage statement (CSV or PDF figures entered by hand) and AFS reconciles monthly; until then the route shows *Not reconciled* beside its gateway cost. Switch to a daily pull if Nous publishes an API |
+| Others (Azure OpenAI and so on) | Route | Not reconciled in 1.2.0; gateway cost only |
+
+**Nous Portal and Hermes models (J, 2026-11-24).** Nous Research's Hermes models are offered as a built-in catalog
+entry `nous-portal` (shipped off, like every service endpoint), with the Hermes models Nous serves listed on the route
+and priced from Nous's published per-token prices. Facts to confirm with Nous before the contract (MEG-OQ-14): the base
+URL (third-party guides give `https://inference-api.nousresearch.com/v1`; not stated on Nous's own pages), the model ids
+(for example Hermes 4 70B and 405B), whether responses carry `usage` and honour `stream_options.include_usage`, and
+whether a portal account can hold one key per team. If usage is missing, calls settle to the reservation and are marked
+`estimated` (MEG-D6), so the cap still holds but cost is overstated; the conformance suite records a Nous fixture to find
+out. The same Hermes models are also on OpenRouter (`nousresearch/hermes-4-…`), which returns `usage.cost` and has a usage
+API: teams that need daily reconciliation today can use Hermes through the `openrouter` route.
+
+Hermes the **models** are separate from Hermes the **agent harness** (Hermes Agent, MIT), which is AFS's default agent
+runtime. The harness is unaffected: it calls whichever routes and models the agent has, through the team gateway.
 
 ### 9.5 Closing the bypass
 
@@ -379,7 +421,7 @@ Metering a route is only meaningful if the same provider is not also reachable d
 ### 9.6 Reports
 
 Usage, cost and activity reports gain `groupBy=route` and a `route` filter; the Bedrock model reports become
-"model spend" across Bedrock and routes, with a *Metered* / *Capped* / *Quota* badge per route. Routes in `capacity`
+"model spend" across Bedrock and routes, with a *Metered* / *Capped* badge per route. Routes in `capacity`
 mode show tokens, allocated cost and effective $/1M tokens. RPT-7 changes from "non-Bedrock LLMs are unmetered" to
 "non-Bedrock LLMs reached directly are unmetered".
 
@@ -399,7 +441,7 @@ AFS does not run. Nothing here stores prompt or completion content.
 | Inter-token latency / output throughput | Mean time between output chunks; output tokens per second per call | Compares backends and models; detects a self-hosted server that is saturating |
 | Token throughput | Input, output, cached and reasoning tokens per second and per period | Capacity planning for self-hosted inference; demand per team and route |
 | Request rate and concurrency | Calls per second and in-flight calls | Load per route; sizing of team gateways |
-| Errors | By outcome and code: upstream 4xx/5xx, `429` throttles with `Retry-After`, timeouts, client disconnects, AFS refusals (`402`, `403` reason, `402 QuotaExceeded`) | Separates "the provider is failing" from "AFS refused it" |
+| Errors | By outcome and code: upstream 4xx/5xx, `429` throttles with `Retry-After`, timeouts, client disconnects, AFS refusals (`402`, `403` reason) | Separates "the provider is failing" from "AFS refused it" |
 | Usage completeness | Share of calls settled with `usage_source = estimated` | A backend that omits usage is a cost-accuracy risk |
 | Cost rate | USD per hour per route and team (from settlements) | Spend anomalies before the daily report |
 | Backend saturation (in-namespace servers only, optional) | Scraped from the server's own `/metrics` (for vLLM: queue length, running requests, KV-cache use) | Explains TTFT growth on self-hosted inference |
@@ -488,7 +530,7 @@ error rate < 2% and p95 TTFT < 5 s over 30 days; gateway added latency p99 < 25 
 
 ### 12.1 Gateway contract (v1.2.0, minor)
 
-New paths (§8.1), route admission reasons, `402 QuotaExceeded`, `AFS_LLM_*` variables and `/etc/afs/llm-routes.json`.
+New paths (§8.1, §8.3), route admission reasons, `unsupported_parameter`, `AFS_LLM_*` variables and `/etc/afs/llm-routes.json`.
 `AFS_GATEWAY_URL` keeps its name; its value is documented as opaque (it was already only consumed as a variable), so
 moving it to the team gateway is not a major change. Bedrock paths, error codes and identity rules are unchanged.
 
@@ -501,7 +543,8 @@ tests and `seedOtherTeams` rows for every new team-owned table.
 
 ### 12.3 `-restapi`
 
-- `afs-gateway`: OpenAI-protocol adapter (Chat, Responses, Embeddings, SSE streaming), route resolution, upstream auth
+- `afs-gateway`: OpenAI-protocol adapter (Chat, Responses, Embeddings, SSE streaming), the Chat Completions →
+  Converse translator for the `bedrock` route (§8.3), route resolution, upstream auth
   from files, usage parsing per §9.2, `GET /v1/models`, route admission cache, a mode flag so the same binary runs as
   the shared gateway or a team gateway (`--team-namespace`); GenAI-convention spans and metrics, `traceparent`
   handling and the new timing columns (§10).
@@ -511,13 +554,14 @@ tests and `seedOtherTeams` rows for every new team-owned table.
   secrets at create time.
 - `afs-reconciler` (telemetry): route health conditions and `model_endpoint.degraded` / `recovered` events; OTel
   Collector routing of team spans to team log destinations when opted in.
-- `afs-billing`: endpoint price proposals from LiteLLM's list and provider pages; optional provider cost pulls;
+- `afs-billing`: endpoint price proposals from LiteLLM's list and provider pages; daily OpenAI and OpenRouter cost
+  pulls (MEG-OQ-11);
   capacity allocation; reports by route.
 - `afs-api`: about 16 operations (contract v1.5.0): `ListModelEndpoints`, `GetModelEndpoint`, `CreateModelEndpoint`,
   `UpdateModelEndpoint`, `DeleteModelEndpoint` (service and team scope), `PutEndpointModels`,
   `PutEndpointModelPrice`, `List/Approve/RejectEndpointPriceProposal`, `PutModelEndpointCredential`,
-  `RotateModelEndpointCredential`, `PutTeamRouteAccess`, agent and pool `routes` in the existing model access body,
-  `PutTokenQuota`, plus report parameters. Each mutation writes audit and outbox (`model_endpoint.*` events).
+  `RotateModelEndpointCredential`, `PutTeamModelEndpoints` (opt-in list), agent and pool `routes` in the existing model
+  access body, plus report parameters. Each mutation writes audit and outbox (`model_endpoint.*` events).
 
 ### 12.4 `-website`
 
@@ -525,7 +569,8 @@ tests and `seedOtherTeams` rows for every new team-owned table.
 - Console, service admin: **Model endpoints** page beside *Models* (catalog table with protocol, location, pricing
   mode, Metered / Capped badges, enabled switch), create wizard with review step and the equivalent `afs` command,
   prices and proposals tabs, credential tab (write-only).
-- Team-admin: **Model endpoints** under the team (service routes with opt-out state, team endpoints when allowed),
+- Team-admin: **Model endpoints** under the team (opted-in service routes, *Add service endpoint* to opt in, team
+  endpoints when allowed),
   agent configuration's *Model access* tab gains *Routes* (all or selected, default route and model) and shows the
   env var names an agent will receive.
 - Reports: route group-by and badges; an *Inference* report (latency, TTFT, errors, tokens per second, cost rate)
@@ -537,8 +582,8 @@ tests and `seedOtherTeams` rows for every new team-owned table.
 New service `model-endpoints` (`list-model-endpoints`, `describe-model-endpoint`, `create-model-endpoint`,
 `update-model-endpoint`, `delete-model-endpoint`, `put-endpoint-models`, `put-endpoint-model-price`,
 `list-endpoint-price-proposals`, `approve-endpoint-price-proposal`, `put-model-endpoint-credential` with value from
-file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team-route-access`, route options on
-`agents update-agent-models`, `budgets put-token-quota`; one command per operation, goldens and AccessDenied tests.
+file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team-model-endpoints`, route options on
+`agents update-agent-models`; one command per operation, goldens and AccessDenied tests.
 
 ### 12.6 Migration from the shared gateway
 
@@ -551,19 +596,19 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team
 
 ## 13. Decisions, risks and open questions
 
-### 13.1 Proposed decisions (Claude, for J's review)
+### 13.1 Decisions (confirmed by J's answers, 2026-11-24)
 
 | # | Decision | Why |
 |---|---|---|
-| MEG-D1 | Per-namespace team gateway; shared control plane | Credential and network isolation stay at the namespace and IAM boundary; one team's failure stays in that team (§5) |
-| MEG-D2 | Extend `afs-gateway`; borrow price data from LiteLLM; Envoy AI Gateway only as a possible translation layer later | Only AFS's gateway reserves USD in AFS's ledger and uses AFS's tenancy (§6) |
-| MEG-D3 | Endpoints are a service → team → agent catalog with model-access semantics (`all` live rule, service admins narrow teams, `requires_terms` never joins *All*) | Same mental model as models and external systems (OR-D16, OR-D17, ADR-010) |
+| MEG-D1 | Per-namespace team gateway; shared control plane (J: MEG-OQ-1) | Credential and network isolation stay at the namespace and IAM boundary; one team's failure stays in that team (§5) |
+| MEG-D2 | Extend `afs-gateway`; borrow price data from LiteLLM (J: MEG-OQ-2) | Only AFS's gateway reserves USD in AFS's ledger and uses AFS's tenancy (§6) |
+| MEG-D3 | Endpoints are a service → team → agent catalog: service switch, **team opt-in** by team-admins (service admins for `requires_terms`), agent narrowing (J: MEG-OQ-4, MEG-OQ-19) | Nothing reaches a team it did not choose; self-service within the service switch |
 | MEG-D4 | Route = endpoint slug; path form `/r/<route>/v1` is primary, `<route>/<model>` in the body is supported | Zero-change SDK use and one-client runtimes both work |
-| MEG-D5 | Pricing modes `per_token` (capped), `capacity` (CUR or allocated, quota optional), `free` | Hard caps only where a per-call price is meaningful |
+| MEG-D5 | Pricing modes `per_token` (capped), `capacity` (CUR or allocated), `free`; no non-USD limits in 1.2.0 (J: MEG-OQ-6, MEG-OQ-7) | Hard caps only where a per-call price is meaningful |
 | MEG-D6 | No usage in a response settles to the reservation | Never under-count spend the gateway could not measure |
 | MEG-D7 | Upstream credentials at `<prefix>/<namespace>/_gateway/<route>`, gateway-only; `per_team` default for service endpoints | Isolation, revocation and provider-side attribution per team |
 | MEG-D8 | Route hosts are reachable from the team gateway only | Without this, caps are advisory |
-| MEG-D9 | Pass-through only in 1.2.0; no protocol translation, fail-over or content inspection | Keep the first release small and the cap guarantee simple |
+| MEG-D9 | Pass-through to OpenAI-compatible endpoints, plus Chat Completions → Converse for Bedrock in `afs-gateway` (J: MEG-OQ-8, MEG-OQ-20); no fail-over or content inspection; AFS never hosts inference (J: MEG-OQ-13) | One client protocol for every model, one enforcement path |
 | MEG-D10 | The gateway emits OpenTelemetry with the GenAI semantic conventions plus `afs.*` tenancy attributes; agent ids on spans and in the ledger, never as metric labels; content capture off | One standard signal for every backend, at a cardinality the metrics store can hold (§10) |
 
 ### 13.2 Risks
@@ -581,24 +626,27 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team
 
 | # | Question | Recommended answer |
 |---|---|---|
-| MEG-OQ-1 | Per-namespace team gateway or shared gateway with per-team routing? | Per namespace (MEG-D1) |
-| MEG-OQ-2 | Extend `afs-gateway` or adopt an off-the-shelf gateway? | Extend (MEG-D2) |
-| MEG-OQ-3 | Service endpoint credentials: one shared key, or one key or project per team? | Per team by default; shared allowed for providers without projects |
-| MEG-OQ-4 | Do enabled service endpoints join every team whose route access is *All* (like models), or must teams opt in? | Join *All*, except `requires_terms` endpoints |
-| MEG-OQ-5 | Keep direct (unmetered) access to an `llm` external system once a route exists for that provider? | No by default; a service-admin override per team, shown *Unmetered* |
-| MEG-OQ-6 | Self-hosted cost: transfer price, capacity allocation, CUR only, or all three? | All three as modes; CUR for in-namespace, transfer price for central platforms |
-| MEG-OQ-7 | Add token quotas (non-USD hard limits) for `capacity` and `free` routes in 1.2.0? | Yes, team-level only first |
-| MEG-OQ-8 | Translate OpenAI requests to Bedrock (one protocol for every model) in scope? | Not in 1.2.0; revisit with Envoy AI Gateway or Bedrock's own OpenAI-compatible endpoint |
-| MEG-OQ-9 | Strip the injected usage chunk from streams when the client did not ask for it? | Yes |
-| MEG-OQ-10 | A model name not listed on a route: refuse, or allow with a route default price? | Refuse (`model_not_on_route`), as Bedrock refuses unpriced models |
-| MEG-OQ-11 | Provider cost reconciliation (OpenAI organization costs, OpenRouter usage) in 1.2.0? | Yes for OpenAI and OpenRouter; others later |
-| MEG-OQ-12 | Who may declare team endpoints? | Team-admins of teams where a service admin sets `may_add_model_endpoints`, mirroring external systems |
-| MEG-OQ-13 | Should AFS host inference servers as a resource kind (GPU NodePool, weights, autoscaling)? | Separate PRD after this one |
-| MEG-OQ-14 | Recheck vendor facts (§2.3, §6) before contracts are written | Yes, at contract time |
-| MEG-OQ-15 | RDS Proxy now, or move spend counters to Valkey with the team gateway? | RDS Proxy now; Valkey when load tests say so |
-| MEG-OQ-16 | Does the orchestration agent (Hermes, Paperclip AI) get routes like any agent? | Yes, same model access screen; the collaboration tool's own model calls go through its routes too |
-| MEG-OQ-17 | Forward a team's spans and gateway log records to the team's own log destination? | Yes, opt-in per team |
-| MEG-OQ-18 | Scrape self-hosted servers' own metrics (vLLM queue, KV cache) for in-namespace routes? | Yes, optional per endpoint, read-only |
+| MEG-OQ-1 | Per-namespace team gateway or shared gateway with per-team routing? | **Decided (J, 2026-11-24): per-namespace team gateway (MEG-D1)** |
+| MEG-OQ-2 | Extend `afs-gateway` or adopt an off-the-shelf gateway? | **Decided (J, 2026-11-24): extend afs-gateway (MEG-D2)** |
+| MEG-OQ-3 | Service endpoint credentials: one shared key, or one key or project per team? | **Decided (J, 2026-11-24): per team by default; shared allowed for providers without projects (MEG-D7)** |
+| MEG-OQ-4 | Do enabled service endpoints join every team whose route access is *All* (like models), or must teams opt in? | **Decided (J, 2026-11-24): teams must opt in; a switched-on service endpoint reaches no team until selected for it (no route access All)** |
+| MEG-OQ-5 | Keep direct (unmetered) access to an `llm` external system once a route exists for that provider? | **Decided (J, 2026-11-24): blocked while a route exists; service-admin override per team, shown Unmetered** |
+| MEG-OQ-6 | Self-hosted cost: transfer price, capacity allocation, CUR only, or all three? | **Decided (J, 2026-11-24): all three as pricing modes: CUR for in-namespace, transfer price or capacity amount for central platforms, plus free** |
+| MEG-OQ-7 | Add token quotas (non-USD hard limits) for `capacity` and `free` routes in 1.2.0? | **Decided (J, 2026-11-24): not in 1.2.0; capacity and free routes are metered and reported only** |
+| MEG-OQ-8 | Translate OpenAI requests to Bedrock (one protocol for every model) in scope? | **Decided (J, 2026-11-24): yes in 1.2.0: OpenAI-protocol calls can reach Bedrock models (see MEG-OQ-20 for how)** |
+| MEG-OQ-9 | Strip the injected usage chunk from streams when the client did not ask for it? | **Decided (J, 2026-11-24): yes, strip it** |
+| MEG-OQ-10 | A model name not listed on a route: refuse, or allow with a route default price? | **Decided (J, 2026-11-24): refuse (model_not_on_route)** |
+| MEG-OQ-11 | Provider cost reconciliation (OpenAI organization costs, OpenRouter usage) in 1.2.0? | **Decided (J, 2026-11-24): yes for OpenAI and OpenRouter in 1.2.0; others later** |
+| MEG-OQ-12 | Who may declare team endpoints? | **Decided (J, 2026-11-24): team-admins of teams where a service admin sets may_add_model_endpoints** |
+| MEG-OQ-13 | Should AFS host inference servers as a resource kind (GPU NodePool, weights, autoscaling)? | **Decided (J, 2026-11-24): never; AFS routes and meters, teams or a central ML platform host inference** |
+| MEG-OQ-14 | Recheck vendor facts (§2.3, §6) before contracts are written | Action for Claude at contract time (not a decision) |
+| MEG-OQ-15 | RDS Proxy now, or move spend counters to Valkey with the team gateway? | **Decided (J, 2026-11-24): RDS Proxy now; Valkey counters only if load tests show the need** |
+| MEG-OQ-16 | Does the orchestration agent (Hermes, Paperclip AI) get routes like any agent? | **Decided (J, 2026-11-24): yes, same Models & routes screen and rules; the collaboration tool's model calls go through its routes** |
+| MEG-OQ-17 | Forward a team's spans and gateway log records to the team's own log destination? | **Decided (J, 2026-11-24): yes, opt-in per team, off by default** |
+| MEG-OQ-18 | Scrape self-hosted servers' own metrics (vLLM queue, KV cache) for in-namespace routes? | **Decided (J, 2026-11-24): yes, optional per endpoint, read-only** |
+| MEG-OQ-19 | With opt-in (MEG-OQ-4), who opts a team in to a service endpoint? | **Decided (J, 2026-11-24): team-admins opt their team in to any switched-on service endpoint; endpoints flagged Extra terms still need a service admin** |
+| MEG-OQ-20 | How is OpenAI-to-Bedrock translation built (MEG-OQ-8)? | **Decided (J, 2026-11-24): in `afs-gateway`, mapping Chat Completions to Bedrock Converse for every Bedrock model, on the same reserve-and-settle path and team inference profiles** |
+| MEG-OQ-21 | Nous Portal documents no usage or cost API. How is it reconciled? | Monthly statement entered by a service admin, *Not reconciled* until then; daily pull if Nous publishes an API; OpenRouter as the reconciled path to Hermes models |
 
 ## 14. Glossary
 
@@ -615,6 +663,11 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team
 
 - 2026-11-24: drafted from J's question in the project thread; proposal only, awaiting J's answers to section 13.3.
 - 2026-11-24: J added inference-layer telemetry as a goal; section 10 added (G7, MEG-D10, MEG-OQ-17, MEG-OQ-18).
+- 2026-11-24: J asked to add Nous Portal (Hermes models) as a supported provider with reconciliation; §9.4 table, MEG-OQ-21,
+  TC-BL-04, TC-BL-05, TC-GW-25 added.
+- 2026-11-24: J answered MEG-OQ-1 to MEG-OQ-20 on decision cards; the PRD, stories, tests and mockups were updated: no token
+  quotas in 1.2.0, team opt-in to service endpoints, Chat Completions → Converse translation for Bedrock, AFS never hosts
+  inference.
 - 2026-11-24: J asked for UI, use cases and test cases to review; Appendix A (screens 56 to 67 by role), Appendix B
   (user stories US-62 to US-77 with acceptance criteria) and Appendix C (test cases) added.
 
@@ -640,7 +693,7 @@ page's *Models* tab becomes **Models & routes**.
 | S-G2 | Create endpoint, step 3 (57) | Wizard: endpoint and route, connection and credential, **models and pricing** (pricing mode tiles, models with prices, LiteLLM import, provider-reported cost), access and objectives, review; equivalent CLI | US-62, US-64 |
 | S-G3 | Endpoint detail, Teams & credentials tab (58) | Per-team access, credential state (set / missing, never the value), last rotation, team gateway version during ring rollout, spend, calls, errors; provider reconciliation KPI | US-65, US-71, US-76 |
 | S-G4 | Inference report (59) | Calls, tokens per second, errors split upstream vs AFS refusals, gateway overhead; per-route latency, TTFT, throughput, error rate, estimated-usage share, cost and effective $/MTok; TTFT chart against the objective | US-73, US-74 |
-| S-G5 | Team detail, Model endpoints (60) | Team's service routes (*All* / *Selected*, service admins only), extra-terms selection, *may declare endpoints* switch, token quotas | US-63, US-66, US-69 |
+| S-G5 | Team detail, Model endpoints (60) | The team's opted-in service routes (who selected each), extra-terms selection by service admins, *may declare endpoints* switch | US-63, US-66 |
 
 ![Service admin: Model endpoints](docs/ui/56-admin-model-endpoints.png)
 ![Service admin: Create endpoint, models and pricing](docs/ui/57-admin-create-model-endpoint.png)
@@ -652,11 +705,11 @@ page's *Models* tab becomes **Models & routes**.
 
 | # | Screen | What it shows | Stories |
 |---|---|---|---|
-| T-G1 | Model endpoints (61) | Team gateway status and overhead; service routes with agents using each, credential, health and spend; team endpoints with owner; degraded-route notice | US-66, US-67, US-74 |
-| T-G2 | Create team endpoint (62) | Route name (and the env var it produces), owner, purpose, location tiles (in namespace / corporate / external), Service and port, protocol paths, auth, *Test connection*, pricing mode, models, token quota; equivalent CLI; what agents get | US-67, US-69 |
-| T-G3 | Agent, Models & routes (63) | Bedrock models as in 1.1.0; routes *All* / *Selected* with models, budget control, calls and cost; default route and model; **the exact environment and file the agent receives**; equivalent CLI | US-68 |
-| T-G4 | Team Inference report (64) | Calls, p95 TTFT, errors and refusals, quota use; per-agent table across routes; cost by route with effective $/MTok for capacity routes; TTFT chart | US-73 |
-| T-G5 | Budget & usage (65) | What counts against the cap (per-token routes and Bedrock), what does not (capacity routes, limited by quota), reserved in flight, EKS compute including the team gateway | US-70, US-72 |
+| T-G1 | Model endpoints (61) | Team gateway status and overhead; opted-in service routes with *Add service endpoint* with agents using each, credential, health and spend; team endpoints with owner; degraded-route notice | US-66, US-67, US-74 |
+| T-G2 | Create team endpoint (62) | Route name (and the env var it produces), owner, purpose, location tiles (in namespace / corporate / external), Service and port, protocol paths, auth, *Test connection*, pricing mode, models; equivalent CLI; what agents get | US-67 |
+| T-G3 | Agent, Models & routes (63) | Bedrock models as in 1.1.0; routes *All* / *Selected* with models, budget control, calls and cost (including `bedrock` through the OpenAI protocol); default route and model; **the exact environment and file the agent receives**; equivalent CLI | US-68 |
+| T-G4 | Team Inference report (64) | Calls, p95 TTFT, errors and refusals; per-agent table across routes; cost by route with effective $/MTok for capacity routes; TTFT chart | US-73 |
+| T-G5 | Budget & usage (65) | What counts against the cap (per-token routes and Bedrock), what does not (capacity routes, reported only), reserved in flight, EKS compute including the team gateway | US-70, US-72 |
 
 ![Team-admin: Model endpoints](docs/ui/61-ta-model-endpoints.png)
 ![Team-admin: Create team endpoint](docs/ui/62-ta-create-team-endpoint.png)
@@ -696,15 +749,17 @@ with its models and prices, so that every team can use it with metering and caps
   return `403` `model_not_priced`.
 - The wizard's review step shows the equivalent `afs model-endpoints create-model-endpoint` command.
 
-**US-63 · Switch an endpoint on for teams.** As a service admin, I want switching an endpoint on to reach the teams
-set to *All*, except endpoints with extra terms. *(§7.2; S-G1, S-G5)*
-- Given `openai-prod` is off and 16 teams have route access *All*, when I switch it on, then within 60 s calls from
-  those teams' agents with access *All* are admitted, and after their next restart those agents have
-  `AFS_LLM_OPENAI_PROD_BASE_URL`.
-- Given an endpoint flagged *Extra terms*, when I switch it on, then no team gets it until a service admin selects it
-  on that team (S-G5), and the team page shows the *Extra terms* badge.
+**US-63 · Teams opt in to service endpoints.** As a service admin, I want a switched-on endpoint to be available to
+teams without reaching any of them until they choose it. *(§7.2; S-G1, S-G5, T-G1)*
+- Given `openai-prod` is switched on, then no team has the route until it opts in; T-G1's *Add service endpoint* lists
+  it for every team.
+- Given a team-admin adds `openai-prod` to the team, then within 60 s calls from that team's agents whose route access
+  is *All* are admitted, after their next restart they have `AFS_LLM_OPENAI_PROD_BASE_URL`, and the opt-in is audited
+  with `selected_by = team_admin`.
+- Given an endpoint flagged *Extra terms*, then a team-admin cannot add it (control disabled with "Needs a service
+  admin"; API `403`), and a service admin can, on S-G5.
 - Given I switch an endpoint off, then within 60 s every call on that route returns `403`
-  `route_not_enabled_for_service`, and agents' files and variables drop it on their next restart.
+  `route_not_enabled_for_service`, opt-in rows are kept, and agents' files and variables drop it on their next restart.
 
 **US-64 · Approve prices for a route.** As a service admin, I want price changes proposed and approved like Bedrock
 prices. *(§7.3, §9.2; S-G1, S-G2)*
@@ -750,18 +805,21 @@ default, and see the exact variables it receives. *(§8.2; T-G3)*
 - Given the agent calls a route it does not have, then `403` `route_not_enabled_for_agent`.
 - Given the agent already sets `OPENAI_BASE_URL` as a configuration value, then AFS does not override it.
 
-**US-69 · Limit a capacity route with a token quota.** As a team-admin, I want a monthly token limit on our vLLM route.
-*(§9.3, MEG-OQ-7; T-G2, S-G5)*
-- Given a quota of 50 M tokens a month, when the month's settled tokens plus a call's reserved worst case would exceed
-  it, then the call gets `402` with code `QuotaExceeded` (not `BudgetExceeded`, and not `429`, which SDKs retry), with `details.route`, `period` and `remainingTokens`.
-- Quota use is shown on T-G4 and S-G5 and resets at the start of the period.
+**US-69 · Reach Bedrock models with an OpenAI client.** As a team-admin, I want agents that speak only the OpenAI
+protocol to use our Bedrock models, with the same budget and tags. *(§8.3; T-G3)*
+- Given an agent with Bedrock model `claude-sonnet`, when it calls `AFS_LLM_BEDROCK_BASE_URL` + `/chat/completions` with
+  `model: claude-sonnet`, streaming or not, with tools, then it receives a valid Chat Completions response or SSE stream,
+  and the call used the team's inference profile, was reserved and settled like a Converse call, and wrote one usage row.
+- Given a request with `n: 2` or `logprobs`, then `400 ValidationError` with `details.reason = unsupported_parameter`
+  and the field name, before any reservation.
+- Given a model outside the agent's effective set, then `403` with the same reasons as a native Bedrock call.
 
 **US-70 · One budget for every per-token model.** As a team-admin, I want OpenAI and other priced routes to count
 against the same budget and cap as Bedrock. *(§9.2; T-G5)*
 - Given the team has spent 99.9% of a blocking budget, when an agent calls `openai-prod` with a reservation larger than
   what is left, then `402 BudgetExceeded` with `budgetId`, `period`, `remainingUsd`, and nothing is forwarded.
 - Given concurrent calls from several pods, then total spend exceeds the cap by at most one in-flight call per pod.
-- T-G5 lists each source with *Capped* or *Token quota* and shows reserved in-flight spend.
+- T-G5 lists each source with *Capped* or *Reported only* and shows reserved in-flight spend.
 
 **US-71 · Never see or leak an upstream key.** As a team-admin, I want agents to work without holding provider keys.
 *(§10; T-G3, S-G3)*
@@ -815,7 +873,7 @@ affect only that team. *(§5.3)*
 ## Appendix C. Test cases
 
 Test types: **U** unit, **I** integration (real PostgreSQL 17 or envtest), **C** conformance (official OpenAI SDKs
-and recorded vLLM, SGLang, Ollama and OpenRouter fixtures against a fake upstream), **E** console end-to-end
+and recorded vLLM, SGLang, Ollama, OpenRouter and Nous Portal fixtures against a fake upstream), **E** console end-to-end
 (Playwright with the fake API), **K** cluster isolation test (Cilium, admission, IAM simulator), **P** performance or
 chaos. Every authorization rule has a denied case.
 
@@ -825,15 +883,15 @@ chaos. Every authorization rule has a denied case.
 |---|---|---|---|
 | TC-DB-01 | I | Insert endpoint with slug `Bad_Slug`, `bedrock`, a duplicate service slug, a team slug equal to a service slug | `23514` / `23505`, constraint named in the error |
 | TC-DB-02 | I | Team endpoint without owner or purpose; `in_namespace` at service level | `23514` |
-| TC-DB-03 | I | `afs_app` as team-admin of team A reads or writes team B's endpoints, credentials, selections, quotas | 0 rows / `42501` (added to `seedOtherTeams`; `TestCrossTeamWritesChangeNothing` covers them) |
-| TC-DB-04 | I | Team-admin sets `teams.may_add_model_endpoints` or `route_access` | `42501`; service admin succeeds |
+| TC-DB-03 | I | `afs_app` as team-admin of team A reads or writes team B's endpoints, credentials, opt-ins and selections | 0 rows / `42501` (added to `seedOtherTeams`; `TestCrossTeamWritesChangeNothing` covers them) |
+| TC-DB-04 | I | Team-admin sets `teams.may_add_model_endpoints`, or opts the team in to a `requires_terms` endpoint | `42501`; service admin succeeds |
 | TC-DB-05 | I | Credential ARN whose path is not `afs.secret_path(team, '_gateway', route)` | `23514` |
 | TC-DB-06 | I | A column named like a value (`value`, `secret_string`) on any new table | Schema test fails (existing guard) |
 | TC-DB-07 | I | `afs.route_admission` for each level off in turn, and a model without price | Reasons in order: service, team, agent, `model_not_on_route`, `model_not_priced` |
-| TC-DB-08 | I | `requires_terms` endpoint on, team access *All* | Not in the team's effective set until selected |
+| TC-DB-08 | I | Service endpoint switched on, team has not opted in | Not in the team's effective set; after a team-admin opt-in, in it |
 | TC-DB-09 | I | Change on any new table | `pg_notify` on `afs_desired_state` with table, team and id |
 | TC-DB-10 | I | Up, down, up of 000023 | Clean; checksums stable |
-| TC-DB-11 | I | Quota reserve and settle concurrently from 20 sessions | Counter never exceeds the limit by more than one reservation per holder |
+| TC-DB-11 | I | Switch a service endpoint off and on again | Opt-in rows kept; effective set follows the switch |
 
 ### C.2 Gateway (`-restapi` `afs-gateway`)
 
@@ -848,7 +906,7 @@ chaos. Every authorization rule has a denied case.
 | TC-GW-07 | U | OpenRouter `usage.cost` above and below the token-price cost | Settles to the larger; both recorded |
 | TC-GW-08 | U | Budget remaining below the reservation | `402 BudgetExceeded`, nothing forwarded, row `rejected_budget` |
 | TC-GW-09 | U | Each admission reason; caller with no route | `403` with the right `details.reason`; usage row `rejected_model` |
-| TC-GW-10 | U | Quota exhausted on a capacity route | `402` with code `QuotaExceeded`; the OpenAI SDKs do not retry it; row recorded |
+| TC-GW-10 | C | OpenAI SDKs against `/r/bedrock/v1/chat/completions`: plain, streaming, tools and tool results, images, stop sequences | Valid Chat Completions output; Converse request as expected (recorded fake Bedrock); reservation, settlement, inference profile and tags as a native call |
 | TC-GW-11 | U | Agent sends `Authorization: Bearer sk-…` | Header replaced by the route credential; value absent from logs, spans and errors |
 | TC-GW-12 | U | Route with no credential | `503 credential_missing`, nothing reserved |
 | TC-GW-13 | I | Credential file rotated on disk | Next call uses the new value; no restart; in-flight call unaffected |
@@ -860,6 +918,8 @@ chaos. Every authorization rule has a denied case.
 | TC-GW-19 | U | Span for a call | GenAI attributes (`gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.*`) and `afs.*` present; no prompt or completion content |
 | TC-GW-20 | U | Incoming `traceparent` | Continued; propagated upstream only for `in_namespace` and `corporate` endpoints |
 | TC-GW-21 | U | Metric labels | No agent or pool id label on any metric |
+| TC-GW-23 | U | `n` > 1, `logprobs`, audio on the `bedrock` route | `400 unsupported_parameter` naming the field; nothing reserved |
+| TC-GW-24 | U | Stream where the client did not request usage, on routes and on `bedrock` | No extra usage chunk reaches the client (MEG-OQ-9) |
 | TC-GW-22 | C | Bedrock and Anthropic paths of contract v1.1.0 through the team gateway | Existing conformance suite passes unchanged |
 
 ### C.3 Reconciler and cluster isolation
@@ -897,6 +957,9 @@ chaos. Every authorization rule has a denied case.
 | TC-BL-01 | I | Recorded OpenAI organization costs fixture vs ledger, per team project | Variance computed; over 5% emits `cost.variance_detected` |
 | TC-BL-02 | I | Capacity route with CUR namespace cost and token shares | Daily allocation by token share sums to the CUR amount |
 | TC-BL-03 | I | Price list differs from the price in force | One pending proposal per model; none when equal |
+| TC-BL-04 | I | OpenRouter key usage fixture vs ledger | Variance computed per team key |
+| TC-BL-05 | I | Nous Portal route with no statement uploaded; then a monthly statement entered | *Not reconciled* shown; after entry, monthly variance computed and alerted over 5% |
+| TC-GW-25 | C | Nous Portal fixture: Chat Completions, streaming with `include_usage` | Usage parsed when present; when absent, settled to reservation and marked `estimated` |
 
 ### C.6 Console (`-website`) and SDK
 
@@ -907,6 +970,7 @@ chaos. Every authorization rule has a denied case.
 | TC-UI-03 | E | Team-admin edits agent routes (T-G3) | Env preview updates as routes and default change; request has `If-Match` |
 | TC-UI-04 | E | Team viewer on V-G1 and V-G2 | Every changing control disabled with "Needs team-admin"; API `AccessDenied` handled if forced |
 | TC-UI-05 | E | Team-admin without `may_add_model_endpoints` | *Create endpoint* disabled with the service-admin tooltip |
+| TC-UI-10 | E | Team-admin opts in to a service endpoint; tries one with *Extra terms* | Opt-in saved and audited; extra-terms endpoint disabled with "Needs a service admin" |
 | TC-UI-06 | U | Credential form | Value never in state store, URL, storage or logs; field cleared after submit |
 | TC-UI-07 | E | Visual baselines for screens 56 to 67 | Match approved baselines |
 | TC-UI-08 | U | `@afs/sdk` generated from contract v1.5.0 | New operations typed; pagination and `If-Match` helpers |
