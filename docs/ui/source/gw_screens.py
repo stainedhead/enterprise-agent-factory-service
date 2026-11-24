@@ -1,4 +1,4 @@
-# Team model gateway (model-endpoint-gateway-PRD.md, PROPOSED), screens 56 to 67.
+# Team model gateway (model-endpoint-gateway-PRD.md, PROPOSED), screens 56 to 68.
 # Executed by gen.py after orch_screens.py, so it shares CSS, page(), opage(), navs and helpers.
 # Proposal mockups only: nothing here is built.
 
@@ -12,6 +12,7 @@ td.num{white-space:nowrap}
 .b-unm{color:#855900;border-color:#855900;background:#fffef0}
 .b-terms{color:#7300e5;border-color:#7300e5}
 .b-bi{color:var(--muted);border-color:#9aa5b1;background:#f3f3f7}
+.b-sub{color:#0b6b6b;border-color:#0b6b6b}
 .loc{display:inline-block;white-space:nowrap;border-radius:10px;padding:1px 9px;font-size:12px;font-weight:700}
 .loc.ext{background:#fff1e6;color:#b45309}.loc.corp{background:#e8f3ff;color:#004a9e}.loc.ns{background:#eaf7ee;color:#00802f}.loc.aws{background:#f3f3f7;color:var(--muted)}
 .pm{font-size:12.5px;color:var(--muted)}
@@ -43,7 +44,8 @@ def loc(kind):
 def mb(kind):
     return {"met": '<span class="badge b-met">Metered</span>', "cap": '<span class="badge b-cap">Capped</span>',
             "quo": '<span class="badge b-quo">Token quota</span>', "unm": '<span class="badge b-unm">Unmetered</span>',
-            "terms": '<span class="badge b-terms">Extra terms</span>', "bi": '<span class="badge b-bi">Built-in</span>'}[kind]
+            "terms": '<span class="badge b-terms">Extra terms</span>', "bi": '<span class="badge b-bi">Built-in</span>',
+            "sub": '<span class="badge b-sub">Fee capped</span>'}[kind]
 
 
 def admin_nav_gw(on):
@@ -66,6 +68,7 @@ SVC_ROUTES = [
     ("openrouter", "OpenRouter", "Chat", "ext", "Per token", ("met", "cap", "terms"), "3", ("ok", "Healthy"), "Per team (2 of 3 set)"),
     ("ml-platform", "Enterprise ML platform", "Chat, Embeddings", "corp", "Per token · transfer price", ("met", "cap"), "26", ("warn", "Degraded"), "Shared key"),
     ("nous-portal", "Nous Portal (Hermes models)", "Chat", "ext", "Per token", ("met", "cap"), "4", ("ok", "Healthy"), "Per team (4 of 4 set)"),
+    ("opencode-go", "OpenCode Go (subscription)", "Chat", "ext", "Subscription · fee per key", ("met", "sub", "terms"), "0", ("pend", "No traffic"), "Per team"),
     ("eval-sandbox", "Evaluation sandbox", "Chat", "corp", "Free", ("met",), "0", ("pend", "Disabled"), "None"),
 ]
 
@@ -73,7 +76,7 @@ SVC_ROUTES = [
 def svc_rows(sel=None):
     out = []
     for r, d, p, l, pm, bs, teams, (hk, ht), cred in SVC_ROUTES:
-        en = st("pend", "Off") if r == "eval-sandbox" else st("ok", "On")
+        en = st("pend", "Off") if r == "eval-sandbox" else st("err", "Off by provider policy") if r == "opencode-go" else st("ok", "On")
         out.append(f'<tr class="{"sel" if r == sel else ""}"><td><span class="radio{" on" if r == sel else ""}"></span></td><td><a class="rt">{r}</a><div class="small muted">{d}</div></td>'
                    f'<td class="small">{p}</td><td>{loc(l)}</td><td class="small">{pm}</td><td>{" ".join(mb(b) for b in bs)}</td>'
                    f'<td>{en}</td><td class="num">{teams}</td><td>{st(hk, ht)}</td><td class="small">{cred}</td></tr>')
@@ -87,7 +90,8 @@ gpage("56-admin-model-endpoints", "admin", admin_nav_gw("endpoints"), f"""
 <div class="desc">OpenAI-compatible model services agents reach through their team gateway, by route name. Every call through a route is metered; per-token routes count against team budgets and hard caps.</div></div>
 <div class="btns"><span class="btn dd">Actions</span><span class="btn p">Create endpoint</span></div></div>
 <div class="alert warn"><span class="ic">⚠</span><div><b>ml-platform is degraded for 4 teams.</b> p95 time to first token is 7.8 s over the last 15 minutes (objective 5 s). Calls still flow; teams were notified. <a>Open inference report</a></div></div>
-<div class="card"><div class="ch"><div><h2>Service endpoints <span class="cnt">(6)</span></h2><div class="sub">Switched-on endpoints are offered to every team; each team opts in. Endpoints with extra terms are selected per team by a service admin. Off means off for every team.</div></div>
+<div class="alert"><span class="ic">ⓘ</span><div class="small"><b>Provider policy:</b> external inference allowed · 4 of 5 external providers on · OpenCode Go off (waiting for the provider to confirm gateway use). <a>Open provider policy</a></div></div>
+<div class="card"><div class="ch"><div><h2>Service endpoints <span class="cnt">(7)</span></h2><div class="sub">Switched-on endpoints are offered to every team; each team opts in. Endpoints with extra terms are selected per team by a service admin. Off means off for every team.</div></div>
 <div class="btns"><span class="btn dis">Turn off</span><span class="btn">Edit</span></div></div>
 <div class="tools"><div class="filter">🔍 Find endpoints</div><span class="sel">Any location ▾</span><span class="sel">Any pricing mode ▾</span><div class="pager">‹ <b>1</b> › &nbsp; ⚙</div></div>
 <table><tr><th></th><th>Route</th><th>Protocol</th><th>Location</th><th>Pricing</th><th>Budget control</th><th>Service</th><th class="num">Teams</th><th>Health (15 min)</th><th>Credential</th></tr>
@@ -404,3 +408,67 @@ gpage("65-ta-budget-routes", "ta", team_nav_gw("budget", "ta"), f"""
 # ---------------------------------------------------------------------------------------------- Team viewer
 gpage("66-tv-model-endpoints", "tv", team_nav_gw("endpoints", "tv"), team_routes_page(True))
 gpage("67-tv-agent-models-routes", "tv", team_nav_gw("agents", "tv"), agent_models_page(True))
+
+
+# ---------------------------------------------------------------------------------------------- Provider policy (J, 2026-11-24)
+PROV = [
+    # provider, hosts, routes, teams, direct systems, on, note
+    ("OpenAI", "api.openai.com", "openai-prod", "18", "1", True, ""),
+    ("OpenRouter", "openrouter.ai", "openrouter", "3", "1 (override for 1 team)", True, ""),
+    ("Nous Portal", "inference-api.nousresearch.com", "nous-portal", "4", "1", True, ""),
+    ("Azure OpenAI", "*.openai.azure.com", "azure-oai-east (team)", "1", "0", True, ""),
+    ("OpenCode Go", "opencode.ai", "opencode-go", "0", "0", False, "Waiting for OpenCode to confirm gateway use (MEG-OQ-22)"),
+    ("Other external hosts", "any external host not listed", "none today", "0", "0", True, ""),
+]
+
+
+def prov_rows():
+    out = []
+    for n, h, r, t, d, on, note in PROV:
+        state = st("ok", "On") if on else st("err", "Off")
+        out.append(f'<tr><td><b>{n}</b>{"<div class=\"small muted\">" + note + "</div>" if note else ""}</td><td class="mono small">{h}</td><td class="rt">{r}</td>'
+                   f'<td class="num">{t}</td><td class="small">{d}</td><td>{state}</td><td>{tg(on)}</td></tr>')
+    return "".join(out)
+
+
+prov_modal = f"""<div class="modalwrap"><div class="modal" style="width:700px"><div class="mh">Turn off all external inference?<span class="muted">✕</span></div><div class="mb">
+<div class="small" style="margin-bottom:10px">Every endpoint with location <b>External</b> stops for every team. Nothing is deleted: opt-ins, selections, credentials and prices come back when you turn it on again.</div>
+<table><tr><th>What changes</th><th class="num">Count</th></tr>
+<tr><td>Routes refused within 60 s (<span class="mono">external_provider_blocked</span>)</td><td class="num">5</td></tr>
+<tr><td>Teams that lose at least one route</td><td class="num">21</td></tr>
+<tr><td>Team-declared external endpoints</td><td class="num">1</td></tr>
+<tr><td>Direct LLM external systems closed, overrides included</td><td class="num">4</td></tr>
+<tr><td>Agents whose default route falls back to <span class="rt">bedrock</span></td><td class="num">37</td></tr></table>
+<div class="small muted" style="margin-top:10px">Gateway egress to these hosts is removed. Agents drop the routes from their files and variables on their next restart. Not affected: <span class="rt">bedrock</span>, corporate and in-namespace endpoints.</div>
+<div class="field" style="margin-top:12px"><label>Reason (recorded in the audit log and shown to teams)</label><div class="input">Enterprise policy: no external inference providers</div></div>
+<div class="field"><label>Type <b>turn off</b> to confirm</label><div class="input" style="width:220px">turn off</div></div>
+</div><div class="mf"><span class="btn" style="border:0">Cancel</span><span class="btn p" style="background:#d91515;border-color:#d91515">Turn off external inference</span></div></div></div>"""
+
+PROV_BODY = f"""
+<div class="crumbs"><a>Agent Factory</a> › <a>Model endpoints</a> › Provider policy</div>
+<div class="hdr"><div><h1>Provider policy <span class="info">Info</span></h1>
+<div class="desc">Turn external inference providers off for the whole service, one at a time or all at once. Off refuses calls on their routes, removes the routes from agents, removes gateway egress to their hosts and closes direct LLM access.</div></div></div>
+<div class="tabs"><span>Endpoints</span><span>Price proposals</span><span class="on">Provider policy</span></div>
+<div class="card"><div class="ch"><div><h2>External inference</h2><div class="sub">Covers every endpoint with location External, service and team, and every external system of category LLM.</div></div><span class="btn">Turn off all external inference</span></div><div class="cb">
+<div class="field"><label>{tg(True)} External inference providers are allowed</label><div class="hint">When off, team-admins cannot create External endpoints, and each provider below is off whatever its own switch says.</div></div></div></div>
+<div class="card"><div class="ch"><div><h2>External providers <span class="cnt">(6)</span></h2><div class="sub">A provider matches its routes by provider and by host, so a team cannot add a blocked provider back under a new route.</div></div><div class="btns"><span class="btn">Add provider</span></div></div>
+<table><tr><th>Provider</th><th>Hosts</th><th>Routes</th><th class="num">Teams</th><th>Direct LLM systems</th><th>Status</th><th>Allowed</th></tr>
+{prov_rows()}</table></div>
+<div class="grid g2">
+<div class="card"><div class="ch"><h2>Not affected</h2></div><div class="cb">
+<table><tr><th>Route or kind</th><th>Why</th><th>How to stop it</th></tr>
+<tr><td class="rt">bedrock</td><td class="small">AWS, through VPC endpoints</td><td class="small">Model catalog</td></tr>
+<tr><td>{loc('corp')}</td><td class="small">Inside the enterprise network</td><td class="small">The endpoint's own switch</td></tr>
+<tr><td>{loc('ns')}</td><td class="small">Runs in the team's namespace</td><td class="small">The team's endpoint</td></tr></table></div></div>
+<div class="card"><div class="ch"><h2>Recent changes</h2><a>Audit log</a></div>
+<table><tr><th>When</th><th>Change</th><th>By</th></tr>
+<tr><td class="small">2026-11-24 14:02</td><td class="small">OpenCode Go <b>off</b>: waiting for the provider to confirm gateway use</td><td class="small">Priya Raman</td></tr>
+<tr><td class="small">2026-11-20 09:15</td><td class="small">Nous Portal <b>on</b></td><td class="small">Priya Raman</td></tr></table></div>
+</div>
+<div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb"><div class="code">afs model-endpoints put-inference-provider-policy --external-providers off \\<br>&nbsp; --reason "Enterprise policy: no external inference providers"</div>
+<div class="code" style="margin-top:8px">afs model-endpoints update-inference-provider --provider opencode --no-enabled \\<br>&nbsp; --reason "Waiting for the provider to confirm gateway use"</div></div></div>
+"""
+
+gpage("68-admin-provider-policy", "admin", admin_nav_gw("endpoints"), PROV_BODY)
+gpage("68a-admin-provider-policy-confirm", "admin", admin_nav_gw("endpoints"), PROV_BODY, modal=prov_modal)
+
