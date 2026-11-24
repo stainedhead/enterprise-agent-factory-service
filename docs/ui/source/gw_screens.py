@@ -69,6 +69,8 @@ SVC_ROUTES = [
     ("ml-platform", "Enterprise ML platform", "Chat, Embeddings", "corp", "Per token · transfer price", ("met", "cap"), "26", ("warn", "Degraded"), "Shared key"),
     ("nous-portal", "Nous Portal (Hermes models)", "Chat", "ext", "Per token", ("met", "cap"), "4", ("ok", "Healthy"), "Per team (4 of 4 set)"),
     ("opencode", "OpenCode Console (pay-as-you-go)", "Chat, Responses", "ext", "Per token", ("met", "cap"), "2", ("ok", "Healthy"), "Per team (2 of 2 set)"),
+    ("azure-openai", "Azure OpenAI and Foundry models", "Chat, Responses, Embeddings", "ext", "Per token", ("met", "cap", "terms"), "0", ("pend", "Provider off"), "Workload identity (per team)"),
+    ("vertex-ai", "Google Vertex AI (Gemini)", "Chat", "ext", "Per token", ("met", "cap", "terms"), "0", ("pend", "Provider off"), "Workload identity (per team)"),
     ("eval-sandbox", "Evaluation sandbox", "Chat", "corp", "Free", ("met",), "0", ("pend", "Disabled"), "None"),
 ]
 
@@ -76,7 +78,7 @@ SVC_ROUTES = [
 def svc_rows(sel=None):
     out = []
     for r, d, p, l, pm, bs, teams, (hk, ht), cred in SVC_ROUTES:
-        en = st("pend", "Off") if r == "eval-sandbox" else st("ok", "On")
+        en = st("pend", "Off") if r == "eval-sandbox" else st("err", "Off by provider policy") if r in ("azure-openai", "vertex-ai") else st("ok", "On")
         out.append(f'<tr class="{"sel" if r == sel else ""}"><td><span class="radio{" on" if r == sel else ""}"></span></td><td><a class="rt">{r}</a><div class="small muted">{d}</div></td>'
                    f'<td class="small">{p}</td><td>{loc(l)}</td><td class="small">{pm}</td><td>{" ".join(mb(b) for b in bs)}</td>'
                    f'<td>{en}</td><td class="num">{teams}</td><td>{st(hk, ht)}</td><td class="small">{cred}</td></tr>')
@@ -90,8 +92,8 @@ gpage("56-admin-model-endpoints", "admin", admin_nav_gw("endpoints"), f"""
 <div class="desc">OpenAI-compatible model services agents reach through their team gateway, by route name. Every call through a route is metered; per-token routes count against team budgets and hard caps.</div></div>
 <div class="btns"><span class="btn dd">Actions</span><span class="btn p">Create endpoint</span></div></div>
 <div class="alert warn"><span class="ic">⚠</span><div><b>ml-platform is degraded for 4 teams.</b> p95 time to first token is 7.8 s over the last 15 minutes (objective 5 s). Calls still flow; teams were notified. <a>Open inference report</a></div></div>
-<div class="alert"><span class="ic">ⓘ</span><div class="small"><b>Provider policy:</b> external inference allowed · 5 listed providers on · unlisted external hosts off. <a>Open provider policy</a></div></div>
-<div class="card"><div class="ch"><div><h2>Service endpoints <span class="cnt">(7)</span></h2><div class="sub">Switched-on endpoints are offered to every team; each team opts in. Endpoints with extra terms are selected per team by a service admin. Off means off for every team.</div></div>
+<div class="alert"><span class="ic">ⓘ</span><div class="small"><b>Provider policy:</b> 6 of 8 providers on · Azure and Google off (new-install default; teams chosen by service admins once on). <a>Open provider policy</a></div></div>
+<div class="card"><div class="ch"><div><h2>Service endpoints <span class="cnt">(9)</span></h2><div class="sub">Switched-on endpoints are offered to every team; each team opts in. Endpoints with extra terms are selected per team by a service admin. Off means off for every team.</div></div>
 <div class="btns"><span class="btn dis">Turn off</span><span class="btn">Edit</span></div></div>
 <div class="tools"><div class="filter">🔍 Find endpoints</div><span class="sel">Any location ▾</span><span class="sel">Any pricing mode ▾</span><div class="pager">‹ <b>1</b> › &nbsp; ⚙</div></div>
 <table><tr><th></th><th>Route</th><th>Protocol</th><th>Location</th><th>Pricing</th><th>Budget control</th><th>Service</th><th class="num">Teams</th><th>Health (15 min)</th><th>Credential</th></tr>
@@ -101,7 +103,7 @@ gpage("56-admin-model-endpoints", "admin", admin_nav_gw("endpoints"), f"""
 <table><tr><th>Team</th><th>Route</th><th>Location</th><th>Pricing</th><th>Health</th></tr>
 <tr><td><a>payments-factory</a></td><td class="rt">coder-vllm</td><td>{loc('ns')}</td><td class="small">Capacity</td><td>{st('ok','Healthy')}</td></tr>
 <tr><td><a>search-relevance</a></td><td class="rt">rerank-tgi</td><td>{loc('ns')}</td><td class="small">Capacity</td><td>{st('ok','Healthy')}</td></tr>
-<tr><td><a>data-platform</a></td><td class="rt">azure-oai-east</td><td>{loc('ext')}</td><td class="small">Per token</td><td>{st('ok','Healthy')}</td></tr>
+<tr><td><a>data-platform</a></td><td class="rt">together-ai</td><td>{loc('ext')}</td><td class="small">Per token</td><td>{st('ok','Healthy')}</td></tr>
 <tr><td><a>mobile-platform</a></td><td class="rt">ollama-test</td><td>{loc('ns')}</td><td class="small">Free</td><td>{st('err','Unavailable')}</td></tr></table></div>
 <div class="card"><div class="ch"><div><h2>Direct LLM access</h2><div class="sub">External systems of category LLM that agents could call without a route</div></div></div><div class="cb">
 <table><tr><th>External system</th><th>Linked route</th><th>Direct access</th></tr>
@@ -412,63 +414,66 @@ gpage("67-tv-agent-models-routes", "tv", team_nav_gw("agents", "tv"), agent_mode
 
 # ---------------------------------------------------------------------------------------------- Provider policy (J, 2026-11-24)
 PROV = [
-    # provider, hosts, routes, teams, direct systems, on, note
-    ("OpenAI", "api.openai.com", "openai-prod", "18", "1", True, ""),
-    ("OpenRouter", "openrouter.ai", "openrouter", "3", "1 (override for 1 team)", True, ""),
-    ("Nous Portal", "inference-api.nousresearch.com", "nous-portal", "4", "1", True, ""),
-    ("Azure OpenAI", "*.openai.azure.com", "azure-oai-east (team)", "1", "0", True, ""),
-    ("OpenCode Console", "opencode.ai", "opencode", "2", "0", True, ""),
-    ("Other external hosts", "any external host not listed", "none", "0", "0", False, "Only listed providers may be used"),
+    # provider, hosts, routes, teams, selected by, credential, on, note
+    ("Amazon Bedrock", "Bedrock runtime (VPC endpoints)", "bedrock", "42", "Every team (model catalog)", "Gateway AWS role", True, ""),
+    ("OpenAI", "api.openai.com", "openai-prod", "18", "Team-admins", "API key per team", True, ""),
+    ("OpenRouter", "openrouter.ai", "openrouter", "3", "Team-admins · Extra terms", "API key per team", True, ""),
+    ("Nous Portal", "inference-api.nousresearch.com", "nous-portal", "4", "Team-admins", "API key per team", True, ""),
+    ("OpenCode Console", "opencode.ai", "opencode", "2", "Team-admins", "Service-account key per team", True, ""),
+    ("Azure", "*.openai.azure.com, *.services.ai.azure.com", "azure-openai", "0", "Service admins", "Workload identity federation", False, "Off by default on a new install"),
+    ("Google", "*aiplatform.googleapis.com", "vertex-ai", "0", "Service admins", "Workload identity federation", False, "Off by default on a new install"),
+    ("Other external hosts", "any external host not listed", "together-ai (team)", "1", "Team-admins (if allowed)", "Team's own key", True, ""),
 ]
 
 
-def prov_rows():
+def prov_rows(azure_on=False):
     out = []
-    for n, h, r, t, d, on, note in PROV:
-        state = st("ok", "On") if on else st("err", "Off")
-        out.append(f'<tr><td><b>{n}</b>{"<div class=\"small muted\">" + note + "</div>" if note else ""}</td><td class="mono small">{h}</td><td class="rt">{r}</td>'
-                   f'<td class="num">{t}</td><td class="small">{d}</td><td>{state}</td><td>{tg(on)}</td></tr>')
+    for n, h, r, t, sel, cred, on, note in PROV:
+        if azure_on and n == "Azure":
+            on, note, t = True, "", "42"
+        state = st("ok", "On") if on else st("pend", "Off")
+        sub = f'<div class="small muted">{note}</div>' if note else ""
+        out.append(f'<tr><td><b>{n}</b>{sub}</td><td class="mono small">{h}</td><td class="rt">{r}</td>'
+                   f'<td class="num">{t}</td><td class="small">{sel}</td><td class="small">{cred}</td><td>{state}</td><td>{tg(on)}</td></tr>')
     return "".join(out)
 
 
-prov_modal = f"""<div class="modalwrap"><div class="modal" style="width:700px"><div class="mh">Turn off all external inference?<span class="muted">✕</span></div><div class="mb">
-<div class="small" style="margin-bottom:10px">Every endpoint with location <b>External</b> stops for every team. Nothing is deleted: opt-ins, selections, credentials and prices come back when you turn it on again.</div>
+prov_modal = f"""<div class="modalwrap"><div class="modal" style="width:760px"><div class="mh">Turn off Amazon Bedrock?<span class="muted">✕</span></div><div class="mb">
+<div class="small" style="margin-bottom:10px">Every agent's Bedrock models stop. Agents need another default model first: pick a route model on a provider that is on. Nothing is deleted; turning Bedrock on again restores every Bedrock model.</div>
+<div class="field"><label>Fallback default model (becomes the service default)</label><div class="input">azure-openai / gpt-5.1 &nbsp;▾</div></div>
+<div class="field"><label>{tg(True)} Select <span class="rt">azure-openai</span> for every team (42 teams, recorded as selected by a service admin)</label><div class="hint">Required: the fallback must reach every team. Azure must be on and each team's federation ready (39 of 42 ready).</div></div>
 <table><tr><th>What changes</th><th class="num">Count</th></tr>
-<tr><td>Routes refused within 60 s (<span class="mono">external_provider_blocked</span>)</td><td class="num">5</td></tr>
-<tr><td>Teams that lose at least one route</td><td class="num">21</td></tr>
-<tr><td>Team-declared external endpoints</td><td class="num">1</td></tr>
-<tr><td>Direct LLM external systems closed, overrides included</td><td class="num">4</td></tr>
-<tr><td>Agents whose default route falls back to <span class="rt">bedrock</span></td><td class="num">37</td></tr></table>
-<div class="small muted" style="margin-top:10px">Gateway egress to these hosts is removed. Agents drop the routes from their files and variables on their next restart. Not affected: <span class="rt">bedrock</span>, corporate and in-namespace endpoints.</div>
-<div class="field" style="margin-top:12px"><label>Reason (recorded in the audit log and shown to teams)</label><div class="input">Enterprise policy: no external inference providers</div></div>
-<div class="field"><label>Type <b>turn off</b> to confirm</label><div class="input" style="width:220px">turn off</div></div>
-</div><div class="mf"><span class="btn" style="border:0">Cancel</span><span class="btn p" style="background:#d91515;border-color:#d91515">Turn off external inference</span></div></div></div>"""
+<tr><td>Bedrock calls refused within 60 s (<span class="mono">provider_disabled</span>)</td><td class="num">all</td></tr>
+<tr><td>Agents moving to the fallback at next restart, orchestration agents included</td><td class="num">318</td></tr>
+<tr><td>Teams whose fallback federation is not ready (their agents get <span class="mono">federation_not_ready</span>)</td><td class="num warn"><b>3</b></td></tr>
+<tr><td>Agents on templates that speak only Anthropic Messages (become Degraded)</td><td class="num warn"><b>6</b></td></tr></table>
+<div class="small muted" style="margin-top:10px"><span class="mono">bedrock:Invoke*</span> is removed from every gateway role and the daily Bedrock catalog sync pauses. Spend already incurred still reconciles against CUR.</div>
+<div class="field" style="margin-top:12px"><label>Reason (recorded in the audit log and shown to teams)</label><div class="input">Enterprise policy: Azure is the approved model provider</div></div>
+</div><div class="mf"><span class="btn" style="border:0">Cancel</span><span class="btn p" style="background:#d91515;border-color:#d91515">Turn off Bedrock</span></div></div></div>"""
 
-PROV_BODY = f"""
+def prov_body(azure_on=False):
+    return f"""
 <div class="crumbs"><a>Agent Factory</a> › <a>Model endpoints</a> › Provider policy</div>
 <div class="hdr"><div><h1>Provider policy <span class="info">Info</span></h1>
-<div class="desc">Turn external inference providers off for the whole service, one at a time or all at once. Off refuses calls on their routes, removes the routes from agents, removes gateway egress to their hosts and closes direct LLM access.</div></div></div>
+<div class="desc">Each model provider, Bedrock included, has its own switch. Off refuses calls on its routes within 60 s, removes the routes from agents, removes gateway egress to its hosts and closes direct LLM access. Nothing is deleted.</div></div></div>
 <div class="tabs"><span>Endpoints</span><span>Price proposals</span><span class="on">Provider policy</span></div>
-<div class="card"><div class="ch"><div><h2>External inference</h2><div class="sub">Covers every endpoint with location External, service and team, and every external system of category LLM.</div></div><span class="btn">Turn off all external inference</span></div><div class="cb">
-<div class="field"><label>{tg(True)} External inference providers are allowed</label><div class="hint">When off, team-admins cannot create External endpoints, and each provider below is off whatever its own switch says.</div></div></div></div>
-<div class="card"><div class="ch"><div><h2>External providers <span class="cnt">(6)</span></h2><div class="sub">A provider matches its routes by provider and by host, so a team cannot add a blocked provider back under a new route.</div></div><div class="btns"><span class="btn">Add provider</span></div></div>
-<table><tr><th>Provider</th><th>Hosts</th><th>Routes</th><th class="num">Teams</th><th>Direct LLM systems</th><th>Status</th><th>Allowed</th></tr>
-{prov_rows()}</table></div>
+<div class="alert"><span class="ic">ⓘ</span><div class="small"><b>New install defaults.</b> Bedrock, OpenAI, OpenRouter, Nous Portal, OpenCode and other external hosts start on: turn off the ones your enterprise does not allow. Azure and Google start off: turn them on, then choose teams on each team's <i>Model endpoints</i> page.</div></div>
+<div class="card"><div class="ch"><div><h2>Providers <span class="cnt">(8)</span></h2><div class="sub">A provider matches its routes by provider and by host, so a team cannot add a disabled provider back under a new route.</div></div><div class="btns"><span class="btn">Add provider</span></div></div>
+<table><tr><th>Provider</th><th>Hosts</th><th>Routes</th><th class="num">Teams</th><th>Teams selected by</th><th>Credential</th><th>Status</th><th>Allowed</th></tr>
+{prov_rows(azure_on)}</table></div>
 <div class="grid g2">
-<div class="card"><div class="ch"><h2>Not affected</h2></div><div class="cb">
-<table><tr><th>Route or kind</th><th>Why</th><th>How to stop it</th></tr>
-<tr><td class="rt">bedrock</td><td class="small">AWS, through VPC endpoints</td><td class="small">Model catalog</td></tr>
+<div class="card"><div class="ch"><h2>Not providers</h2></div><div class="cb">
+<table><tr><th>Kind</th><th>Why</th><th>How to stop it</th></tr>
 <tr><td>{loc('corp')}</td><td class="small">Inside the enterprise network</td><td class="small">The endpoint's own switch</td></tr>
 <tr><td>{loc('ns')}</td><td class="small">Runs in the team's namespace</td><td class="small">The team's endpoint</td></tr></table></div></div>
 <div class="card"><div class="ch"><h2>Recent changes</h2><a>Audit log</a></div>
 <table><tr><th>When</th><th>Change</th><th>By</th></tr>
-<tr><td class="small">2026-11-24 14:02</td><td class="small">Other external hosts <b>off</b>: only listed providers may be used</td><td class="small">Priya Raman</td></tr>
+<tr><td class="small">2026-11-24 14:02</td><td class="small">OpenCode Console <b>on</b> (built-in entry added)</td><td class="small">Priya Raman</td></tr>
 <tr><td class="small">2026-11-20 09:15</td><td class="small">Nous Portal <b>on</b></td><td class="small">Priya Raman</td></tr></table></div>
 </div>
-<div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb"><div class="code">afs model-endpoints put-inference-provider-policy --external-providers off \\<br>&nbsp; --reason "Enterprise policy: no external inference providers"</div>
-<div class="code" style="margin-top:8px">afs model-endpoints update-inference-provider --provider other --no-enabled \\<br>&nbsp; --reason "Only listed providers may be used"</div></div></div>
+<div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb"><div class="code">afs model-endpoints update-inference-provider --provider google --enabled \\<br>&nbsp; --reason "Approved for the data-science teams"</div>
+<div class="code" style="margin-top:8px">afs model-endpoints update-inference-provider --provider bedrock --no-enabled \\<br>&nbsp; --fallback-model azure-openai/gpt-5.1 --select-for-all-teams \\<br>&nbsp; --reason "Enterprise policy: Azure is the approved model provider"</div></div></div>
 """
 
-gpage("68-admin-provider-policy", "admin", admin_nav_gw("endpoints"), PROV_BODY)
-gpage("68a-admin-provider-policy-confirm", "admin", admin_nav_gw("endpoints"), PROV_BODY, modal=prov_modal)
-
+gpage("68-admin-provider-policy", "admin", admin_nav_gw("endpoints"), prov_body())
+gpage("68a-admin-provider-policy-confirm", "admin", admin_nav_gw("endpoints"), prov_body(azure_on=True), modal=prov_modal)
