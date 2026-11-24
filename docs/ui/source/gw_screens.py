@@ -1,4 +1,4 @@
-# Team model gateway (model-endpoint-gateway-PRD.md, PROPOSED), screens 46 to 57.
+# Team model gateway (model-endpoint-gateway-PRD.md, PROPOSED), screens 56 to 67.
 # Executed by gen.py after orch_screens.py, so it shares CSS, page(), opage(), navs and helpers.
 # Proposal mockups only: nothing here is built.
 
@@ -80,7 +80,7 @@ def svc_rows(sel=None):
 
 
 # ---------------------------------------------------------------------------------------------- Service admin
-gpage("46-admin-model-endpoints", "admin", admin_nav_gw("endpoints"), f"""
+gpage("56-admin-model-endpoints", "admin", admin_nav_gw("endpoints"), f"""
 <div class="crumbs"><a>Agent Factory</a> › Model endpoints</div>
 <div class="hdr"><div><h1>Model endpoints <span class="info">Info</span></h1>
 <div class="desc">OpenAI-compatible model services agents reach through their team gateway, by route name. Every call through a route is metered; per-token routes count against team budgets and hard caps.</div></div>
@@ -110,7 +110,7 @@ gpage("46-admin-model-endpoints", "admin", admin_nav_gw("endpoints"), f"""
 <tr><td class="rt">openrouter</td><td class="mono">qwen3-coder</td><td class="muted">— (not callable)</td><td><b>0.22 / 0.95</b></td><td class="small">LiteLLM price list</td><td><span class="btn sm">Review</span></td></tr></table></div>
 """)
 
-gpage("47-admin-create-model-endpoint", "admin", admin_nav_gw("endpoints"), f"""
+gpage("57-admin-create-model-endpoint", "admin", admin_nav_gw("endpoints"), f"""
 <div class="crumbs"><a>Agent Factory</a> › <a>Model endpoints</a> › Create endpoint</div>
 <div class="wiz"><div class="steps">
 <div><div class="n">Step 1</div><b>Endpoint and route</b></div>
@@ -143,7 +143,7 @@ gpage("47-admin-create-model-endpoint", "admin", admin_nav_gw("endpoints"), f"""
 </div></div>
 """)
 
-gpage("48-admin-endpoint-detail", "admin", admin_nav_gw("endpoints"), f"""
+gpage("58-admin-endpoint-detail", "admin", admin_nav_gw("endpoints"), f"""
 <div class="crumbs"><a>Agent Factory</a> › <a>Model endpoints</a> › openai-prod</div>
 <div class="hdr"><div><h1><span class="rt" style="font-size:22px">openai-prod</span> {st('ok','Healthy')} <span class="info">Info</span></h1>
 <div class="desc">OpenAI · https://api.openai.com/v1 · Chat, Responses, Embeddings · {loc('ext')} {mb('met')} {mb('cap')}</div></div>
@@ -175,7 +175,7 @@ def lat_chart(vals=LAT, slo=5.0, scale=13):
             '<div class="lg"><span><i style="background:#688ae8"></i>p95 time to first token, per hour</span><span><i style="background:#c33d69"></i>Over objective</span><span>Last 24 h</span></div>')
 
 
-gpage("49-admin-inference-report", "admin", admin_nav_gw("reports"), f"""
+gpage("59-admin-inference-report", "admin", admin_nav_gw("reports"), f"""
 <div class="crumbs"><a>Agent Factory</a> › <a>Reports & analytics</a> › Inference</div>
 <div class="hdr"><div><h1>Inference <span class="info">Info</span></h1><div class="desc">Every model call through team gateways, Bedrock and routes, all teams. From gateway telemetry (OpenTelemetry GenAI conventions) and the usage ledger; no prompt or completion content is recorded.</div></div></div>
 <div class="tabs"><span>Overview</span><span>Usage</span><span>Costs</span><span class="on">Inference</span><span>Activity</span><span>Traffic</span></div>
@@ -207,7 +207,7 @@ gpage("49-admin-inference-report", "admin", admin_nav_gw("reports"), f"""
 <div class="small muted">Per-agent figures are on each team's report. Traces for any call can be found by request id in the platform trace store.</div>
 """)
 
-gpage("50-admin-team-routes", "admin", admin_nav_gw("teams"), f"""
+gpage("60-admin-team-routes", "admin", admin_nav_gw("teams"), f"""
 <div class="crumbs"><a>Agent Factory</a> › <a>Teams</a> › <a>payments-factory</a> › Model endpoints</div>
 <div class="hdr"><div><h1>payments-factory · Model endpoints <span class="info">Info</span></h1><div class="desc">Which service routes this team may use, whether it may declare its own endpoints, and its token quotas.</div></div>
 <div class="btns"><span class="btn">Edit</span></div></div>
@@ -266,9 +266,9 @@ def team_routes_page(ro):
 """
 
 
-gpage("51-ta-model-endpoints", "ta", team_nav_gw("endpoints", "ta"), team_routes_page(False))
+gpage("61-ta-model-endpoints", "ta", team_nav_gw("endpoints", "ta"), team_routes_page(False))
 
-gpage("52-ta-create-team-endpoint", "ta", team_nav_gw("endpoints", "ta"), f"""
+gpage("62-ta-create-team-endpoint", "ta", team_nav_gw("endpoints", "ta"), f"""
 <div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › <a>Model endpoints</a> › Create endpoint</div>
 <div class="split"><div style="flex:1;max-width:860px">
 <div class="hdr"><div><h1>Create team endpoint</h1><div class="desc">Adds an OpenAI-compatible model service only this team can use. Every call is metered by the team gateway.</div></div></div>
@@ -347,7 +347,7 @@ def agent_models_page(ro):
 """
 
 
-gpage("53-ta-agent-models-routes", "ta", team_nav_gw("agents", "ta"), agent_models_page(False))
+gpage("63-ta-agent-models-routes", "ta", team_nav_gw("agents", "ta"), agent_models_page(False))
 
 
 def team_inference_body():
@@ -382,9 +382,9 @@ def team_inference_body():
 """
 
 
-gpage("54-ta-team-inference-report", "ta", team_nav_gw("reports", "ta"), team_inference_body())
+gpage("64-ta-team-inference-report", "ta", team_nav_gw("reports", "ta"), team_inference_body())
 
-gpage("55-ta-budget-routes", "ta", team_nav_gw("budget", "ta"), f"""
+gpage("65-ta-budget-routes", "ta", team_nav_gw("budget", "ta"), f"""
 <div class="crumbs"><a>Agent Factory</a> › <a>payments-factory</a> › Budget & usage</div>
 <div class="hdr"><div><h1>Budget & usage <span class="info">Info</span></h1><div class="desc">Monthly budget $40,000 · hard cap (block at 100%) · thresholds 50 / 80 / 100%</div></div>
 <div class="btns"><span class="btn">Edit budget</span></div></div>
@@ -405,5 +405,5 @@ gpage("55-ta-budget-routes", "ta", team_nav_gw("budget", "ta"), f"""
 """)
 
 # ---------------------------------------------------------------------------------------------- Team viewer
-gpage("56-tv-model-endpoints", "tv", team_nav_gw("endpoints", "tv"), team_routes_page(True))
-gpage("57-tv-agent-models-routes", "tv", team_nav_gw("agents", "tv"), agent_models_page(True))
+gpage("66-tv-model-endpoints", "tv", team_nav_gw("endpoints", "tv"), team_routes_page(True))
+gpage("67-tv-agent-models-routes", "tv", team_nav_gw("agents", "tv"), agent_models_page(True))

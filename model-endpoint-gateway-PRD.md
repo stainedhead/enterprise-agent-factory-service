@@ -530,7 +530,7 @@ tests and `seedOtherTeams` rows for every new team-owned table.
   env var names an agent will receive.
 - Reports: route group-by and badges; an *Inference* report (latency, TTFT, errors, tokens per second, cost rate)
   for service admins and per team; *Unmetered* badge kept only for direct `llm` external systems.
-- Proposal mockups are screens 46 to 57 (Appendix A); console stories are US-62 to US-75 (Appendix B).
+- Proposal mockups are screens 56 to 67 (Appendix A); console stories are US-62 to US-75 (Appendix B).
 
 ### 12.5 `-cli`
 
@@ -615,7 +615,7 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team
 
 - 2026-11-24: drafted from J's question in the project thread; proposal only, awaiting J's answers to section 13.3.
 - 2026-11-24: J added inference-layer telemetry as a goal; section 10 added (G7, MEG-D10, MEG-OQ-17, MEG-OQ-18).
-- 2026-11-24: J asked for UI, use cases and test cases to review; Appendix A (screens 46 to 57 by role), Appendix B
+- 2026-11-24: J asked for UI, use cases and test cases to review; Appendix A (screens 56 to 67 by role), Appendix B
   (user stories US-62 to US-77 with acceptance criteria) and Appendix C (test cases) added.
 
 ---
@@ -636,33 +636,33 @@ page's *Models* tab becomes **Models & routes**.
 
 | # | Screen | What it shows | Stories |
 |---|---|---|---|
-| S-G1 | Model endpoints (46) | Service endpoint catalog with route, protocol, location, pricing mode, *Metered* / *Capped* / *Extra terms* badges, service switch, team count, 15-minute health and credential mode; team-declared endpoints; direct LLM access and its *Unmetered* state; pending price proposals; degraded-route alert | US-62, US-63, US-70, US-74 |
-| S-G2 | Create endpoint, step 3 (47) | Wizard: endpoint and route, connection and credential, **models and pricing** (pricing mode tiles, models with prices, LiteLLM import, provider-reported cost), access and objectives, review; equivalent CLI | US-62, US-64 |
-| S-G3 | Endpoint detail, Teams & credentials tab (48) | Per-team access, credential state (set / missing, never the value), last rotation, team gateway version during ring rollout, spend, calls, errors; provider reconciliation KPI | US-65, US-71, US-76 |
-| S-G4 | Inference report (49) | Calls, tokens per second, errors split upstream vs AFS refusals, gateway overhead; per-route latency, TTFT, throughput, error rate, estimated-usage share, cost and effective $/MTok; TTFT chart against the objective | US-73, US-74 |
-| S-G5 | Team detail, Model endpoints (50) | Team's service routes (*All* / *Selected*, service admins only), extra-terms selection, *may declare endpoints* switch, token quotas | US-63, US-66, US-69 |
+| S-G1 | Model endpoints (56) | Service endpoint catalog with route, protocol, location, pricing mode, *Metered* / *Capped* / *Extra terms* badges, service switch, team count, 15-minute health and credential mode; team-declared endpoints; direct LLM access and its *Unmetered* state; pending price proposals; degraded-route alert | US-62, US-63, US-70, US-74 |
+| S-G2 | Create endpoint, step 3 (57) | Wizard: endpoint and route, connection and credential, **models and pricing** (pricing mode tiles, models with prices, LiteLLM import, provider-reported cost), access and objectives, review; equivalent CLI | US-62, US-64 |
+| S-G3 | Endpoint detail, Teams & credentials tab (58) | Per-team access, credential state (set / missing, never the value), last rotation, team gateway version during ring rollout, spend, calls, errors; provider reconciliation KPI | US-65, US-71, US-76 |
+| S-G4 | Inference report (59) | Calls, tokens per second, errors split upstream vs AFS refusals, gateway overhead; per-route latency, TTFT, throughput, error rate, estimated-usage share, cost and effective $/MTok; TTFT chart against the objective | US-73, US-74 |
+| S-G5 | Team detail, Model endpoints (60) | Team's service routes (*All* / *Selected*, service admins only), extra-terms selection, *may declare endpoints* switch, token quotas | US-63, US-66, US-69 |
 
-![Service admin: Model endpoints](docs/ui/46-admin-model-endpoints.png)
-![Service admin: Create endpoint, models and pricing](docs/ui/47-admin-create-model-endpoint.png)
-![Service admin: Endpoint detail, teams and credentials](docs/ui/48-admin-endpoint-detail.png)
-![Service admin: Inference report](docs/ui/49-admin-inference-report.png)
-![Service admin: Team model endpoints](docs/ui/50-admin-team-routes.png)
+![Service admin: Model endpoints](docs/ui/56-admin-model-endpoints.png)
+![Service admin: Create endpoint, models and pricing](docs/ui/57-admin-create-model-endpoint.png)
+![Service admin: Endpoint detail, teams and credentials](docs/ui/58-admin-endpoint-detail.png)
+![Service admin: Inference report](docs/ui/59-admin-inference-report.png)
+![Service admin: Team model endpoints](docs/ui/60-admin-team-routes.png)
 
 ### A.2 Team-admin
 
 | # | Screen | What it shows | Stories |
 |---|---|---|---|
-| T-G1 | Model endpoints (51) | Team gateway status and overhead; service routes with agents using each, credential, health and spend; team endpoints with owner; degraded-route notice | US-66, US-67, US-74 |
-| T-G2 | Create team endpoint (52) | Route name (and the env var it produces), owner, purpose, location tiles (in namespace / corporate / external), Service and port, protocol paths, auth, *Test connection*, pricing mode, models, token quota; equivalent CLI; what agents get | US-67, US-69 |
-| T-G3 | Agent, Models & routes (53) | Bedrock models as in 1.1.0; routes *All* / *Selected* with models, budget control, calls and cost; default route and model; **the exact environment and file the agent receives**; equivalent CLI | US-68 |
-| T-G4 | Team Inference report (54) | Calls, p95 TTFT, errors and refusals, quota use; per-agent table across routes; cost by route with effective $/MTok for capacity routes; TTFT chart | US-73 |
-| T-G5 | Budget & usage (55) | What counts against the cap (per-token routes and Bedrock), what does not (capacity routes, limited by quota), reserved in flight, EKS compute including the team gateway | US-70, US-72 |
+| T-G1 | Model endpoints (61) | Team gateway status and overhead; service routes with agents using each, credential, health and spend; team endpoints with owner; degraded-route notice | US-66, US-67, US-74 |
+| T-G2 | Create team endpoint (62) | Route name (and the env var it produces), owner, purpose, location tiles (in namespace / corporate / external), Service and port, protocol paths, auth, *Test connection*, pricing mode, models, token quota; equivalent CLI; what agents get | US-67, US-69 |
+| T-G3 | Agent, Models & routes (63) | Bedrock models as in 1.1.0; routes *All* / *Selected* with models, budget control, calls and cost; default route and model; **the exact environment and file the agent receives**; equivalent CLI | US-68 |
+| T-G4 | Team Inference report (64) | Calls, p95 TTFT, errors and refusals, quota use; per-agent table across routes; cost by route with effective $/MTok for capacity routes; TTFT chart | US-73 |
+| T-G5 | Budget & usage (65) | What counts against the cap (per-token routes and Bedrock), what does not (capacity routes, limited by quota), reserved in flight, EKS compute including the team gateway | US-70, US-72 |
 
-![Team-admin: Model endpoints](docs/ui/51-ta-model-endpoints.png)
-![Team-admin: Create team endpoint](docs/ui/52-ta-create-team-endpoint.png)
-![Team-admin: Agent models and routes](docs/ui/53-ta-agent-models-routes.png)
-![Team-admin: Inference report](docs/ui/54-ta-team-inference-report.png)
-![Team-admin: Budget and usage with routes](docs/ui/55-ta-budget-routes.png)
+![Team-admin: Model endpoints](docs/ui/61-ta-model-endpoints.png)
+![Team-admin: Create team endpoint](docs/ui/62-ta-create-team-endpoint.png)
+![Team-admin: Agent models and routes](docs/ui/63-ta-agent-models-routes.png)
+![Team-admin: Inference report](docs/ui/64-ta-team-inference-report.png)
+![Team-admin: Budget and usage with routes](docs/ui/65-ta-budget-routes.png)
 
 ### A.3 Team viewer
 
@@ -671,11 +671,11 @@ Same pages, read-only: every changing control is disabled with the tooltip "Need
 
 | # | Screen | What it shows | Stories |
 |---|---|---|---|
-| V-G1 | Model endpoints (56) | T-G1 read-only, with the read-only banner | US-75 |
-| V-G2 | Agent, Models & routes (57) | T-G3 read-only, including the environment the agent receives (no values that are secrets exist there) | US-75 |
+| V-G1 | Model endpoints (66) | T-G1 read-only, with the read-only banner | US-75 |
+| V-G2 | Agent, Models & routes (67) | T-G3 read-only, including the environment the agent receives (no values that are secrets exist there) | US-75 |
 
-![Team viewer: Model endpoints](docs/ui/56-tv-model-endpoints.png)
-![Team viewer: Agent models and routes](docs/ui/57-tv-agent-models-routes.png)
+![Team viewer: Model endpoints](docs/ui/66-tv-model-endpoints.png)
+![Team viewer: Agent models and routes](docs/ui/67-tv-agent-models-routes.png)
 
 ## Appendix B. User stories and acceptance criteria
 
@@ -908,7 +908,7 @@ chaos. Every authorization rule has a denied case.
 | TC-UI-04 | E | Team viewer on V-G1 and V-G2 | Every changing control disabled with "Needs team-admin"; API `AccessDenied` handled if forced |
 | TC-UI-05 | E | Team-admin without `may_add_model_endpoints` | *Create endpoint* disabled with the service-admin tooltip |
 | TC-UI-06 | U | Credential form | Value never in state store, URL, storage or logs; field cleared after submit |
-| TC-UI-07 | E | Visual baselines for screens 46 to 57 | Match approved baselines |
+| TC-UI-07 | E | Visual baselines for screens 56 to 67 | Match approved baselines |
 | TC-UI-08 | U | `@afs/sdk` generated from contract v1.5.0 | New operations typed; pagination and `If-Match` helpers |
 | TC-UI-09 | E | Accessibility of the new pages | WCAG 2.2 AA checks pass |
 
