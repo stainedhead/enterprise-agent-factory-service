@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Proposed; J answered MEG-OQ-1 to MEG-OQ-20 on 2026-11-24 (§13.3); every open question answered (MEG-OQ-1 to MEG-OQ-23, 2026-11-24)**, awaiting approval to implement. Nothing here is built, and no contract, schema or release changes until J approves. Release 1.1.0 is not changed by this document. Target release if approved: 1.2.0 in every repository (`-db` and `-restapi` in lockstep) |
+| **Status** | **Proposed; J answered every open question (MEG-OQ-1 to MEG-OQ-23) on 2026-11-24 (§13.3)**, awaiting approval to implement. Nothing here is built, and no contract, schema or release changes until J approves. Release 1.1.0 is not changed by this document. Target release if approved: 1.2.0 in every repository (`-db` and `-restapi` in lockstep) |
 | **Kind** | Change PRD to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md) (BUD-2, BUD-3, EXT-6, RPT-7), the [team orchestration agent PRD](team-orchestration-agent-PRD.md) (model access, section 6.9) and the [gateway contract](docs/contracts/gateway-contract.md) v1.1.0 |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
