@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Proposed; J answered MEG-OQ-1 to MEG-OQ-20 on 2026-11-24 (§13.3); MEG-OQ-21 to MEG-OQ-23 are new (Nous Portal, OpenCode Go, provider policy)**, awaiting approval to implement. Nothing here is built, and no contract, schema or release changes until J approves. Release 1.1.0 is not changed by this document. Target release if approved: 1.2.0 in every repository (`-db` and `-restapi` in lockstep) |
+| **Status** | **Proposed; J answered MEG-OQ-1 to MEG-OQ-20 on 2026-11-24 (§13.3); MEG-OQ-21 and MEG-OQ-22 answered; MEG-OQ-23 open (provider policy scope)**, awaiting approval to implement. Nothing here is built, and no contract, schema or release changes until J approves. Release 1.1.0 is not changed by this document. Target release if approved: 1.2.0 in every repository (`-db` and `-restapi` in lockstep) |
 | **Kind** | Change PRD to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md) (BUD-2, BUD-3, EXT-6, RPT-7), the [team orchestration agent PRD](team-orchestration-agent-PRD.md) (model access, section 6.9) and the [gateway contract](docs/contracts/gateway-contract.md) v1.1.0 |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
@@ -54,9 +54,8 @@ reserve-and-settle math AFS already uses for Bedrock.
    GenAI semantic conventions, landing in the platform's metrics and trace stores, the `usage_events` ledger and,
    optionally, the team's own log destination. Route health becomes a status condition and a notification.
 7. **Service admins control external providers** (section 7.4, J 2026-11-24): one switch turns all external inference
-   off, and each provider (OpenAI, OpenRouter, Nous Portal, OpenCode Go and others) can be turned off on its own. Off
+   off, and each provider (OpenAI, OpenRouter, Nous Portal, OpenCode and others) can be turned off on its own. Off
    refuses calls, removes the routes and the gateways' egress, and closes direct access, without deleting anything.
-   Flat-fee plans such as OpenCode Go are a `subscription` pricing mode whose fee is charged and capped (section 9).
 
 This partly reverses D7 / EXT-6 / RPT-7: a non-Bedrock LLM reached **through a route** is metered and capped; one
 reached directly as an external system stays *Unmetered*, and direct access to a provider is blocked while a route for
@@ -266,14 +265,14 @@ All tables in schema `afs`, team-scoped tables with `team_id`, composite foreign
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `model_endpoints` | `id` (`mep_…`), `team_id` (NULL = service), `slug` (route name, `^[a-z][a-z0-9-]{1,30}$`, unique across the service and each team; a team cannot reuse a service slug; `bedrock` reserved), `display_name`, `description`, `owner`, `purpose` (required for team endpoints), `provider` (`openai`, `openrouter`, `nous`, `opencode`, `azure_openai`, `other`; set by service admins on service endpoints and derived from the host for team endpoints, section 7.4), `protocol` (`openai_chat` in 1.2.0; `openai_responses`, `openai_embeddings` allowed as additional paths), `location` (`external` internet FQDN, `corporate` host on the corporate network, `in_namespace` a Service name in the team namespace; `in_namespace` only for team endpoints), `base_url` (https except `in_namespace`, which may be http inside WireGuard, recorded like PC-D7), `ca_bundle` (optional PEM, not a secret), `auth_kind` (`none`, `bearer`, `header` with `auth_header`), `metrics_port` (optional, `in_namespace` only, MEG-OQ-18), `credential_mode` (`shared` one credential, `per_team` one per team for service endpoints), `pricing_mode` (`per_token`, `capacity`, `free`, `subscription`), `requires_terms`, `enabled`, `timeout_seconds`, `max_body_mib` | No credential value, only metadata. `external_system_id` optional link to the external systems catalog entry of the same provider, used for direct-access policy (MEG-OQ-5) |
+| `model_endpoints` | `id` (`mep_…`), `team_id` (NULL = service), `slug` (route name, `^[a-z][a-z0-9-]{1,30}$`, unique across the service and each team; a team cannot reuse a service slug; `bedrock` reserved), `display_name`, `description`, `owner`, `purpose` (required for team endpoints), `provider` (`openai`, `openrouter`, `nous`, `opencode`, `azure_openai`, `other`; set by service admins on service endpoints and derived from the host for team endpoints, section 7.4), `protocol` (`openai_chat` in 1.2.0; `openai_responses`, `openai_embeddings` allowed as additional paths), `location` (`external` internet FQDN, `corporate` host on the corporate network, `in_namespace` a Service name in the team namespace; `in_namespace` only for team endpoints), `base_url` (https except `in_namespace`, which may be http inside WireGuard, recorded like PC-D7), `ca_bundle` (optional PEM, not a secret), `auth_kind` (`none`, `bearer`, `header` with `auth_header`), `metrics_port` (optional, `in_namespace` only, MEG-OQ-18), `credential_mode` (`shared` one credential, `per_team` one per team for service endpoints), `pricing_mode` (`per_token`, `capacity`, `free`), `requires_terms`, `enabled`, `timeout_seconds`, `max_body_mib` | No credential value, only metadata. `external_system_id` optional link to the external systems catalog entry of the same provider, used for direct-access policy (MEG-OQ-5) |
 | `endpoint_models` | `(endpoint_id, model_name)`, `max_output_tokens`, `context_tokens`, `enabled` | `model_name` is what the client sends in `model`; free text, validated as printable ≤ 200 chars |
 | `endpoint_model_prices` | `(endpoint_id, model_name, effective_from)`, `input_per_mtok_usd`, `output_per_mtok_usd`, `cached_input_per_mtok_usd`, `request_fee_usd` (optional per-call fee), `source` (`manual`, `price_list`, `transfer`) | `numeric`, USD. Effective-dated like `model_prices` |
 | `endpoint_price_proposals` | as `model_price_proposals` | From LiteLLM's list or a provider's published prices; approved by a service admin |
 | `endpoint_credentials` | `(endpoint_id, team_id NULL)`, `secret_arn`, `rotated_at`, `status` | ARN at the managed path of section 11; `team_id` set for `per_team` and team endpoints |
 | `team_model_endpoints` | `(team_id, endpoint_id)`, `selected_by` (`team_admin` or `service_admin`) | The team's opt-in rows. Insert of a `requires_terms` endpoint by a caller who is not a service admin → `42501` |
 | `agent_model_endpoints`, `pool_model_endpoints` | `(team_id, agent_id\|pool_id, endpoint_id)` | Selection rows when the agent's or pool's `route_access = selected` |
-| `endpoint_capacity_costs` | `(endpoint_id, team_id, effective_from)`, `monthly_usd` or `hourly_usd`, `allocation` (`by_tokens`, `by_agent`) | Optional, for `capacity` routes not costed by CUR (section 9.3); also holds the per-key fee of `subscription` routes (section 9.1) |
+| `endpoint_capacity_costs` | `(endpoint_id, team_id, effective_from)`, `monthly_usd` or `hourly_usd`, `allocation` (`by_tokens`, `by_agent`) | Optional, for `capacity` routes not costed by CUR (section 9.3) |
 | `inference_providers` | `provider` (key), `display_name`, `hosts` (FQDN globs, for example `api.openai.com`, `*.openai.azure.com`), `enabled`, `disabled_reason`, `changed_by`, `changed_at` | Service-wide, no `team_id`. Seeded with the providers of section 9.4; `other` matches any external host not listed. Audited on every change |
 
 
@@ -381,7 +380,6 @@ with one OpenAI client. Agents with Bedrock models receive `AFS_LLM_BEDROCK_BASE
 | `per_token` | OpenAI, OpenRouter, Azure OpenAI, any priced provider; an internal platform with a **transfer price** set by service admins | Yes | From `endpoint_model_prices` (+ optional request fee) | **Yes**, reserve and settle against the team budget |
 | `capacity` | Self-hosted inference whose cost is the hardware (team GPU nodes, a reserved cluster) | Yes, tokens | Zero per call; cost comes from CUR (EKS split cost by namespace) or `endpoint_capacity_costs`, allocated daily | No (reported only, MEG-OQ-7) |
 | `free` | Internal services charged elsewhere, evaluation endpoints | Yes, tokens | Zero | No (reported only) |
-| `subscription` | A flat-fee plan with the provider's own usage allowance, for example OpenCode Go (section 9.4) | Yes, tokens and the provider's allowance meters | Zero per call; the plan fee per key in `endpoint_capacity_costs` (`monthly_usd`) is charged to the team when its key is set and on each renewal, allocated to agents by token share | **Yes, on the fee**: a team whose remaining budget cannot cover the next fee cannot opt in or renew. Use is bounded by the provider's allowance, not by AFS |
 
 ### 9.2 Reservation and settlement on `per_token` routes
 
@@ -437,7 +435,7 @@ with one provider project or key per team, so the provider's figures split by te
 | OpenAI | Route, OpenAI protocol | Organization usage and costs API, per project, pulled daily with an admin key at `<prefix>/_service/billing/<route>` |
 | OpenRouter | Route, OpenAI protocol; `usage.cost` per call | Key usage and credits API, pulled daily; per-call `usage.cost` already settles each call (§9.2) |
 | **Nous Portal** (J, 2026-11-24) | Route, OpenAI protocol (Nous describes its inference API as OpenAI-compatible chat completions) | **No usage or cost API is documented** (checked 2026-11-24): usage, credits and teams are managed in the portal UI only. Decided (J, MEG-OQ-21): a service admin uploads the portal's monthly usage statement (CSV or PDF figures entered by hand) and AFS reconciles monthly; until then the route shows *Not reconciled* beside its gateway cost. Switch to a daily pull if Nous publishes an API |
-| **OpenCode Go** (J, 2026-11-24) | Route, `subscription` mode; base `https://opencode.ai/inference/go` | Nothing to reconcile per token: the cost is the fixed plan fee. `afs-billing` reads the allowance meters (`GET /inference/go/v1/usage`: 5-hour, weekly and monthly percent used) daily per team key, shows them on the route and alerts at 80%. No invoice or cost export API is documented, so fees are checked against the monthly invoice by hand |
+| **OpenCode Console** (pay-as-you-go, J, MEG-OQ-22) | Route, OpenAI protocol at `https://opencode.ai/inference/openai/v1`; per-call `usage.cost` in USD | **No usage or billing API is documented** (checked 2026-11-24); the Console's *Export usage* gives a CSV of daily totals by day, model and key holder. Per-call `usage.cost` already settles each call (§9.2). A service admin imports the CSV monthly, as for Nous (MEG-OQ-21); *Not reconciled* until then |
 | Others (Azure OpenAI and so on) | Route | Not reconciled in 1.2.0; gateway cost only |
 
 **Nous Portal and Hermes models (J, 2026-11-24).** Nous Research's Hermes models are offered as a built-in catalog
@@ -450,47 +448,29 @@ whether a portal account can hold one key per team. If usage is missing, calls s
 out. The same Hermes models are also on OpenRouter (`nousresearch/hermes-4-…`), which returns `usage.cost` and has a usage
 API: teams that need daily reconciliation today can use Hermes through the `openrouter` route.
 
-**OpenCode Go (J, 2026-11-24).** Checked against OpenCode's own pages on 2026-11-24
-([docs](https://opencode.ai/docs/go/), [plans](https://opencode.ai/go)):
+**OpenCode (J, 2026-11-24, MEG-OQ-22).** J asked about the OpenCode Go plan. Go is a flat monthly subscription with
+a usage allowance, meant for coding agents, monitored for abuse and not covering service accounts, so J chose OpenCode's
+**pay-as-you-go Console** instead. It is an ordinary `per_token` route with hard caps. Checked against OpenCode's own
+pages on 2026-11-24 ([models and prices](https://opencode.ai/docs/console/models/),
+[inference API](https://opencode.ai/docs/console/api/inference), [billing](https://opencode.ai/docs/console/billing)):
 
-- *What it is.* A subscription to open-weight coding models (Kimi, GLM, Qwen, DeepSeek, MiniMax and others, plus a few
-  closed models; the docs say the list "may change"). Go is $10 a month, Go Plus $40, Go Teams $20 per member (two
-  minimum).
-- *Limits.* Each plan has a monthly allowance expressed as a dollar equivalent per model. A 5-hour window may use 20%
-  of it and a week 50%. There are no token-based limits.
-- *API.* Base `https://opencode.ai/inference/go`, bearer key, a model list at `/v1/models`, embeddings on an OpenAI
-  path. The docs say every text model "works through the other APIs, which Console translates". The exact Chat
-  Completions path and the per-model API are on a console page we could not read, so they are confirmed with the
-  conformance fixture.
-- *Usage and cost.* Responses report how much each call counted against the allowance (`opencode.allowance`). Whether
-  standard `usage` token fields are always present is not documented. The usage endpoint gives percent used and the
-  reset time per window. No billing export is documented.
-- *Extra Usage.* An optional setting lets Go fall back to a pay-as-you-go balance when the allowance runs out, instead
-  of refusing calls.
-
-How AFS handles it:
-
-- A built-in catalog entry `opencode-go`, provider `opencode`, pricing mode `subscription`, `credential_mode = per_team`
-  (each Go key has its own allowance, so one key per team keeps one team from using up another's), and
-  `requires_terms = true`, so only a service admin selects it for a team. It ships **off**.
-- *Caps and costing.* The plan fee is the cost. It is charged to the team as a fixed line when the team's key is set
-  and on each renewal, and allocated to its agents by token share each day, like `capacity`. The hard cap applies to
-  the fee: a team that cannot cover the next fee cannot opt in or renew. Per-call cost is zero, so calls do not reserve
-  spend. When the provider's allowance is used up, its refusal is passed through as `429 Throttled` with
-  `details.reason = provider_allowance_exhausted` and the reset time, so agents and dashboards can tell it apart from
-  an AFS budget refusal.
-- *Extra Usage must be off.* With it on, overage is billed per token outside anything the gateway can see or cap. The
-  credential form requires the admin to confirm it is off. The API does not tell us, so the daily meter check flags a
-  key whose monthly meter goes past 100%.
-- *Required headers.* Go needs a stable session id in `x-opencode-session` and a real client user agent, and says apps
-  that do not send a session id cannot use Go models. The gateway passes through the agent's own header (Hermes,
-  OpenCode and Claude Code are among the clients OpenCode lists as validated) or derives a stable one from the agent
-  id and run. Its user agent is `afs-gateway/<version>`.
-- *Terms (MEG-OQ-22).* OpenCode says Go is "designed for OpenCode and other coding agents" and that traffic is
-  monitored for abuse. Go Teams does not cover service accounts. One key shared by a team's agents through a gateway
-  may be outside the plan's intended use, so AFS treats Go as *Extra terms* and asks J to decide before it ships. The
-  pay-as-you-go OpenCode Console balance is the alternative: it has per-token prices and would be a normal `per_token`
-  route with caps.
+- *API.* OpenAI, Anthropic and Gemini-compatible APIs under `https://opencode.ai/inference`. The route uses
+  `/inference/openai/v1` (Chat Completions for open models such as Kimi, GLM, MiniMax and DeepSeek; Responses for GPT and
+  Grok models). Models whose native API is Anthropic Messages are not offered on this route in 1.2.0. Bearer key.
+- *Usage and cost.* Responses carry the native usage fields and `usage.cost` in USD (the amount charged), with the final
+  stream chunk when `stream_options.include_usage` is set. The gateway settles to the larger of `usage.cost` and the
+  token-price cost, as for OpenRouter.
+- *Prices.* Per-1M-token prices are published per model and loaded as price proposals for a service admin to approve.
+  Credits are prepaid per workspace, with a card processing fee of 4.6% plus $0.31 on each purchase that is not in
+  `usage.cost`; it shows as reconciliation variance unless a service admin includes it in the approved prices.
+- *Keys.* One OpenCode **service account per team** (Settings, Service accounts), each with a restricted key that may
+  only call models, so `credential_mode = per_team` and the usage export splits by team. OpenCode's own monthly budget
+  per service account can be set as a second safety net; AFS's cap stays the authority.
+- *Errors.* An empty balance returns `402` from OpenCode, which the gateway maps to `503 Unavailable` with
+  `details.reason = provider_balance_exhausted`, so agents do not mistake it for their team's AFS budget. An OpenCode
+  budget refusal (`429`) is passed through as `429 Throttled` with `details.reason = provider_budget_exhausted`.
+- *Catalog.* Built-in entry `opencode`, provider `opencode`, shipped off like every service endpoint. Free-tier models
+  are refused to non-OpenCode clients, so only paid models are listed.
 
 Hermes the **models** are separate from Hermes the **agent harness** (Hermes Agent, MIT), which is AFS's default agent
 runtime. The harness is unaffected: it calls whichever routes and models the agent has, through the team gateway.
@@ -645,7 +625,7 @@ tests and `seedOtherTeams` rows for every new team-owned table.
 - `afs-reconciler` (telemetry): route health conditions and `model_endpoint.degraded` / `recovered` events; OTel
   Collector routing of team spans to team log destinations when opted in.
 - `afs-billing`: endpoint price proposals from LiteLLM's list and provider pages; daily OpenAI and OpenRouter cost
-  pulls (MEG-OQ-11); Nous Portal monthly statements; OpenCode Go plan fees and daily allowance meters;
+  pulls (MEG-OQ-11); Nous Portal monthly statements and OpenCode usage CSV imports;
   capacity allocation; reports by route.
 - `afs-api`: about 16 operations (contract v1.5.0): `ListModelEndpoints`, `GetModelEndpoint`, `CreateModelEndpoint`,
   `UpdateModelEndpoint`, `DeleteModelEndpoint` (service and team scope), `PutEndpointModels`,
@@ -705,7 +685,7 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`, `get-inference-p
 | MEG-D8 | Route hosts are reachable from the team gateway only | Without this, caps are advisory |
 | MEG-D9 | Pass-through to OpenAI-compatible endpoints, plus Chat Completions → Converse for Bedrock in `afs-gateway` (J: MEG-OQ-8, MEG-OQ-20); no fail-over or content inspection; AFS never hosts inference (J: MEG-OQ-13) | One client protocol for every model, one enforcement path |
 | MEG-D11 | Service admins can turn off one external provider or all external inference; off refuses calls, removes routes and egress, and closes direct `llm` access, without deleting anything (J, 2026-11-24) | Enterprises that restrict external access can enforce it in one place (§7.4) |
-| MEG-D12 | Flat-fee plans are a `subscription` pricing mode: the fee is the cost and is capped; the provider's allowance bounds use (OpenCode Go, J asked 2026-11-24) | A flat fee has no meaningful per-call price to reserve (§9.1, §9.4) |
+| MEG-D12 | OpenCode is offered through its pay-as-you-go Console as a `per_token` route, not the Go subscription (J: MEG-OQ-22) | Per-call USD cost fits reserve-and-settle and hard caps; Go's terms target coding agents and exclude service accounts |
 | MEG-D10 | The gateway emits OpenTelemetry with the GenAI semantic conventions plus `afs.*` tenancy attributes; agent ids on spans and in the ledger, never as metric labels; content capture off | One standard signal for every backend, at a cardinality the metrics store can hold (§10) |
 
 ### 13.2 Risks
@@ -744,7 +724,7 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`, `get-inference-p
 | MEG-OQ-19 | With opt-in (MEG-OQ-4), who opts a team in to a service endpoint? | **Decided (J, 2026-11-24): team-admins opt their team in to any switched-on service endpoint; endpoints flagged Extra terms still need a service admin** |
 | MEG-OQ-20 | How is OpenAI-to-Bedrock translation built (MEG-OQ-8)? | **Decided (J, 2026-11-24): in `afs-gateway`, mapping Chat Completions to Bedrock Converse for every Bedrock model, on the same reserve-and-settle path and team inference profiles** |
 | MEG-OQ-21 | Nous Portal documents no usage or cost API. How is it reconciled? | **Decided (J, 2026-11-24): monthly statement entered by a service admin; Not reconciled until then; daily pull if Nous publishes an API; OpenRouter stays the daily-reconciled path to Hermes models** |
-| MEG-OQ-22 | OpenCode Go is a personal coding-agent subscription that monitors for abuse and excludes service accounts. Offer it through team gateways? | Offer it as *Extra terms* (service admin selects per team), one key per team, Extra Usage off, after OpenCode confirms gateway use is allowed; until then use the OpenCode Console pay-as-you-go balance as a `per_token` route |
+| MEG-OQ-22 | OpenCode Go is a personal coding-agent subscription that monitors for abuse and excludes service accounts. Offer it through team gateways? | **Decided (J, 2026-11-24): use OpenCode's pay-as-you-go Console instead, as a `per_token` route with caps; the Go plan is not offered** |
 | MEG-OQ-23 | Should the single *External inference off* switch also cover `corporate` endpoints? | No: corporate endpoints are inside the enterprise network; each keeps its own service switch |
 
 ## 14. Glossary
@@ -755,14 +735,15 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`, `get-inference-p
 | Model endpoint | A configured OpenAI-compatible upstream (service or team level) |
 | Route | The name agents use for an endpoint, in URLs and environment variable names |
 | Route model | A model name served on a route, with limits and prices |
-| Pricing mode | How a route's calls are costed: `per_token`, `capacity`, `free` or `subscription` |
+| Pricing mode | How a route's calls are costed: `per_token`, `capacity` or `free` |
 | Provider policy | The service admins' switches for external inference as a whole and for each external provider (§7.4) |
 | Transfer price | A per-token internal price service admins set for a shared internal inference platform |
 
 ## 15. Review record
 
-- 2026-11-24: J asked to add OpenCode Go and to let service admins turn external providers off; `subscription` pricing
-  mode, §7.4 provider policy, screen 68, US-78, US-79, MEG-D11, MEG-D12, MEG-OQ-22, MEG-OQ-23 and their tests added.
+- 2026-11-24: J asked to add OpenCode Go and to let service admins turn external providers off; §7.4 provider policy,
+  screens 68 and 68a, US-78, US-79, MEG-D11, MEG-D12, MEG-OQ-22, MEG-OQ-23 and their tests added. J chose OpenCode's
+  pay-as-you-go Console over the Go subscription (MEG-OQ-22), so it is a normal per-token route.
 
 - 2026-11-24: drafted from J's question in the project thread; proposal only, awaiting J's answers to section 13.3.
 - 2026-11-24: J added inference-layer telemetry as a goal; section 10 added (G7, MEG-D10, MEG-OQ-17, MEG-OQ-18).
@@ -797,7 +778,7 @@ page's *Models* tab becomes **Models & routes**.
 | S-G3 | Endpoint detail, Teams & credentials tab (58) | Per-team access, credential state (set / missing, never the value), last rotation, team gateway version during ring rollout, spend, calls, errors; provider reconciliation KPI | US-65, US-71, US-76 |
 | S-G4 | Inference report (59) | Calls, tokens per second, errors split upstream vs AFS refusals, gateway overhead; per-route latency, TTFT, throughput, error rate, estimated-usage share, cost and effective $/MTok; TTFT chart against the objective | US-73, US-74 |
 | S-G5 | Team detail, Model endpoints (60) | The team's opted-in service routes (who selected each), extra-terms selection by service admins, *may declare endpoints* switch | US-63, US-66 |
-| S-G6 | Model endpoints, Provider policy (68, 68a) | The external inference switch; one row per external provider with hosts, routes, teams and direct systems affected and an on/off switch; OpenCode Go shown off with its reason; what is not affected; the confirmation before *Turn off all external inference*, listing the impact | US-78, US-79 |
+| S-G6 | Model endpoints, Provider policy (68, 68a) | The external inference switch; one row per external provider with hosts, routes, teams and direct systems affected and an on/off switch; unlisted external hosts shown off with its reason; what is not affected; the confirmation before *Turn off all external inference*, listing the impact | US-78, US-79 |
 
 ![Service admin: Model endpoints](docs/ui/56-admin-model-endpoints.png)
 ![Service admin: Create endpoint, models and pricing](docs/ui/57-admin-create-model-endpoint.png)
@@ -976,7 +957,7 @@ affect only that team. *(§5.3)*
 - Given team A's gateway is crash-looping or saturated by slow upstream streams, then team B's calls see no change in
   error rate or p99 overhead.
 
-### B.6 Provider policy and subscription plans (J, 2026-11-24)
+### B.6 Provider policy and OpenCode (J, 2026-11-24)
 
 **US-78 · Turn external providers off.** As a service admin in an enterprise that limits external access, I want to
 turn off one external provider, or all external inference, so that no agent can reach it through AFS. *(§7.4; S-G6)*
@@ -998,19 +979,17 @@ turn off one external provider, or all external inference, so that no agent can 
 - A team-admin or team viewer sees *Off by provider policy* on the affected routes and cannot change the policy (API
   `403`, audited).
 
-**US-79 · Offer a flat-fee plan as a route.** As a service admin, I want to offer a subscription plan such as
-OpenCode Go to selected teams, so that its fixed cost is charged and capped and its use is visible. *(§9.1, §9.4;
-S-G1, S-G6)*
-- Given `opencode-go` is switched on, then only a service admin can select it for a team (*Extra terms*), and each team
-  needs its own key.
-- Given I set a team's key and confirm *Extra Usage is off*, then the plan fee is charged to the team as a fixed line,
-  allocated to its agents by token share each day; the form refuses to save without the confirmation.
-- Given the team's remaining budget is below the next fee, then the opt-in or renewal is refused with
-  `402 BudgetExceeded`.
-- Given the provider's allowance is used up, then the agent receives `429 Throttled` with
-  `details.reason = provider_allowance_exhausted` and the reset time, and the call is recorded as an upstream refusal,
-  not an AFS budget refusal.
-- The route shows the allowance meters (5-hour, weekly, monthly percent used) from the daily read, and an alert at 80%.
+**US-79 · Offer OpenCode pay-as-you-go as a route.** As a service admin, I want OpenCode's open models available to
+teams through a capped route, so that teams can use them with the same metering as other providers. *(§9.4; S-G1, S-G6)*
+- Given the built-in `opencode` endpoint is switched on and a team opts in, when I set the team's key from its OpenCode
+  service account, then calls on the route reserve and settle like any `per_token` route and settle to the larger of
+  `usage.cost` and the token-price cost, recording both.
+- Given the OpenCode balance is empty, then the agent receives `503 Unavailable` with
+  `details.reason = provider_balance_exhausted` and the reservation is released.
+- Given an OpenCode service-account budget refusal, then the agent receives `429 Throttled` with
+  `details.reason = provider_budget_exhausted`.
+- Given I import OpenCode's usage CSV for a month, then variance per team is computed and alerted over 5%; before the
+  import the route shows *Not reconciled*.
 
 ## Appendix C. Test cases
 
@@ -1066,7 +1045,7 @@ chaos. Every authorization rule has a denied case.
 | TC-GW-24 | U | Stream where the client did not request usage, on routes and on `bedrock` | No extra usage chunk reaches the client (MEG-OQ-9) |
 | TC-GW-22 | C | Bedrock and Anthropic paths of contract v1.1.0 through the team gateway | Existing conformance suite passes unchanged |
 | TC-GW-26 | U | Change-feed notification that a provider is off | Next call on its routes `403 external_provider_blocked` within 60 s; nothing reserved or forwarded |
-| TC-GW-27 | C | OpenCode Go fixture: call with and without the agent's `x-opencode-session`; allowance exhausted | Header passed through or derived stably per agent run; user agent `afs-gateway/<version>`; no reservation; exhausted → `429` `provider_allowance_exhausted` with reset time |
+| TC-GW-27 | C | OpenCode Console fixture: Chat Completions with `usage.cost`, streaming with `include_usage`, `402` empty balance, `429` budget | Settles to the larger cost; `503 provider_balance_exhausted` and `429 provider_budget_exhausted`, reservations released |
 
 ### C.3 Reconciler and cluster isolation
 
@@ -1107,7 +1086,7 @@ chaos. Every authorization rule has a denied case.
 | TC-BL-03 | I | Price list differs from the price in force | One pending proposal per model; none when equal |
 | TC-BL-04 | I | OpenRouter key usage fixture vs ledger | Variance computed per team key |
 | TC-BL-05 | I | Nous Portal route with no statement uploaded; then a monthly statement entered | *Not reconciled* shown; after entry, monthly variance computed and alerted over 5% |
-| TC-BL-06 | I | OpenCode Go key set mid-month, renewal, team below the fee, recorded usage meters at 85% and 104% | Fee charged once per period and allocated by token share; renewal refused `402`; alert at 80%; 104% flagged as possible Extra Usage |
+| TC-BL-06 | I | OpenCode usage CSV (daily totals by model and service account) vs ledger | *Not reconciled* before import; after import, variance per team computed and alerted over 5% |
 | TC-GW-25 | C | Nous Portal fixture: Chat Completions, streaming with `include_usage` | Usage parsed when present; when absent, settled to reservation and marked `estimated` |
 
 ### C.6 Console (`-website`) and SDK

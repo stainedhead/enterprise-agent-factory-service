@@ -68,7 +68,7 @@ SVC_ROUTES = [
     ("openrouter", "OpenRouter", "Chat", "ext", "Per token", ("met", "cap", "terms"), "3", ("ok", "Healthy"), "Per team (2 of 3 set)"),
     ("ml-platform", "Enterprise ML platform", "Chat, Embeddings", "corp", "Per token · transfer price", ("met", "cap"), "26", ("warn", "Degraded"), "Shared key"),
     ("nous-portal", "Nous Portal (Hermes models)", "Chat", "ext", "Per token", ("met", "cap"), "4", ("ok", "Healthy"), "Per team (4 of 4 set)"),
-    ("opencode-go", "OpenCode Go (subscription)", "Chat", "ext", "Subscription · fee per key", ("met", "sub", "terms"), "0", ("pend", "No traffic"), "Per team"),
+    ("opencode", "OpenCode Console (pay-as-you-go)", "Chat, Responses", "ext", "Per token", ("met", "cap"), "2", ("ok", "Healthy"), "Per team (2 of 2 set)"),
     ("eval-sandbox", "Evaluation sandbox", "Chat", "corp", "Free", ("met",), "0", ("pend", "Disabled"), "None"),
 ]
 
@@ -76,7 +76,7 @@ SVC_ROUTES = [
 def svc_rows(sel=None):
     out = []
     for r, d, p, l, pm, bs, teams, (hk, ht), cred in SVC_ROUTES:
-        en = st("pend", "Off") if r == "eval-sandbox" else st("err", "Off by provider policy") if r == "opencode-go" else st("ok", "On")
+        en = st("pend", "Off") if r == "eval-sandbox" else st("ok", "On")
         out.append(f'<tr class="{"sel" if r == sel else ""}"><td><span class="radio{" on" if r == sel else ""}"></span></td><td><a class="rt">{r}</a><div class="small muted">{d}</div></td>'
                    f'<td class="small">{p}</td><td>{loc(l)}</td><td class="small">{pm}</td><td>{" ".join(mb(b) for b in bs)}</td>'
                    f'<td>{en}</td><td class="num">{teams}</td><td>{st(hk, ht)}</td><td class="small">{cred}</td></tr>')
@@ -90,7 +90,7 @@ gpage("56-admin-model-endpoints", "admin", admin_nav_gw("endpoints"), f"""
 <div class="desc">OpenAI-compatible model services agents reach through their team gateway, by route name. Every call through a route is metered; per-token routes count against team budgets and hard caps.</div></div>
 <div class="btns"><span class="btn dd">Actions</span><span class="btn p">Create endpoint</span></div></div>
 <div class="alert warn"><span class="ic">⚠</span><div><b>ml-platform is degraded for 4 teams.</b> p95 time to first token is 7.8 s over the last 15 minutes (objective 5 s). Calls still flow; teams were notified. <a>Open inference report</a></div></div>
-<div class="alert"><span class="ic">ⓘ</span><div class="small"><b>Provider policy:</b> external inference allowed · 4 of 5 external providers on · OpenCode Go off (waiting for the provider to confirm gateway use). <a>Open provider policy</a></div></div>
+<div class="alert"><span class="ic">ⓘ</span><div class="small"><b>Provider policy:</b> external inference allowed · 5 listed providers on · unlisted external hosts off. <a>Open provider policy</a></div></div>
 <div class="card"><div class="ch"><div><h2>Service endpoints <span class="cnt">(7)</span></h2><div class="sub">Switched-on endpoints are offered to every team; each team opts in. Endpoints with extra terms are selected per team by a service admin. Off means off for every team.</div></div>
 <div class="btns"><span class="btn dis">Turn off</span><span class="btn">Edit</span></div></div>
 <div class="tools"><div class="filter">🔍 Find endpoints</div><span class="sel">Any location ▾</span><span class="sel">Any pricing mode ▾</span><div class="pager">‹ <b>1</b> › &nbsp; ⚙</div></div>
@@ -417,8 +417,8 @@ PROV = [
     ("OpenRouter", "openrouter.ai", "openrouter", "3", "1 (override for 1 team)", True, ""),
     ("Nous Portal", "inference-api.nousresearch.com", "nous-portal", "4", "1", True, ""),
     ("Azure OpenAI", "*.openai.azure.com", "azure-oai-east (team)", "1", "0", True, ""),
-    ("OpenCode Go", "opencode.ai", "opencode-go", "0", "0", False, "Waiting for OpenCode to confirm gateway use (MEG-OQ-22)"),
-    ("Other external hosts", "any external host not listed", "none today", "0", "0", True, ""),
+    ("OpenCode Console", "opencode.ai", "opencode", "2", "0", True, ""),
+    ("Other external hosts", "any external host not listed", "none", "0", "0", False, "Only listed providers may be used"),
 ]
 
 
@@ -462,11 +462,11 @@ PROV_BODY = f"""
 <tr><td>{loc('ns')}</td><td class="small">Runs in the team's namespace</td><td class="small">The team's endpoint</td></tr></table></div></div>
 <div class="card"><div class="ch"><h2>Recent changes</h2><a>Audit log</a></div>
 <table><tr><th>When</th><th>Change</th><th>By</th></tr>
-<tr><td class="small">2026-11-24 14:02</td><td class="small">OpenCode Go <b>off</b>: waiting for the provider to confirm gateway use</td><td class="small">Priya Raman</td></tr>
+<tr><td class="small">2026-11-24 14:02</td><td class="small">Other external hosts <b>off</b>: only listed providers may be used</td><td class="small">Priya Raman</td></tr>
 <tr><td class="small">2026-11-20 09:15</td><td class="small">Nous Portal <b>on</b></td><td class="small">Priya Raman</td></tr></table></div>
 </div>
 <div class="card"><div class="ch"><h2>Equivalent CLI</h2></div><div class="cb"><div class="code">afs model-endpoints put-inference-provider-policy --external-providers off \\<br>&nbsp; --reason "Enterprise policy: no external inference providers"</div>
-<div class="code" style="margin-top:8px">afs model-endpoints update-inference-provider --provider opencode --no-enabled \\<br>&nbsp; --reason "Waiting for the provider to confirm gateway use"</div></div></div>
+<div class="code" style="margin-top:8px">afs model-endpoints update-inference-provider --provider other --no-enabled \\<br>&nbsp; --reason "Only listed providers may be used"</div></div></div>
 """
 
 gpage("68-admin-provider-policy", "admin", admin_nav_gw("endpoints"), PROV_BODY)
