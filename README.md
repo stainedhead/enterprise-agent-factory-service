@@ -54,9 +54,11 @@ does not scale and is hard to govern. AFS makes it a managed service:
 The goals and non-goals are in [INTENT.md](INTENT.md); the full requirements are in the
 [initial PRD](enterprise-agent-factory-service-initial-PRD.md).
 Proposed changes to it are change PRDs at this root:
-[Paperclip team collaboration](paperclip-team-collaboration-PRD.md) (built, release 1.0.1) and
+[Paperclip team collaboration](paperclip-team-collaboration-PRD.md) (built, release 1.0.1),
 [Team orchestration agent](team-orchestration-agent-PRD.md) (built, release 1.1.0), which makes an
-orchestration agent part of every team and adds service, team and agent model access.
+orchestration agent part of every team and adds service, team and agent model access, and
+[Team model gateway](model-endpoint-gateway-PRD.md) (proposed, not built), a per-namespace gateway that
+meters and caps OpenAI-compatible model endpoints, including internal inference.
 
 ## What a team gets
 
