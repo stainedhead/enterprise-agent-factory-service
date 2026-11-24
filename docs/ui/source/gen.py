@@ -1219,4 +1219,7 @@ page("31-tv-collaboration", "tv", team_nav("collab", "tv", collab=True), collab_
 # Orchestration agent redesign screens (team-orchestration-agent-PRD.md)
 exec((pathlib.Path(__file__).parent / "orch_screens.py").read_text())
 
+# Team model gateway proposal screens (model-endpoint-gateway-PRD.md, not built)
+exec((pathlib.Path(__file__).parent / "gw_screens.py").read_text())
+
 print("\n".join(sorted(p.name for p in OUT.glob("*.html"))))

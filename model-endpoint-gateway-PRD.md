@@ -353,7 +353,8 @@ case, at most one in-flight call per pod. It holds **only if agents cannot reach
   admins from the platform's chargeback rate, or `capacity` with a monthly or hourly amount in
   `endpoint_capacity_costs`, allocated to agents by token share each day.
 - Token quotas (`token_quotas`) give `capacity` and `free` routes a hard limit that is not money: reserve output-token
-  worst case, settle actual, refuse with `429 QuotaExceeded` (not `402`, because no money is involved; MEG-OQ-7).
+  worst case, settle actual, refuse with `402` and code `QuotaExceeded` (a distinct code from `BudgetExceeded`, because no money is involved;
+  `402` rather than `429` because OpenAI SDKs retry `429` by default, and a quota does not clear on retry; MEG-OQ-7).
 
 ### 9.4 Reconciliation against the provider's bill
 
@@ -398,7 +399,7 @@ AFS does not run. Nothing here stores prompt or completion content.
 | Inter-token latency / output throughput | Mean time between output chunks; output tokens per second per call | Compares backends and models; detects a self-hosted server that is saturating |
 | Token throughput | Input, output, cached and reasoning tokens per second and per period | Capacity planning for self-hosted inference; demand per team and route |
 | Request rate and concurrency | Calls per second and in-flight calls | Load per route; sizing of team gateways |
-| Errors | By outcome and code: upstream 4xx/5xx, `429` throttles with `Retry-After`, timeouts, client disconnects, AFS refusals (`402`, `403` reason, `429 QuotaExceeded`) | Separates "the provider is failing" from "AFS refused it" |
+| Errors | By outcome and code: upstream 4xx/5xx, `429` throttles with `Retry-After`, timeouts, client disconnects, AFS refusals (`402`, `403` reason, `402 QuotaExceeded`) | Separates "the provider is failing" from "AFS refused it" |
 | Usage completeness | Share of calls settled with `usage_source = estimated` | A backend that omits usage is a cost-accuracy risk |
 | Cost rate | USD per hour per route and team (from settlements) | Spend anomalies before the daily report |
 | Backend saturation (in-namespace servers only, optional) | Scraped from the server's own `/metrics` (for vLLM: queue length, running requests, KV-cache use) | Explains TTFT growth on self-hosted inference |
@@ -487,7 +488,7 @@ error rate < 2% and p95 TTFT < 5 s over 30 days; gateway added latency p99 < 25 
 
 ### 12.1 Gateway contract (v1.2.0, minor)
 
-New paths (§8.1), route admission reasons, `429 QuotaExceeded`, `AFS_LLM_*` variables and `/etc/afs/llm-routes.json`.
+New paths (§8.1), route admission reasons, `402 QuotaExceeded`, `AFS_LLM_*` variables and `/etc/afs/llm-routes.json`.
 `AFS_GATEWAY_URL` keeps its name; its value is documented as opaque (it was already only consumed as a variable), so
 moving it to the team gateway is not a major change. Bedrock paths, error codes and identity rules are unchanged.
 
@@ -529,7 +530,7 @@ tests and `seedOtherTeams` rows for every new team-owned table.
   env var names an agent will receive.
 - Reports: route group-by and badges; an *Inference* report (latency, TTFT, errors, tokens per second, cost rate)
   for service admins and per team; *Unmetered* badge kept only for direct `llm` external systems.
-- New mockups are needed (`docs/ui/46-…`), to be drawn once J approves the direction.
+- Proposal mockups are screens 46 to 57 (Appendix A); console stories are US-62 to US-75 (Appendix B).
 
 ### 12.5 `-cli`
 
@@ -614,3 +615,317 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`), `teams put-team
 
 - 2026-11-24: drafted from J's question in the project thread; proposal only, awaiting J's answers to section 13.3.
 - 2026-11-24: J added inference-layer telemetry as a goal; section 10 added (G7, MEG-D10, MEG-OQ-17, MEG-OQ-18).
+- 2026-11-24: J asked for UI, use cases and test cases to review; Appendix A (screens 46 to 57 by role), Appendix B
+  (user stories US-62 to US-77 with acceptance criteria) and Appendix C (test cases) added.
+
+---
+
+## Appendix A. User experience by role (proposal mockups)
+
+The mockups follow the existing console (AWS-console familiar: dark header with role pill, left navigation,
+breadcrumbs, page header with *Info* and right-aligned actions, tables with filter and pagination, one primary action,
+wizards with a review step, status as dot + word, *Equivalent CLI* on create forms). Every screen carries a
+**PROPOSAL · not built** badge. Sources: [docs/ui/source/gw_screens.py](docs/ui/source/gw_screens.py), run by
+`gen.py` and rendered by `shoot.mjs`. Data is illustrative.
+
+New navigation: service admins get **Model endpoints** under *Platform* (beside *Model catalog & pricing*); every team
+role gets **Model endpoints** under *Configuration* (beside *Models*); reports gain an **Inference** tab; the agent
+page's *Models* tab becomes **Models & routes**.
+
+### A.1 Service admin
+
+| # | Screen | What it shows | Stories |
+|---|---|---|---|
+| S-G1 | Model endpoints (46) | Service endpoint catalog with route, protocol, location, pricing mode, *Metered* / *Capped* / *Extra terms* badges, service switch, team count, 15-minute health and credential mode; team-declared endpoints; direct LLM access and its *Unmetered* state; pending price proposals; degraded-route alert | US-62, US-63, US-70, US-74 |
+| S-G2 | Create endpoint, step 3 (47) | Wizard: endpoint and route, connection and credential, **models and pricing** (pricing mode tiles, models with prices, LiteLLM import, provider-reported cost), access and objectives, review; equivalent CLI | US-62, US-64 |
+| S-G3 | Endpoint detail, Teams & credentials tab (48) | Per-team access, credential state (set / missing, never the value), last rotation, team gateway version during ring rollout, spend, calls, errors; provider reconciliation KPI | US-65, US-71, US-76 |
+| S-G4 | Inference report (49) | Calls, tokens per second, errors split upstream vs AFS refusals, gateway overhead; per-route latency, TTFT, throughput, error rate, estimated-usage share, cost and effective $/MTok; TTFT chart against the objective | US-73, US-74 |
+| S-G5 | Team detail, Model endpoints (50) | Team's service routes (*All* / *Selected*, service admins only), extra-terms selection, *may declare endpoints* switch, token quotas | US-63, US-66, US-69 |
+
+![Service admin: Model endpoints](docs/ui/46-admin-model-endpoints.png)
+![Service admin: Create endpoint, models and pricing](docs/ui/47-admin-create-model-endpoint.png)
+![Service admin: Endpoint detail, teams and credentials](docs/ui/48-admin-endpoint-detail.png)
+![Service admin: Inference report](docs/ui/49-admin-inference-report.png)
+![Service admin: Team model endpoints](docs/ui/50-admin-team-routes.png)
+
+### A.2 Team-admin
+
+| # | Screen | What it shows | Stories |
+|---|---|---|---|
+| T-G1 | Model endpoints (51) | Team gateway status and overhead; service routes with agents using each, credential, health and spend; team endpoints with owner; degraded-route notice | US-66, US-67, US-74 |
+| T-G2 | Create team endpoint (52) | Route name (and the env var it produces), owner, purpose, location tiles (in namespace / corporate / external), Service and port, protocol paths, auth, *Test connection*, pricing mode, models, token quota; equivalent CLI; what agents get | US-67, US-69 |
+| T-G3 | Agent, Models & routes (53) | Bedrock models as in 1.1.0; routes *All* / *Selected* with models, budget control, calls and cost; default route and model; **the exact environment and file the agent receives**; equivalent CLI | US-68 |
+| T-G4 | Team Inference report (54) | Calls, p95 TTFT, errors and refusals, quota use; per-agent table across routes; cost by route with effective $/MTok for capacity routes; TTFT chart | US-73 |
+| T-G5 | Budget & usage (55) | What counts against the cap (per-token routes and Bedrock), what does not (capacity routes, limited by quota), reserved in flight, EKS compute including the team gateway | US-70, US-72 |
+
+![Team-admin: Model endpoints](docs/ui/51-ta-model-endpoints.png)
+![Team-admin: Create team endpoint](docs/ui/52-ta-create-team-endpoint.png)
+![Team-admin: Agent models and routes](docs/ui/53-ta-agent-models-routes.png)
+![Team-admin: Inference report](docs/ui/54-ta-team-inference-report.png)
+![Team-admin: Budget and usage with routes](docs/ui/55-ta-budget-routes.png)
+
+### A.3 Team viewer
+
+Same pages, read-only: every changing control is disabled with the tooltip "Needs team-admin", credentials show only
+*Set* / *Missing*, and the CLI panel is hidden. Viewers can open the Inference report (T-G4) as on other reports.
+
+| # | Screen | What it shows | Stories |
+|---|---|---|---|
+| V-G1 | Model endpoints (56) | T-G1 read-only, with the read-only banner | US-75 |
+| V-G2 | Agent, Models & routes (57) | T-G3 read-only, including the environment the agent receives (no values that are secrets exist there) | US-75 |
+
+![Team viewer: Model endpoints](docs/ui/56-tv-model-endpoints.png)
+![Team viewer: Agent models and routes](docs/ui/57-tv-agent-models-routes.png)
+
+## Appendix B. User stories and acceptance criteria
+
+Numbering continues the root PRD and the orchestration PRD (last story US-61). Each story names the requirements
+sections and screens it proves.
+
+### B.1 Service admin
+
+**US-62 · Publish an OpenAI-compatible endpoint.** As a service admin, I want to publish a model provider as a route
+with its models and prices, so that every team can use it with metering and caps. *(§7, §9.1; S-G1, S-G2)*
+- Given I complete the *Create endpoint* wizard with slug `openrouter`, protocol Chat, location External, pricing
+  *Per token* and three models, when I create it, then `CreateModelEndpoint` returns `mep_…`, the endpoint is **off**
+  for the service, an audit record and a `model_endpoint.created` event are written, and no team gets the route.
+- Given a slug that is not a DNS label, is `bedrock`, or equals an existing service or team slug, then
+  `ValidationError` with `details.reason` `slug_invalid`, `slug_reserved` or `slug_taken`.
+- Given a non-HTTPS base URL for an External or Corporate endpoint, then `ValidationError` (`base_url_not_https`).
+- Given a *Per token* model without a price, then the endpoint saves, the model shows *Not callable*, and calls to it
+  return `403` `model_not_priced`.
+- The wizard's review step shows the equivalent `afs model-endpoints create-model-endpoint` command.
+
+**US-63 · Switch an endpoint on for teams.** As a service admin, I want switching an endpoint on to reach the teams
+set to *All*, except endpoints with extra terms. *(§7.2; S-G1, S-G5)*
+- Given `openai-prod` is off and 16 teams have route access *All*, when I switch it on, then within 60 s calls from
+  those teams' agents with access *All* are admitted, and after their next restart those agents have
+  `AFS_LLM_OPENAI_PROD_BASE_URL`.
+- Given an endpoint flagged *Extra terms*, when I switch it on, then no team gets it until a service admin selects it
+  on that team (S-G5), and the team page shows the *Extra terms* badge.
+- Given I switch an endpoint off, then within 60 s every call on that route returns `403`
+  `route_not_enabled_for_service`, and agents' files and variables drop it on their next restart.
+
+**US-64 · Approve prices for a route.** As a service admin, I want price changes proposed and approved like Bedrock
+prices. *(§7.3, §9.2; S-G1, S-G2)*
+- Given the daily job finds a price on the provider's page or the LiteLLM list that differs from the price in force,
+  then one pending proposal per model appears; approving writes an `endpoint_model_prices` row effective from its date
+  or the approval, whichever is later; rejecting writes nothing.
+- No price ever changes without a service admin's approval, and every approval is audited with the old and new price.
+
+**US-65 · Credentials per team.** As a service admin, I want each team to have its own provider key, so that the
+provider's invoice splits by team and I can revoke one team. *(§10; S-G3)*
+- Given credential mode *Per team*, when I set a team's credential from a file or prompt, then the value goes to
+  Secrets Manager at `afs/<namespace>/_gateway/<route>`, the response and every later read return only state and
+  rotation time, and the audit record has no value.
+- Given a team with the route but no credential, then its calls on the route return `503 Unavailable` with
+  `details.reason = credential_missing`, and S-G3 lists the team as *Missing*.
+- Given I rotate a credential, then the team gateway uses the new value within 2 minutes without a restart, and calls
+  in flight complete.
+
+**US-66 · Let a team declare its own endpoints.** As a service admin, I want to allow selected teams to add their own
+endpoints. *(§7.2, MEG-OQ-12; S-G5)*
+- Given `may_add_model_endpoints` is off, then a team-admin's *Create endpoint* is disabled with "Needs permission from
+  a service admin" and `CreateModelEndpoint` for the team returns `403 AccessDenied`.
+- Only a service admin can change the switch (`403` for a team-admin, audited either way).
+
+### B.2 Team-admin
+
+**US-67 · Add the team's own inference server.** As a team-admin, I want to put the team's vLLM server behind a
+route, so that agents use it through the gateway and its use is measured. *(§7, §8, §9.3; T-G1, T-G2)*
+- Given I create endpoint `coder-vllm`, location *In this namespace*, Service `vllm-coder:8000`, auth none, pricing
+  *Capacity*, then the route appears on T-G1, the team gateway's network policy allows it to reach that Service, and
+  no agent's policy does.
+- Given *Test connection* is on, then the gateway calls `GET /v1/models` once and the form shows reachable or the
+  error; nothing is saved when it fails unless I turn the test off.
+- Owner and purpose are required; a Service name outside the namespace is refused (`ValidationError`).
+
+**US-68 · Choose an agent's routes and see what it gets.** As a team-admin, I want to pick an agent's routes and a
+default, and see the exact variables it receives. *(§8.2; T-G3)*
+- Given I select routes `bedrock`, `openai-prod`, `coder-vllm` with default `openai-prod` / `gpt-4.1`, when I save with
+  `If-Match`, then the pod restarts and has `AFS_LLM_ROUTES=openai-prod,bedrock,coder-vllm`, one
+  `AFS_LLM_<ROUTE>_BASE_URL` per route, `OPENAI_BASE_URL` pointing at `openai-prod`, `OPENAI_API_KEY=afs-gateway`, and
+  `/etc/afs/llm-routes.json` matching T-G3's preview.
+- Given a stale version, then `412 PreconditionFailed` and nothing changes.
+- Given the agent calls a route it does not have, then `403` `route_not_enabled_for_agent`.
+- Given the agent already sets `OPENAI_BASE_URL` as a configuration value, then AFS does not override it.
+
+**US-69 · Limit a capacity route with a token quota.** As a team-admin, I want a monthly token limit on our vLLM route.
+*(§9.3, MEG-OQ-7; T-G2, S-G5)*
+- Given a quota of 50 M tokens a month, when the month's settled tokens plus a call's reserved worst case would exceed
+  it, then the call gets `402` with code `QuotaExceeded` (not `BudgetExceeded`, and not `429`, which SDKs retry), with `details.route`, `period` and `remainingTokens`.
+- Quota use is shown on T-G4 and S-G5 and resets at the start of the period.
+
+**US-70 · One budget for every per-token model.** As a team-admin, I want OpenAI and other priced routes to count
+against the same budget and cap as Bedrock. *(§9.2; T-G5)*
+- Given the team has spent 99.9% of a blocking budget, when an agent calls `openai-prod` with a reservation larger than
+  what is left, then `402 BudgetExceeded` with `budgetId`, `period`, `remainingUsd`, and nothing is forwarded.
+- Given concurrent calls from several pods, then total spend exceeds the cap by at most one in-flight call per pod.
+- T-G5 lists each source with *Capped* or *Token quota* and shows reserved in-flight spend.
+
+**US-71 · Never see or leak an upstream key.** As a team-admin, I want agents to work without holding provider keys.
+*(§10; T-G3, S-G3)*
+- No agent pod has a Secret volume, environment variable or file containing a route credential; T-G3's preview has
+  only placeholders.
+- A credential sent by an agent in `Authorization` is removed before the upstream call and never logged.
+
+**US-72 · Spend I can trust when usage is missing.** As a team-admin, I want calls whose response has no usage to be
+charged safely. *(§9.2, MEG-D6; T-G5)*
+- Given a server that returns no `usage`, then the call settles at its reservation, the row has
+  `usage_source = estimated`, and the share of estimated calls is shown per route.
+
+### B.3 Any team role and service admins (telemetry)
+
+**US-73 · See how inference is performing.** As anyone on a team, I want latency, TTFT, errors and throughput by
+route, model and agent. *(§10; T-G4, S-G4)*
+- Given calls in the period, then T-G4 shows p50 latency, p95 TTFT, output tokens per second, error rate split into
+  upstream errors and AFS refusals, per agent and per route, computed from `usage_events`; S-G4 shows the same across
+  teams for service admins.
+- No report, span or log contains prompt or completion text.
+
+**US-74 · Know when a route is degraded.** As a service admin or team-admin, I want to be told when a backend is slow
+or failing. *(§10.4, §10.6; S-G1, T-G1)*
+- Given p95 TTFT over the route's objective for 5 minutes, then the route's condition becomes `Degraded`, a
+  `model_endpoint.degraded` event reaches the team's notification channels, and the alert shows on S-G1 and T-G1;
+  `model_endpoint.recovered` follows when it clears. Calls are never blocked by this.
+
+### B.4 Team viewer
+
+**US-75 · Read-only view of routes.** As a team viewer, I want to see routes, health and usage but change nothing.
+*(§4; V-G1, V-G2)*
+- Every changing control on V-G1 and V-G2 is disabled with "Needs team-admin"; the API returns `403 AccessDenied` for
+  every mutation a viewer sends.
+- Credentials show only *Set* or *Missing*; no endpoint returns credential metadata beyond name, state and last rotation.
+
+### B.5 Platform operator
+
+**US-76 · Move teams to their own gateway safely.** As a platform operator, I want to move teams ring by ring with
+rollback. *(§5, §12.6; S-G3)*
+- Given `gateway.deployment = per_namespace` for a canary team, then the reconciler creates its team gateway, then rolls
+  agents to the new `AFS_GATEWAY_URL`; agents not yet rolled keep working through the shared gateway, and both write
+  the same ledger.
+- Given I flip the team back, then agents roll back to the shared gateway and no call is refused during the move.
+- A gateway image change rolls by ring; a team gateway that fails readiness stops the ring.
+
+**US-77 · One team's trouble stays in that team.** As a platform operator, I want a failing team gateway or backend to
+affect only that team. *(§5.3)*
+- Given team A's gateway is crash-looping or saturated by slow upstream streams, then team B's calls see no change in
+  error rate or p99 overhead.
+
+## Appendix C. Test cases
+
+Test types: **U** unit, **I** integration (real PostgreSQL 17 or envtest), **C** conformance (official OpenAI SDKs
+and recorded vLLM, SGLang, Ollama and OpenRouter fixtures against a fake upstream), **E** console end-to-end
+(Playwright with the fake API), **K** cluster isolation test (Cilium, admission, IAM simulator), **P** performance or
+chaos. Every authorization rule has a denied case.
+
+### C.1 Database (`-db` 000023)
+
+| ID | Type | Case | Expected |
+|---|---|---|---|
+| TC-DB-01 | I | Insert endpoint with slug `Bad_Slug`, `bedrock`, a duplicate service slug, a team slug equal to a service slug | `23514` / `23505`, constraint named in the error |
+| TC-DB-02 | I | Team endpoint without owner or purpose; `in_namespace` at service level | `23514` |
+| TC-DB-03 | I | `afs_app` as team-admin of team A reads or writes team B's endpoints, credentials, selections, quotas | 0 rows / `42501` (added to `seedOtherTeams`; `TestCrossTeamWritesChangeNothing` covers them) |
+| TC-DB-04 | I | Team-admin sets `teams.may_add_model_endpoints` or `route_access` | `42501`; service admin succeeds |
+| TC-DB-05 | I | Credential ARN whose path is not `afs.secret_path(team, '_gateway', route)` | `23514` |
+| TC-DB-06 | I | A column named like a value (`value`, `secret_string`) on any new table | Schema test fails (existing guard) |
+| TC-DB-07 | I | `afs.route_admission` for each level off in turn, and a model without price | Reasons in order: service, team, agent, `model_not_on_route`, `model_not_priced` |
+| TC-DB-08 | I | `requires_terms` endpoint on, team access *All* | Not in the team's effective set until selected |
+| TC-DB-09 | I | Change on any new table | `pg_notify` on `afs_desired_state` with table, team and id |
+| TC-DB-10 | I | Up, down, up of 000023 | Clean; checksums stable |
+| TC-DB-11 | I | Quota reserve and settle concurrently from 20 sessions | Counter never exceeds the limit by more than one reservation per holder |
+
+### C.2 Gateway (`-restapi` `afs-gateway`)
+
+| ID | Type | Case | Expected |
+|---|---|---|---|
+| TC-GW-01 | C | OpenAI Python, Node and Go SDKs with `base_url = AFS_LLM_<ROUTE>_BASE_URL`, Chat non-stream and stream, Responses, Embeddings | Same results as the fake upstream; one usage row per call |
+| TC-GW-02 | U | Route in the body form `openai-prod/gpt-4.1` on `/openai/v1/chat/completions` | Routed like the path form |
+| TC-GW-03 | U | Request without `max_completion_tokens` / `max_tokens`, with one above the model's limit, and a reasoning model | Forwarded request carries the reserved cap; reservation equals §9.2 formula (table-driven, to the micro-dollar) |
+| TC-GW-04 | U | Settlement with cached and reasoning tokens | Cost per §9.2; reasoning not double-counted |
+| TC-GW-05 | C | Stream where the client did not set `include_usage` | Upstream receives `include_usage: true`; client receives no extra usage chunk; settlement uses it |
+| TC-GW-06 | C | Upstream omits usage; stream cut mid-way; client disconnects | Settled at reservation (or reported tokens), `usage_source = estimated` |
+| TC-GW-07 | U | OpenRouter `usage.cost` above and below the token-price cost | Settles to the larger; both recorded |
+| TC-GW-08 | U | Budget remaining below the reservation | `402 BudgetExceeded`, nothing forwarded, row `rejected_budget` |
+| TC-GW-09 | U | Each admission reason; caller with no route | `403` with the right `details.reason`; usage row `rejected_model` |
+| TC-GW-10 | U | Quota exhausted on a capacity route | `402` with code `QuotaExceeded`; the OpenAI SDKs do not retry it; row recorded |
+| TC-GW-11 | U | Agent sends `Authorization: Bearer sk-…` | Header replaced by the route credential; value absent from logs, spans and errors |
+| TC-GW-12 | U | Route with no credential | `503 credential_missing`, nothing reserved |
+| TC-GW-13 | I | Credential file rotated on disk | Next call uses the new value; no restart; in-flight call unaffected |
+| TC-GW-14 | U | `GET /v1/models` on a route | Answered by the gateway from the agent's effective models; upstream not called |
+| TC-GW-15 | U | Unsupported path (`/v1/files`, `/v1/batches`, `/v1/fine_tuning/jobs`) | `404 NotFound`, nothing reserved |
+| TC-GW-16 | U | Upstream 5xx, 429 with `Retry-After`, timeout | Reservation released; `502` / `429` passed through / `504`; error recorded by code |
+| TC-GW-17 | I | Database unreachable | `503 Unavailable`, nothing forwarded (fail closed) |
+| TC-GW-18 | U | Change-feed notification for a route switched off | Cache entry dropped; next call refused within 60 s |
+| TC-GW-19 | U | Span for a call | GenAI attributes (`gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.*`) and `afs.*` present; no prompt or completion content |
+| TC-GW-20 | U | Incoming `traceparent` | Continued; propagated upstream only for `in_namespace` and `corporate` endpoints |
+| TC-GW-21 | U | Metric labels | No agent or pool id label on any metric |
+| TC-GW-22 | C | Bedrock and Anthropic paths of contract v1.1.0 through the team gateway | Existing conformance suite passes unchanged |
+
+### C.3 Reconciler and cluster isolation
+
+| ID | Type | Case | Expected |
+|---|---|---|---|
+| TC-RC-01 | I | Team switched to `per_namespace` | Deployment (2 replicas), PDB, Service, certificate, ServiceAccount, Pod Identity to the team Bedrock role, ExternalSecret, network policies rendered; agents rolled after the gateway is ready |
+| TC-RC-02 | K | Agent pod connects to a route host (for example `api.openai.com`) or the in-namespace `vllm-coder` Service | Denied by Cilium; Hubble records the drop |
+| TC-RC-03 | K | Team gateway connects to another team's namespace or gateway | Denied |
+| TC-RC-04 | K | Pod in team B reaches team A's gateway | Denied before the gateway |
+| TC-RC-05 | K | A non-gateway pod uses the `afs-gateway` ServiceAccount, or a team tries to edit an object labelled `afs.io/component=gateway` | Refused by admission |
+| TC-RC-06 | K | IAM policy simulation: agent role reads `afs/<ns>/_gateway/*`; team A gateway reads team B's `_gateway/*` | Denied; team A gateway on its own path allowed |
+| TC-RC-07 | I | Agent pod spec | No Secret volume or env from `afs-gateway-routes` |
+| TC-RC-08 | I | Agent route change; team-level change; service-level change | Agent change rolls the pod; others update ConfigMap and apply on next roll; gateway enforces within 60 s |
+| TC-RC-09 | I | `llm` external system linked to a route | Not rendered into any agent's egress unless a service-admin override exists |
+| TC-RC-10 | I | Ring rollout with a gateway image that fails readiness | Ring stops; earlier rings stay; event raised |
+| TC-RC-11 | I | Route breaches TTFT objective 5 minutes, then recovers | `Degraded` condition and event, then `recovered` |
+
+### C.4 REST API (`-restapi` `afs-api`)
+
+| ID | Type | Case | Expected |
+|---|---|---|---|
+| TC-API-01 | I | Every new operation × service admin, team-admin (own team, other team), team viewer, security operator, API key | Allowed only per §4; every denied case `403 AccessDenied` and audited |
+| TC-API-02 | I | Mutations | Row, audit record and `model_endpoint.*` outbox event in one transaction |
+| TC-API-03 | I | Update without `If-Match`, with a stale one | `428` / `412` |
+| TC-API-04 | I | `PutModelEndpointCredential` then every read operation | No response, log line or audit record contains the value |
+| TC-API-05 | I | `teamId` in the body differs from the path | Path wins; body ignored or `ValidationError` |
+| TC-API-06 | I | Reports `inference` with `groupBy=route|model|agent|hour`, JSON and CSV | Percentiles match a reference computed from the fixture ledger |
+| TC-API-07 | U | OpenAPI document | Lints; every route declares a permission; a handler without one fails the test |
+
+### C.5 Billing (`-restapi` `afs-billing`)
+
+| ID | Type | Case | Expected |
+|---|---|---|---|
+| TC-BL-01 | I | Recorded OpenAI organization costs fixture vs ledger, per team project | Variance computed; over 5% emits `cost.variance_detected` |
+| TC-BL-02 | I | Capacity route with CUR namespace cost and token shares | Daily allocation by token share sums to the CUR amount |
+| TC-BL-03 | I | Price list differs from the price in force | One pending proposal per model; none when equal |
+
+### C.6 Console (`-website`) and SDK
+
+| ID | Type | Case | Expected |
+|---|---|---|---|
+| TC-UI-01 | E | Service admin creates an endpoint through the wizard (S-G2) | Review step and CLI preview match the request sent |
+| TC-UI-02 | E | Team-admin creates `coder-vllm` (T-G2) with *Test connection* failing | Error shown; nothing saved |
+| TC-UI-03 | E | Team-admin edits agent routes (T-G3) | Env preview updates as routes and default change; request has `If-Match` |
+| TC-UI-04 | E | Team viewer on V-G1 and V-G2 | Every changing control disabled with "Needs team-admin"; API `AccessDenied` handled if forced |
+| TC-UI-05 | E | Team-admin without `may_add_model_endpoints` | *Create endpoint* disabled with the service-admin tooltip |
+| TC-UI-06 | U | Credential form | Value never in state store, URL, storage or logs; field cleared after submit |
+| TC-UI-07 | E | Visual baselines for screens 46 to 57 | Match approved baselines |
+| TC-UI-08 | U | `@afs/sdk` generated from contract v1.5.0 | New operations typed; pagination and `If-Match` helpers |
+| TC-UI-09 | E | Accessibility of the new pages | WCAG 2.2 AA checks pass |
+
+### C.7 CLI (`-cli`)
+
+| ID | Type | Case | Expected |
+|---|---|---|---|
+| TC-CLI-01 | U | Each new command: parsing, request sent, `--output json|table|text`, golden files | Matches goldens; JSON field names as the API |
+| TC-CLI-02 | U | `put-model-endpoint-credential` with `--value` as an argument | Rejected; value accepted only from file, stdin or no-echo prompt |
+| TC-CLI-03 | U | API `AccessDenied` | Exit 254 with the AWS-style message |
+| TC-CLI-04 | U | `--debug` on a credential call | Value and `Authorization` redacted |
+
+### C.8 Performance and resilience
+
+| ID | Type | Case | Expected |
+|---|---|---|---|
+| TC-P-01 | P | Team gateway overhead at 200 concurrent streams | p99 added time to first byte < 25 ms |
+| TC-P-02 | P | 300 team gateways against RDS through RDS Proxy | No connection exhaustion; reservation p99 < 10 ms |
+| TC-P-03 | P | Team A gateway crash-looping and saturated by slow upstreams | Team B error rate and p99 unchanged (US-77) |
+| TC-P-04 | P | Migration of a canary team under load (US-76) | No refused call during the switch and the rollback |
