@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Proposed; J answered MEG-OQ-1 to MEG-OQ-20 on 2026-11-24 (§13.3); MEG-OQ-21 and MEG-OQ-22 answered; provider switches per provider including Bedrock, and Azure and Google added (J, 2026-11-24)**, awaiting approval to implement. Nothing here is built, and no contract, schema or release changes until J approves. Release 1.1.0 is not changed by this document. Target release if approved: 1.2.0 in every repository (`-db` and `-restapi` in lockstep) |
+| **Status** | **Proposed; J answered MEG-OQ-1 to MEG-OQ-20 on 2026-11-24 (§13.3); every open question answered (MEG-OQ-1 to MEG-OQ-23, 2026-11-24)**, awaiting approval to implement. Nothing here is built, and no contract, schema or release changes until J approves. Release 1.1.0 is not changed by this document. Target release if approved: 1.2.0 in every repository (`-db` and `-restapi` in lockstep) |
 | **Kind** | Change PRD to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md) (BUD-2, BUD-3, EXT-6, RPT-7), the [team orchestration agent PRD](team-orchestration-agent-PRD.md) (model access, section 6.9) and the [gateway contract](docs/contracts/gateway-contract.md) v1.1.0 |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
@@ -343,7 +343,8 @@ model (MOD-3, MOD-4), and the Bedrock paths of the gateway contract serve the An
 - *Harness protocols.* Each runtime template declares the protocols it speaks (`anthropic_messages`, `openai_chat`).
   An agent whose template speaks only Anthropic Messages has no model without Bedrock in 1.2.0 and becomes `Degraded`;
   the confirmation lists them. Hermes, the default harness and the orchestration agent's, is configured for an
-  OpenAI-compatible endpoint by base URL; the conformance suite proves this before Bedrock-off ships (MEG-OQ-23).
+  OpenAI-compatible endpoint by base URL; the conformance suite covers it, but Bedrock off is not gated on it (J,
+  MEG-OQ-23): it ships in 1.2.0 with the fallback rule and the impact confirmation.
 - *Bedrock refusals.* Calls on Bedrock paths, `/r/bedrock` and the Converse translation return `provider_disabled`. The
   daily Bedrock catalog sync pauses; CUR reconciliation continues for any residual spend.
 
@@ -780,7 +781,7 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`, `list-inference-
 | MEG-OQ-20 | How is OpenAI-to-Bedrock translation built (MEG-OQ-8)? | **Decided (J, 2026-11-24): in `afs-gateway`, mapping Chat Completions to Bedrock Converse for every Bedrock model, on the same reserve-and-settle path and team inference profiles** |
 | MEG-OQ-21 | Nous Portal documents no usage or cost API. How is it reconciled? | **Decided (J, 2026-11-24): monthly statement entered by a service admin; Not reconciled until then; daily pull if Nous publishes an API; OpenRouter stays the daily-reconciled path to Hermes models** |
 | MEG-OQ-22 | OpenCode Go is a personal coding-agent subscription that monitors for abuse and excludes service accounts. Offer it through team gateways? | **Decided (J, 2026-11-24): use OpenCode's pay-as-you-go Console instead, as a `per_token` route with caps; the Go plan is not offered** |
-| MEG-OQ-23 | With Bedrock off, agents need a route model. Ship *Bedrock off* in 1.2.0, gated by the fallback rule of §7.4? | Yes, once the conformance suite proves Hermes and the orchestration agent run on an OpenAI-compatible route; templates that speak only Anthropic Messages stay `Degraded` until an Anthropic-protocol route exists |
+| MEG-OQ-23 | With Bedrock off, agents need a route model. Ship *Bedrock off* in 1.2.0, gated by the fallback rule of §7.4? | **Decided (J, 2026-11-24): ship Bedrock off in 1.2.0 without a test gate; the fallback model rule and the impact confirmation (68a) stay** |
 
 ## 14. Glossary
 
@@ -802,6 +803,7 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`, `list-inference-
 - 2026-11-24: J clarified the provider switches: one per provider, Bedrock included, existing providers on by default,
   no single "all external" switch; and asked for Azure and Google, off by default with teams chosen by service admins.
   §7.4 rewritten (Bedrock-off fallback), §9.4 and §11.1 (workload identity federation) added; MEG-OQ-23 replaced.
+- 2026-11-24: J answered MEG-OQ-23: Bedrock off ships in 1.2.0 without a test gate; fallback and impact screen stay.
 
 - 2026-11-24: drafted from J's question in the project thread; proposal only, awaiting J's answers to section 13.3.
 - 2026-11-24: J added inference-layer telemetry as a goal; section 10 added (G7, MEG-D10, MEG-OQ-17, MEG-OQ-18).
