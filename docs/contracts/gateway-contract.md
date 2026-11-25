@@ -247,7 +247,7 @@ Denials are `403 AccessDenied` with `details.reason` in this order (CD-41): `pro
 
 | Item | Value |
 |---|---|
-| `AFS_LLM_ROUTES` | Comma-separated effective route slugs, default first |
+| `AFS_LLM_ROUTES` | Comma-separated effective route slugs, default first, then by slug. Never includes `bedrock`: Bedrock keeps `AFS_DEFAULT_MODEL` and `AFS_MODELS` (§3), and `/r/bedrock` is announced only by `AFS_LLM_BEDROCK_BASE_URL` (CD-67) |
 | `AFS_LLM_<ROUTE>_BASE_URL` | `AFS_GATEWAY_URL` + `/r/<route>/v1`; `<ROUTE>` is the slug upper-cased with `-` → `_`. Includes `AFS_LLM_BEDROCK_BASE_URL` when Bedrock is on |
 | `AFS_LLM_DEFAULT_ROUTE`, `AFS_LLM_DEFAULT_MODEL` | The agent's default route and model when its default is a route model |
 | `AFS_DEFAULT_MODEL` | Unchanged meaning; when the default is a route model its value is `<route>/<model>` |
@@ -255,7 +255,11 @@ Denials are `403 AccessDenied` with `details.reason` in this order (CD-41): `pro
 | `/etc/afs/llm-routes.json` | `{"version": 1, "defaultRoute": "<slug>", "defaultModel": "<model>", "routes": [{"route": "<slug>", "baseUrl": "<url>", "protocols": ["openai_chat", …], "models": [{"name": "<model>", "maxOutputTokens": <int>}], "pricing": "per_token\|capacity\|free"}]}` |
 
 Same roll rules as `AFS_MODELS` (§3): the agent's own change rolls the pod; team and service changes apply on the next roll
-and are enforced by the gateway at once.
+and are enforced by the gateway at once. These items are delivered only to agents and pools of a `per_namespace` team
+(§12.1); a team on the shared gateway gets none, and its pod-template hash is unchanged from 1.1.0. The variables are
+rendered as `$(AFS_GATEWAY_URL)/r/<route>/v1` after `AFS_GATEWAY_URL`, so a gateway move changes one value; the file
+cannot expand variables and carries the resolved URL. A subject has at most 50 routes. No upstream credential is ever
+mounted into an agent pod.
 
 ### 12.5 Errors (additions to §7)
 
@@ -277,6 +281,18 @@ Upstream `429` passes through as `429 Throttled` with `Retry-After`; upstream 5x
 `provider_cost`), `reasoning_tokens`, `ttft_ms`, `upstream_ms`, `gateway_ms`, `http_status`. Calls with no usage in the
 response settle to the reservation with `usage_source = estimated`. When the provider reports `usage.cost`, the settled
 cost is the larger of it and the token-price cost.
+
+### 12.6a Upstream authentication (as built)
+
+The team gateway reads route credentials from files (ExternalSecret `afs-gateway-credentials`, one key per route slug,
+mounted at `/etc/afs/gateway-credentials`) and picks up rotation without a restart. For `azure_federated` and
+`google_federated` routes it presents **one projected Kubernetes service account token per gateway pod**
+(`system:serviceaccount:afs-t-<slug>:afs-gateway`, issued by the cluster's OIDC issuer): Azure exchanges it for an Entra
+token (audience `api://AzureADTokenExchange`), Google STS exchanges it as a JWT subject token at the team's workload
+identity provider. The token's audience is the Azure one when the team has an Azure route, else the first Google
+provider audience, so a team with both must allow the Azure audience on its Google provider (CD-68).
+`PutEndpointFederation` returns the expected issuer, subject and audience, and for Google also the team gateway's role
+ARN.
 
 ### 12.7 Telemetry
 
@@ -451,6 +467,10 @@ On MCP paths the JSON-RPC error is in the body and the AFS envelope is in `error
   (§13.4, CD-46); `AFS_MCP_*` and `/etc/afs/mcp.json` (§13.5); upstream credentials, no token passthrough and pinning
   (§13.6); elicitation and sampling (§13.7); ledger and telemetry (§13.8); federated identities for agent pods (§13.9);
   errors (§13.10). Minor: additions only.
+- **v1.2.0 amendment (2026-11-25), build of `-restapi` 1.2.0 (PR #14):** route delivery only to `per_namespace`
+  teams, `AFS_LLM_ROUTES` without `bedrock`, variables as `$(AFS_GATEWAY_URL)` references, at most 50 routes (§12.4);
+  upstream authentication from files and one federation audience per gateway pod, Google by OIDC token exchange rather
+  than an AWS-signed request (§12.6a). CD-67, CD-68. No wire change for agents.
 - **v1.2.0 (2026-11-25):** team gateway per namespace and opaque `AFS_GATEWAY_URL` (§12.1); OpenAI-compatible route
   paths, body form and Chat Completions → Converse on `bedrock` (§12.2); route admission and `provider_disabled` (§12.3);
   `AFS_LLM_*`, `OPENAI_*` and `/etc/afs/llm-routes.json` (§12.4); new error reasons and `504 UpstreamTimeout` (§12.5);
@@ -465,3 +485,5 @@ On MCP paths the JSON-RPC error is in the body and the AFS envelope is in `error
 | CD-39 | Admission reasons are reported in the fixed order service, team, agent (or pool), price, so a caller sees the highest level to ask about. A pool's own selection uses `model_not_enabled_for_agent`, because the PRD names four reasons |
 | CD-40 | A callable model whose team inference profile is not yet active answers `503 model_provisioning` with `Retry-After: 30` rather than calling the foundation model directly, so every call stays attributable to the team's profile and cost tags |
 | CD-41 | Route admission reasons follow the model admission pattern, with the provider switch first because it is the highest level a caller can ask about |
+| CD-67 | `AFS_LLM_ROUTES` lists OpenAI-compatible routes only. Bedrock models stay on `AFS_DEFAULT_MODEL`/`AFS_MODELS` so a 1.1.0 runtime sees no change, and `/r/bedrock` serves Chat Completions only (Responses and Embeddings are `404` in 1.2.0) |
+| CD-68 | Federation uses one projected token per gateway pod for both Azure and Google (Google pools trust the cluster's OIDC issuer). The PRD's AWS-provider variant for Google (§11.1, a signed `GetCallerIdentity`) is not built in 1.2.0; `PutEndpointFederation` still returns `expectedRoleArn` (the team gateway's role) as information |
