@@ -344,7 +344,7 @@ Accepted, Proposed (needs review), Superseded.
 ## ADR-018 Team model gateway: a gateway per namespace, model routes and provider switches
 
 - **Status:** Accepted (J, 2026-11-24; build approved 2026-11-25). **Built** in release 1.2.0 (merged 2026-11-25;
-  tags pending J): `-db` PR #23, `-restapi` PR #11 and #14, `-cli` PR #12, `-website` PR #14 (in progress).
+  tags pending J): `-db` PR #23, `-restapi` PR #11 and #14, `-cli` PR #12, `-website` PR #14 (merged a05f8ab).
 - **Context:** Agents reach non-Bedrock models directly, unmetered and uncapped (EXT-6, RPT-7). J asked whether a
   namespace-scoped gateway fronting OpenAI-compatible endpoints by route name could track and cap their cost, and later
   for per-provider switches (Bedrock included) and Azure and Google as providers.
