@@ -357,3 +357,25 @@ Accepted, Proposed (needs review), Superseded.
 - **Consequences:** Two small pods per team and a connection pooler in front of RDS; agents' traffic stays in their
   namespace; one team's gateway trouble stays in that team. Off-the-shelf gateways are not the enforcement point. Real
   EKS, Azure and Google checks wait for cloud access (fakes and recorded fixtures until then).
+
+## ADR-019 Governed MCP servers as a route type on the team gateway
+
+- **Status:** Accepted (J, 2026-11-25; build approved 2026-11-25). Release 1.3.0.
+- **Context:** Agents use MCP servers with no catalog, no review and no record of which tools they call. J asked for a
+  central catalog of enterprise servers that teams opt into, team-managed servers that are still audited, telemetry by
+  tool, resource and prompt, and search-style discovery, and asked how OIDC temporary credentials fit.
+- **Decision:** MCP is a route type (`/mcp`, `/mcp/<server>`) on the per-namespace team gateway of ADR-018, not a
+  separate proxy. Enterprise servers are published by service admins and switched on per team (opt-in, with a
+  default-for-new-teams flag); team servers are registered by teams where allowed and approved under a three-level
+  service policy (`team_all` default, `team_low_security_higher`, `security_all`). Policy narrows service → team →
+  agent and a block anywhere wins. Every definition is pinned by an RFC 8785 digest and changes are held for review
+  (per-server drift setting). The aggregated endpoint offers fixed meta-tools (`afs_search`, `afs_describe`,
+  `afs_call`) over a BM25 index, because MCP 2026-07-28 has no normative search. The gateway mints or exchanges
+  credentials per call (RFC 8693 federation, OAuth client, service-account OAuth, SigV4) and never passes a token
+  through; agents' own CLIs get per-agent projected OIDC tokens and stay outside the gateway. Every request is a row in
+  an append-only ledger with no content. Details: [MCP gateway PRD](../mcp-gateway-PRD.md) §14.1 (MCP-D1 to MCP-D9);
+  contracts: gateway v1.3.0 §13, API v1.6.0 §4.14, database v1.6.0 §7.5 (000024).
+- **Consequences:** MCP needs a team on a per-namespace gateway (CD-44). Hosted stdio servers run as pods with
+  `afs-mcp-bridge`. The policy decision is a database function shared by API, reconciler and gateway (CD-51). Search
+  quality is BM25 until embeddings are approved (MCP-OQ-6). Real EKS, IdP federation and hosted-image signing checks
+  wait for cloud access (fakes and local tests until then).
