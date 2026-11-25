@@ -461,6 +461,15 @@ On MCP paths the JSON-RPC error is in the body and the AFS envelope is in `error
 
 ## 11. Change log
 
+- **v1.3.0 amendment (2026-11-25), build of `-restapi` 1.3.0 (PR #17):** records where the build read §13; no wire
+  change for agents. Decisions CD-70 to CD-72.
+
+| # | Decision |
+|---|---|
+| CD-70 | `AFS_MCP_SERVERS` and the per-server URLs name the effective servers, so a team-level change that alters an agent's effective set rolls that agent's pod on the next reconcile (it is part of the pod template hash). The gateway enforces the change at once either way |
+| CD-71 | `per_agent` instance mode of a hosted server is accepted and stored, but 1.3.0 serves it with one instance per team; separate instances per agent follow when hosted servers run on a real cluster |
+| CD-72 | Gateway egress covers each server's host and its federation token endpoint. An OAuth authorization server on another host is not added in 1.3.0, so `oauth_user` refresh needs the token endpoint on the server's host until it is |
+
 - **v1.3.0 (2026-11-25):** MCP on team gateways only (§13.1, CD-44); Streamable HTTP for 2026-07-28 and 2025-11-25
   with sealed session ids, `Mcp-Method`/`Mcp-Name` checks and limits (§13.2); fixed meta-tools `afs_search`,
   `afs_describe`, `afs_call` (§13.3, CD-47); admission from `afs.mcp_admission` with refusals that look like unknown names

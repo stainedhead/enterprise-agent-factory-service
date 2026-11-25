@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Approved by J for implementation (2026-11-25), release 1.3.0** in every repository (`-db` and `-restapi` in lockstep), with the answers of section 14.3 and the implementation appendices A to I. Builds after release 1.2.0 ([team model gateway](model-endpoint-gateway-PRD.md)) is on main. Release 1.1.0 is not changed |
+| **Status** | **Built (release 1.3.0, 2026-11-25; tags pending J)**. `-db` PR #28 (docs; migrations 000024 to 000026 merged earlier), `-restapi` PR #17 (with parts 1 to 3 merged earlier), `-cli` PR #14, `-website` (SDK and screens 46 to 55) in review after its 1.2.0 PR #14. What was built and what is deferred: [§21](#21-built-and-deferred-130). Approved by J for implementation on 2026-11-25 with the answers of section 14.3 and the implementation appendices A to I |
 | **Kind** | Change PRD to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md) (EXT-1..7, TEAM-3, SEC-6, RPT), the [team orchestration agent PRD](team-orchestration-agent-PRD.md) and the [gateway contract](docs/contracts/gateway-contract.md) v1.1.0. **Depends on** the per-namespace team gateway proposed in root PR #24 (`model-endpoint-gateway-PRD.md`, decision MEG-D1) |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
@@ -827,6 +827,34 @@ J approved implementing this PRD as release 1.3.0 on 2026-11-25, after release 1
 `model-endpoint-gateway-PRD.md`). These appendices hold the details the layers build from. Where an appendix and an
 earlier section differ, the appendix wins. Story ids use the prefix `MCP-` so they never collide with ids that other
 PRDs add (DB-US, RA-US, WEB-US, CLI-US).
+
+## 21. Built and deferred (1.3.0)
+
+**Built** (2026-11-25; J pushes the tags): `-db` migrations 000024 (catalog, policy, ledger, admission), 000025
+(security operator and team reader access) and 000026 (OAuth connect states without a stored verifier); `-restapi`
+API contract v1.6.0 (55 operations, 276 in total), the use cases and handlers, OAuth connect (RFC 9728 and 8414
+discovery, PKCE, RFC 9207, RFC 8707), the `/mcp` route family on the team gateway (sealed sessions, full and search
+modes, admission, policy, limits, upstream credentials per auth kind, inventory refresh with drift holds, the ledger),
+`afs-mcp-bridge`, agent and pool access, `governedBy` on external systems, and the reconciler outputs (`AFS_MCP_*`,
+`/etc/afs/mcp.json`, team gateway egress, credentials, federation tokens and session keys, hosted servers, conditions);
+`-cli` 54 commands; `-website` SDK and screens 46 to 55. Build decisions: database CD-69, gateway CD-70 to CD-72;
+`-restapi` ADR-035 to ADR-037.
+
+**Deferred** (need cloud access or a later release):
+
+| Item | Why |
+|---|---|
+| Hosted servers on a real EKS cluster; envtest of their rollout | No cluster yet; rendered objects are tested |
+| Pod Identity association for hosted servers that need AWS | Made with the AWS environment |
+| Image signature verification by admission policy | Needs the cluster's admission controller |
+| Live IdP federation (Entra ID, Okta) and OAuth against real servers | No tenant; tested against fakes |
+| Separate per-agent instances of a hosted server (`per_agent`) | One instance per team in 1.3.0 (CD-71) |
+| OAuth authorization servers on another host in gateway egress | Not built (CD-72) |
+| Appendix D notifications for MCP events | Events are written to the outbox; channel templates follow |
+| A shared rate limiter across gateway replicas | Limits are per replica (up to twice the setting with two) |
+| Load tests at Appendix F scale | Wait for the AWS environment |
+
+---
 
 ## Appendix A. Roles and permissions
 

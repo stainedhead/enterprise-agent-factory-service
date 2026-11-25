@@ -1042,6 +1042,15 @@ isolation and `TestCrossTeamWritesChangeNothing` cover every team-owned table; u
 
 ## 9. Change log
 
+- **v1.6.0 amendment (2026-11-25), build of `-db` 000024 to 000026 and `-restapi` 1.3.0:** migration 000025 lets a
+  security operator write the `mcp_server.*` and `mcp_primitive.*` outbox events of its own reviews and read every
+  team's `mcp_events` and `mcp_usage_daily`; migration 000026 drops the stored PKCE verifier from `mcp_oauth_states`
+  (the API derives it with an HMAC of the state). Additive. Decision CD-69.
+
+| # | Decision |
+|---|---|
+| CD-69 | Every service connects with the startup parameter `role` set to its group role (`afs_app`, `afs_reconciler`, `afs_gateway`, `afs_billing`, `afs_edge`), so the `current_user` checks in triggers and `SECURITY DEFINER` functions hold for a LOGIN user that is only a member of the group, which is how RDS IAM users are set up |
+
 - **v1.6.0 (2026-11-25), governed MCP servers ([PRD](../../mcp-gateway-PRD.md), approved by J):** migration 000024
   (§7.5): `mcp_servers` with review transitions and the enterprise and team slug rule, hosted specs pinned by digest,
   `mcp_primitives` with pinning and a transition guard, team switches gated on a per-namespace gateway, agent and pool

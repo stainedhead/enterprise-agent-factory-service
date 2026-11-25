@@ -391,3 +391,6 @@ Accepted, Proposed (needs review), Superseded.
   `afs-mcp-bridge`. The policy decision is a database function shared by API, reconciler and gateway (CD-51). Search
   quality is BM25 until embeddings are approved (MCP-OQ-6). Real EKS, IdP federation and hosted-image signing checks
   wait for cloud access (fakes and local tests until then).
+- **Built (2026-11-25):** `-db` 000024 to 000026, `-restapi` 1.3.0 (PR #17: the MCP route, catalog, review, OAuth
+  connect, agent and pool access, reconciler outputs and conditions, `afs-mcp-bridge`; ADR-035 to ADR-037 there),
+  `-cli` 1.3.0 (PR #14, 54 commands). Build decisions: database CD-69, gateway CD-70 to CD-72.
