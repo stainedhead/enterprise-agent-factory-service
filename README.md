@@ -56,9 +56,11 @@ The goals and non-goals are in [INTENT.md](INTENT.md); the full requirements are
 Proposed changes to it are change PRDs at this root:
 [Paperclip team collaboration](paperclip-team-collaboration-PRD.md) (built, release 1.0.1),
 [Team orchestration agent](team-orchestration-agent-PRD.md) (built, release 1.1.0), which makes an
-orchestration agent part of every team and adds service, team and agent model access, and
+orchestration agent part of every team and adds service, team and agent model access,
 [Team model gateway](model-endpoint-gateway-PRD.md) (proposed, not built), a per-namespace gateway that
-meters and caps OpenAI-compatible model endpoints, including internal inference.
+meters and caps OpenAI-compatible model endpoints, including internal inference, and
+[Governed MCP servers](mcp-gateway-PRD.md) (decided, not built, target 1.3.0), which adds MCP to that gateway
+with an enterprise catalog teams opt into, team-managed servers, tool-level policy and search-first discovery.
 
 ## What a team gets
 
