@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Decisions answered by J (2026-11-24/25), section 14.3.** Design document: nothing is built, and contracts and schema change only when J approves implementation. Release 1.1.0 is not changed. **Target release 1.3.0** in every repository (`-db` and `-restapi` in lockstep), after the team gateway and model routes of [PR #24](https://github.com/stainedhead/enterprise-agent-factory-service/pull/24) ship in 1.2.0 (MCP-OQ-17) |
+| **Status** | **Approved by J for implementation (2026-11-25), release 1.3.0** in every repository (`-db` and `-restapi` in lockstep), with the answers of section 14.3 and the implementation appendices A to I. Builds after release 1.2.0 ([team model gateway](model-endpoint-gateway-PRD.md)) is on main. Release 1.1.0 is not changed |
 | **Kind** | Change PRD to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md) (EXT-1..7, TEAM-3, SEC-6, RPT), the [team orchestration agent PRD](team-orchestration-agent-PRD.md) and the [gateway contract](docs/contracts/gateway-contract.md) v1.1.0. **Depends on** the per-namespace team gateway proposed in root PR #24 (`model-endpoint-gateway-PRD.md`, decision MEG-D1) |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
@@ -495,7 +495,7 @@ AccessDenied tests for each.
 
 ## 14. Decisions, risks and open questions
 
-### 14.1 Proposed decisions (Claude, for J's review)
+### 14.1 Decisions (confirmed by J's answers, 2026-11-25)
 
 | # | Decision | Why |
 |---|---|---|
@@ -817,3 +817,450 @@ AWS-console style, from `docs/ui/source/mcp_screens.py` (run by `gen.py`, render
   (cases 4 and 6, MCP-D6, MCP-OQ-10).
 - 2026-11-24: J asked for UI, use cases and test cases to review; sections 15 to 17 and mockups 46 to 55 added.
 - 2026-11-25: J answered all open questions (section 14.3). MCP moves to release 1.3.0; team server approval becomes a three-level service policy with team approval by default; user-delegated OAuth uses service accounts only; per-agent OIDC tokens ship with MCP.
+- 2026-11-25: J approved implementing this PRD as release 1.3.0. Implementation appendices A to I added: roles and permissions, service settings, per-agent federated identity, API operations and events, stories by layer, non-functional requirements, release plan, existing MCP traffic, more test cases.
+
+---
+
+# Implementation appendices (added 2026-11-25 for release 1.3.0)
+
+J approved implementing this PRD as release 1.3.0 on 2026-11-25, after release 1.2.0 (team gateway and model routes,
+`model-endpoint-gateway-PRD.md`). These appendices hold the details the layers build from. Where an appendix and an
+earlier section differ, the appendix wins. Story ids use the prefix `MCP-` so they never collide with ids that other
+PRDs add (DB-US, RA-US, WEB-US, CLI-US).
+
+## Appendix A. Roles and permissions
+
+There are no new roles. Security operators gain MCP review rights.
+
+| Action | Service admin | Security operator | Team-admin | Team viewer | Agent (workload) |
+|---|---|---|---|---|---|
+| Create, change, publish, retire an enterprise server; set its service policy and drift setting | Yes | No | No | No | No |
+| Import `server.json` as a draft | Yes | No | No | No | No |
+| Set service MCP settings (Appendix B), including the team server approval policy | Yes | No | No | No | No |
+| Allow a team to register servers (`teams.may_add_mcp_servers`) | Yes | No | No | No | No |
+| Review queue: approve, reject, ask for changes, decide primitives of team servers that need security approval under the policy | Yes | Yes | No | No | No |
+| Suspend or resume any server | Yes | Yes | No | No | No |
+| Approve held primitive changes on enterprise servers | Yes | Yes | No | No | No |
+| Switch an enterprise server on or off for a team, choose Full or Read-only | Yes | No | Yes | No | No |
+| Register, change, delete a team server (when allowed); approve it where the policy lets teams approve | Yes | No | Yes | No | No |
+| Approve held changes on team servers (where the policy lets teams approve) | Yes | Yes | Yes | No | No |
+| Set team and agent policy rules; narrow an agent's or pool's servers; choose search or full mode | Yes | No | Yes | No | No |
+| Set a server credential (write-only) or connect a service account by OAuth | Yes (enterprise shared and any team) | No | Yes (own team) | No | No |
+| Add or remove an agent's federated identity (Appendix C) | Yes | No | Yes | No | No |
+| See catalog, team servers, effective tools, conditions | Yes (all teams) | Yes (all teams) | Yes (own team) | Yes (own team, credential metadata only) | Own set through `/etc/afs/mcp.json` |
+| Read `mcp_events` and MCP reports | Yes (all) | Yes (all) | Yes (own team) | Yes (own team) | No |
+| Start a time-boxed search query capture | Yes | No | No | No | No |
+| Call MCP through the gateway | No | No | No | No | Yes, within its effective set |
+
+Permissions, all in `internal/authz` with allowed and denied tests per role:
+
+- `mcp-servers:read`
+- `mcp-servers:write`, for service scope
+- `mcp-servers:review`, for service admins and security operators
+- `mcp-servers:suspend`
+- `team-mcp-servers:read`
+- `team-mcp-servers:write`
+- `team-mcp-servers:approve`, which is granted to team-admins only while the policy allows it. This check is made in
+  the use case, not in the static matrix.
+- `mcp-settings:write`
+- `mcp-events:read`
+- `agent-federated-identities:write`
+
+## Appendix B. Service settings
+
+| Key | Default | Allowed values | Used by |
+|---|---|---|---|
+| `mcp.enabled` | `false` until the release is rolled out, then `true` | boolean | Feature switch; off means no `/mcp` paths, no catalog screens for teams |
+| `mcp.team_server_approval` | `team_all` | `team_all`, `team_low_security_higher`, `security_all` | §8, MCP-OQ-4 |
+| `mcp.host_deny_list` | `[]` | host or `*.domain` globs | §8 automatic checks; a denied host makes the risk tier `high` |
+| `mcp.corporate_domains` | `[]` | `*.domain` globs | Location `corporate` and the `low` tier rule |
+| `mcp.allowed_image_registries` | the environment's ECR registry | registry hosts | §10.2 hosted images |
+| `mcp.image_signature_policy` | `required` | `required`, `warn` (non-production only) | §10.2 |
+| `mcp.default_agent_mode` | `search` | `search`, `full` | §6.1 default for new agents |
+| `mcp.search_limit_max` | `25` | 5 to 50 | `afs_search` |
+| `mcp.refresh_interval_minutes` | `15` | 1 to 1440 | §6.3 inventory refresh when no list-changed signal |
+| `mcp.limits` | request 1 MiB, response 8 MiB, timeout 60 s, 8 concurrent calls per agent per server | per field | §12.2, overridable per server |
+| `mcp.query_capture_max_days` | `7` | 1 to 14 | §11.4 |
+| `mcp.events_retention_months` | `13` | 3 to 36 | `mcp_events` partitions |
+| `gateway.mcp.placement_default` | `combined` | `combined`, `separate` | §5.3; a team may override (`teams.mcp_placement`) |
+| `federation.allowed_audiences` | `[]` | exact audiences or globs | Appendix C; empty means service admins add each audience |
+
+## Appendix C. Per-agent federated identity (MCP-OQ-10)
+
+The aim is for an agent's own CLIs and SDKs to get OIDC temporary credentials for targets that trust the cluster's
+OIDC issuer, with nothing stored. Examples are Azure CLI, Google Cloud SDK, a corporate API behind Okta, and Vault JWT
+auth. This builds on the projected-token pattern of the model gateway PRD §11.1, applied to an agent's own pod.
+
+- **Data:** table `agent_federated_identities` with the following columns.
+  - `(team_id, agent_id, name)`
+  - `audience`
+  - `file_path`, which defaults to `/var/run/secrets/afs/federation/<name>/token`
+  - `env_var`, which defaults to `AFS_FEDERATED_TOKEN_FILE_<NAME>` and is upper-snake
+  - `expiration_seconds` (600 to 86400, default 3600)
+  - `created_by` and `created_at`
+  - Pool workers use `pool_federated_identities`.
+  - Both tables are team-scoped, with RLS, and are covered by isolation tests.
+- **Rules:**
+  - At most 10 per agent.
+  - The audience must match `federation.allowed_audiences`, or be added there by a service admin first.
+  - `sts.amazonaws.com` is refused because AWS access goes through Pod Identity (ADR-009).
+  - The audience `afs-gateway` is reserved.
+- **Delivery:** the reconciler adds a projected ServiceAccount token volume per identity to the agent's pod spec, with
+  the audience and expiry above, plus the environment variable. The kubelet rotates the token. A change rolls the pod.
+  The subject is `system:serviceaccount:afs-t-<slug>:<agent service account>`, and the console shows it for the target
+  IdP's trust setup.
+- **What it does not do:** AFS never exchanges these tokens. The agent's tool does that. Calls stay outside the
+  gateway and are visible only in Cilium flow logs and the existing traffic report (§9 case 6).
+- **API:**
+  - `ListAgentFederatedIdentities`
+  - `PutAgentFederatedIdentity`
+  - `DeleteAgentFederatedIdentity`
+  - The same three operations for pools
+  - Each one is audited and emits the outbox event `agent.federated_identity_changed`.
+- **CLI:**
+  - `afs agents list-agent-federated-identities`
+  - `afs agents put-agent-federated-identity`
+  - `afs agents delete-agent-federated-identity`
+- **Console:** a *Federated identities* panel on the agent's *AWS access* tab, renamed *Cloud & identity access*. It
+  shows the name, audience, file and variable, and the subject and issuer to copy.
+
+## Appendix D. API operations, errors and events (contract v1.6.0)
+
+Every operation follows the root API conventions: `/v1`, camelCase, `If-Match` on updates, `Idempotency-Key` on
+creates, `maxResults`/`nextToken`, and errors as `{code, message, requestId, details}`. Every mutation writes the row,
+an `audit_log` row and its outbox event in one transaction.
+
+| Operation | Method and path | Permission |
+|---|---|---|
+| ListMcpServers | `GET /v1/mcp-servers` (filters `kind`, `status`, `risk`, `teamId`) | `mcp-servers:read` |
+| CreateMcpServer | `POST /v1/mcp-servers` | `mcp-servers:write` |
+| GetMcpServer, UpdateMcpServer, DeleteMcpServer | `GET`, `PATCH`, `DELETE /v1/mcp-servers/{mcpServerId}` | read, write, write |
+| ImportMcpServerManifest | `POST /v1/mcp-servers:import` (body: `server.json`) | `mcp-servers:write` |
+| PublishMcpServer, RetireMcpServer | `POST /v1/mcp-servers/{id}:publish`, `:retire` | `mcp-servers:write` |
+| SuspendMcpServer, ResumeMcpServer | `POST /v1/mcp-servers/{id}:suspend`, `:resume` (reason required) | `mcp-servers:suspend` |
+| RefreshMcpInventory | `POST /v1/mcp-servers/{id}:refresh` | write (service) or `team-mcp-servers:write` (team) |
+| ListMcpPrimitives | `GET /v1/mcp-servers/{id}/primitives` (filters `kind`, `status`) | read |
+| GetMcpPrimitiveChange | `GET /v1/mcp-servers/{id}/primitives/{primitiveId}/change` (old, new, diff, checks) | read |
+| ApproveMcpPrimitive, RejectMcpPrimitive | `POST …/primitives/{primitiveId}:approve`, `:reject` | review, or team approve per policy |
+| PutMcpPolicy | `PUT /v1/mcp-servers/{id}/policy` (service rules); `PUT /v1/teams/{teamId}/mcp-servers/{id}/policy` (team rules) | write / `team-mcp-servers:write` |
+| PutMcpServerCredential | `PUT /v1/mcp-servers/{id}/credential` (shared); `PUT /v1/teams/{teamId}/mcp-servers/{id}/credential` | write / team write |
+| StartMcpOAuthConnect, CompleteMcpOAuthConnect, DisconnectMcpOAuth | `POST /v1/teams/{teamId}/mcp-servers/{id}/oauth:start` (returns authorization URL and `state`), `GET /v1/mcp-oauth/callback`, `POST …/oauth:disconnect` | team write |
+| TestMcpFederation | `POST /v1/teams/{teamId}/mcp-servers/{id}/federation:test` | team write |
+| ListTeamMcpServers | `GET /v1/teams/{teamId}/mcp-servers` (enterprise with switch state, and team servers) | `team-mcp-servers:read` |
+| PutTeamMcpServer | `PUT /v1/teams/{teamId}/mcp-servers/{id}` (`enabled`, `mode` `full` / `read_only`) | team write |
+| CreateTeamMcpServer | `POST /v1/teams/{teamId}/mcp-servers` | team write and `teams.may_add_mcp_servers` |
+| SubmitMcpServerForReview | `POST /v1/teams/{teamId}/mcp-servers/{id}:submit` | team write |
+| ApproveMcpServer, RejectMcpServer, RequestMcpServerChanges | `POST /v1/mcp-servers/{id}:approve`, `:reject`, `:request-changes` (note required; per-primitive decisions in the body) | review, or team approve per policy |
+| ListMcpReviews | `GET /v1/mcp-reviews` (pending servers and held primitives, all teams) | `mcp-servers:review` |
+| GetEffectiveAgentMcp | `GET /v1/teams/{teamId}/agents/{agentId}/mcp` (servers, effective primitives, the deciding level, URLs, env names) | `team-mcp-servers:read` |
+| Agent and pool MCP access | `mcp` object in the existing agent and pool update bodies: `{access: all\|selected, serverIds, mode, blocks}` | team write |
+| ListMcpEvents | `GET /v1/teams/{teamId}/mcp-events`, `GET /v1/mcp-events` (filters time, agent, server, method, name, outcome) | `mcp-events:read` |
+| GetMcpUsageReport | `GET /v1/teams/{teamId}/reports/mcp`, `GET /v1/reports/mcp` (`groupBy` server, primitive, agent, team, day; `view` usage, unused, refusals, discovery; JSON or CSV) | `mcp-events:read` |
+| StartMcpQueryCapture, StopMcpQueryCapture | `POST /v1/mcp-settings/query-capture:start` (days ≤ setting), `:stop` | `mcp-settings:write` |
+| Service settings | the existing settings operations with the keys of Appendix B | `mcp-settings:write` |
+| Agent federated identities | Appendix C | `agent-federated-identities:write` / read with team read |
+
+**Validation reasons** (`ValidationError` `details.reason`):
+- `slug_invalid`
+- `slug_reserved`
+- `slug_taken`
+- `url_not_https`
+- `host_denied`
+- `image_not_pinned`
+- `image_unsigned`
+- `registry_not_allowed`
+- `auth_kind_unsupported`
+- `service_account_required`
+- `audience_not_allowed`
+- `team_servers_not_allowed`
+- `approval_not_permitted_by_policy`
+- `server_not_published`
+- `capture_window_too_long`
+
+**Gateway refusal reasons** (§7.2, plus):
+- `server_suspended`
+- `auth_reconnect_needed`
+- `federation_not_ready`
+- `rate_limited`
+- `header_mismatch`
+
+**Outbox events:**
+- `mcp_server.created`, `.updated`, `.published`, `.retired`, `.deleted`
+- `mcp_server.submitted`, `.approved`, `.rejected`, `.changes_requested`
+- `mcp_server.suspended`, `.resumed`
+- `mcp_server.primitive_changed`, `.primitive_approved`, `.primitive_rejected`
+- `mcp_server.auth_expired`, `.auth_restored`
+- `mcp_server.degraded`, `.recovered`
+- `team_mcp_server.enabled`, `.disabled`
+- `mcp_settings.changed`
+- `mcp_query_capture.started`, `.stopped`
+- `agent.federated_identity_changed`
+
+The reconciler sends notifications for `submitted` (to reviewers), `primitive_changed`, `suspended`, `auth_expired`,
+`degraded`, and the review decisions (to the owning team).
+
+## Appendix E. Stories by layer
+
+### E.1 Root contracts and docs
+
+**MCP-DOC-1 · Contracts first.**
+- Database contract, API contract (v1.6.0) and gateway contract (v1.3.0) gain the tables, operations, errors, events,
+  `/mcp` endpoints, meta-tools, `AFS_MCP_*` variables and `/etc/afs/mcp.json` schema of this PRD.
+- These land in the root before any child PR. Contract decisions continue the CD numbering.
+
+**MCP-DOC-2 · Design and diagrams.**
+- `docs/solution-design.md` gains an MCP section. There is an ADR for MCP on the team gateway.
+- A new diagram `mcp-gateway` (source in `docs/diagrams/source/`, rendered SVG and PNG) is copied into the child
+  READMEs that show it.
+- The root README, `docs/product-summary.md` and `docs/product-details.md` describe the feature.
+- `user-docs/` gains "Use MCP servers from an agent".
+- The `skills/` entry for `afs` gains the `mcp-servers` commands.
+
+### E.2 `-db` (release 1.3.0, migration after 1.2.0's)
+
+**MCP-DB-1 · Catalog tables.**
+- `mcp_servers` with:
+  - `id` (`mcp_` prefixed ULID, `afs.ulid_ok`)
+  - `team_id` (NULL for enterprise)
+  - `slug` (`^[a-z][a-z0-9-]{1,30}$`; `afs` reserved). Unique among enterprise servers, unique per team, and never
+    equal to an enterprise slug. The last rule is enforced by a trigger, since NULL `team_id` cannot share a unique
+    index.
+  - Text plus CHECK enumerations for `transport`, `location`, `auth_kind`, `review_status`, `risk_tier`,
+    `drift_policy`.
+  - `limits jsonb`, `federation jsonb`, `version`, `generation`, `created_at/by`, `updated_at`, and the
+    revision trigger.
+- `mcp_hosted_specs`, which CHECKs that `image_digest` matches `^[^@]+@sha256:[0-9a-f]{64}$`.
+- Proven by `TestMcpServers/*`: slug rules, enum checks, digest pin, and the trigger refusing a team slug equal to an
+  enterprise slug and the reverse.
+
+**MCP-DB-2 · Primitives and pinning.**
+- `mcp_primitives` has `(server_id, kind, name)` unique, `digest` (`sha256:` plus 64 hex), `approved_digest`,
+  `status`, `annotations jsonb`, and `pending_definition jsonb`.
+  - `pending_definition` holds the new definition while it is held. It is tool metadata, not secrets.
+- A transition guard allows these moves only:
+  - `pending_review → approved | blocked`
+  - `approved → pending_review`, when the digest changes
+  - `blocked → approved`, by review
+- Proven by `TestMcpPrimitives/*`.
+
+**MCP-DB-3 · Opt-in, narrowing and policy.**
+- `team_mcp_servers` (`enabled`, `mode`).
+- `agent_mcp_servers` and `pool_mcp_servers`.
+- `agents.mcp_access`, `agents.mcp_mode`, `agent_pools.mcp_access` and `agent_pools.mcp_mode`.
+- `mcp_policies`, with a CHECK that the level and scope columns agree.
+- Composite foreign keys `(team_id, id)` everywhere. A team row cannot reference another team's server: only
+  enterprise or same-team servers, by a trigger.
+- `afs.mcp_admission(subject_kind, subject_id)` returns the effective servers and primitive decisions with the deciding
+  level. View `effective_agent_mcp` (security invoker).
+- Proven by `TestMcpAdmission/*`: every rule of §7.2, opt-in default off, the default-for-new-teams flag applied by
+  `create_team`, read-only mode, and a block at any level winning.
+
+**MCP-DB-4 · Credentials, reviews and federated identities.**
+- `mcp_credentials` (ARN only), `mcp_reviews` and `agent_federated_identities` / `pool_federated_identities`
+  (Appendix C).
+- `teams.may_add_mcp_servers` is guarded like `may_add_external_systems`, so only service admins can change it, and
+  `teams.mcp_placement` also.
+- `afs.secret_path` accepts the `_gateway/mcp/<slug>` scope.
+- The column-name test still finds no column that could hold a secret value.
+- Proven by `TestMcpCredentials/*` and the existing secret-column test.
+
+**MCP-DB-5 · Ledger.**
+- `mcp_events`, partitioned by day, with the fields of §11.1 and a CHECK on `outcome`. It is append-only by trigger,
+  the same as audit.
+- `mcp_usage_daily` rollup and `afs.rollup_mcp_usage(day)`.
+- Grants: `afs_gateway` inserts only for its team (`SET LOCAL afs.team_ids`), `afs_app` reads under RLS, and
+  `afs_readonly` reads.
+- Proven by `TestMcpEvents/*`: append-only, partition creation, rollup totals, retention drop.
+
+**MCP-DB-6 · Isolation and change feed.**
+- Every new team-owned table is in the RLS list and has rows in `seedOtherTeams`. `TestCrossTeamWritesChangeNothing`
+  and the catalog-driven isolation tests pass.
+- Change-feed triggers on the catalog, opt-in, policy, primitive and credential tables notify the gateway's admission
+  cache.
+
+**MCP-DB-7 · Release.**
+- `docs/data-model.md` is updated. Up/down/up passes. `CHANGELOG.md` gets the 1.3.0 entry, and the tag goes in lockstep
+  with `-restapi`.
+
+### E.3 `-restapi`
+
+**MCP-RA-1 · MCP API.**
+- The operations of Appendix D are in `api/openapi.yaml`, with handlers through use cases, and with allowed and denied
+  tests per role (viewer, team-admin, service admin, security operator, workload).
+- The policy-dependent approval check has a table test over the three policy values.
+
+**MCP-RA-2 · Gateway MCP server side.**
+- `/mcp` and `/mcp/<server>` run on Streamable HTTP for 2026-07-28. For 2025-11-25 clients there is the sealed
+  session id (§12.1). `Mcp-Method` and `Mcp-Name` are verified.
+- Search and full modes, the meta-tools and the prefixed names (§6).
+- Admission from `afs.mcp_admission`, cached 60 s and refreshed from the change feed.
+- Refusal reasons as listed.
+- Limits and rate limits.
+- Conformance tests use the official SDK clients for both versions.
+
+**MCP-RA-3 · Gateway MCP client side.**
+- Upstream sessions are per server and per team. The gateway uses `server/discover` and `initialize`, pagination,
+  `subscriptions/listen` and `list_changed`, `ttlMs` and `cacheScope`.
+- The inventory and digest calculation (RFC 8785), the drift handling of §7.4 and the automatic checks of §8.
+- The BM25 index.
+
+**MCP-RA-4 · Gateway credentials.**
+- `static`, `oauth_client`, `workload_federation` (RFC 8693 and Entra / Okta federated credential flows, reusing 1.2.0's
+  federation code), `oauth_user` with service accounts only, and `aws_sigv4`.
+- Tokens are held in memory and audience-bound. No token is ever passed through. Upstream auth headers are redacted.
+
+**MCP-RA-5 · Gateway telemetry.**
+- An `mcp_events` writer, batched, that fails open for telemetry but closed for admission.
+- OTel spans and metrics per §11.2, and trace context per §11.2.
+
+**MCP-RA-6 · Reconciler.**
+- Gateway egress to MCP hosts.
+- Hosted server Deployments with `afs-mcp-bridge`, network policy, signature verification by admission policy, and
+  per-team or per-agent instances.
+- `/etc/afs/mcp.json` and `AFS_MCP_*` per agent and pool.
+- Federated identity token volumes (Appendix C).
+- Conditions `McpServerReady`, `McpAuthExpired`, `McpDriftPending`.
+- Notifications per Appendix D.
+- `gateway.mcp.placement`.
+
+**MCP-RA-7 · Bridge.**
+- `cmd/afs-mcp-bridge` is a new binary and image: stdio to Streamable HTTP, with restart on exit and
+  serialised requests.
+- Tested against a stdio fixture server.
+
+**MCP-RA-8 · Reports.**
+- Usage, unused, refusals and discovery reports from `mcp_usage_daily` and `mcp_events`, with CSV.
+
+**MCP-RA-9 · Release.**
+- Pin `-db` v1.3.0. Version 1.3.0 in the Makefile, Helm chart and `CHANGELOG.md`.
+- `docs/technical-details.md` and an ADR. The `user-docs` MCP page.
+
+### E.4 `@afs/sdk`
+
+**MCP-SDK-1 · MCP resources.**
+- Generated from contract v1.6.0:
+  - `mcpServers.*`, `teams.mcpServers.*`, `mcpReviews.list()`, `mcpEvents.list()` (an async iterator) and
+    `reports.mcp()`
+  - `agents.federatedIdentities.*` and `pools.federatedIdentities.*`
+  - `mcp` in agent and pool update types
+  - `settings` keys typed
+- Helpers:
+  - `mcp.effectiveTools(agent)`, which groups the effective primitives by server and deciding level
+  - `mcp.cliCommand(input)`, for the console's CLI previews
+- Credential setters accept a value but never return one, and their TSDoc says so.
+- Contract replay tests pass. It is a minor version.
+
+### E.5 Console
+
+**MCP-WEB-1 · Service admin pages.**
+- Screens 46, 47, 48 and 55 as mocked: the catalog, server detail (tabs Overview, Tools-resources-prompts, Policy,
+  Credentials, Teams, Usage, Reviews, Revisions), the add/import wizard with its review step and CLI preview, and the
+  report.
+- A *MCP* section on *Service settings* with the keys of Appendix B. The approval policy is a radio group with three
+  options and their consequences.
+
+**MCP-WEB-2 · Review queue.**
+- Screen 49 under *Governance › MCP reviews*, for service admins and security operators. It covers pending servers,
+  held primitives, diffs and checks, and approve, reject or ask-for-changes with a required note.
+
+**MCP-WEB-3 · Team pages.**
+- Screens 50, 51 and 53 for team-admins, and 54 read-only for viewers.
+- Controls are disabled with tooltips when not allowed by role, by `may_add_mcp_servers` or by the approval policy. The
+  OAuth *Connect* flow opens the authorization URL in a new window and returns to the page.
+
+**MCP-WEB-4 · Agent MCP tab.**
+- Screen 52 on agents and pools: all or selected servers, blocks, search or full mode, env names and the effective
+  tools with the deciding level.
+- The *Cloud & identity access* tab with federated identities (Appendix C).
+
+**MCP-WEB-5 · Quality.**
+- `can(...)` gates mirror Appendix A, and every gate has a denied test.
+- No secret value in state, URL or storage.
+- WCAG 2.2 AA (axe) on every new screen.
+- Playwright specs and visual baselines for screens 46 to 55 run against the fake API, regenerated in CI. J approves
+  the baselines.
+
+### E.6 CLI
+
+**MCP-CLI-1 · `mcp-servers` service.**
+- One command per operation of Appendix D, for example `list-mcp-servers`, `create-mcp-server`,
+  `import-mcp-server-manifest`, `publish-mcp-server`, `suspend-mcp-server`, `list-mcp-primitives`,
+  `approve-mcp-primitive`, `put-mcp-policy`, `put-mcp-server-credential` (value from file, stdin or prompt only),
+  `start-mcp-oauth-connect`, `test-mcp-federation`, `list-mcp-reviews`, `approve-mcp-server` and
+  `start-mcp-query-capture`.
+- Under `teams`: `list-team-mcp-servers`, `put-team-mcp-server`, `create-team-mcp-server`,
+  `submit-mcp-server-for-review`.
+- Under `agents`: `get-effective-agent-mcp` and the federated identity commands.
+- `audit list-mcp-events` and `reports get-mcp-usage-report`.
+
+**MCP-CLI-2 · Quality.**
+- Help with an example for every command.
+- Table columns: `Slug`, `Kind`, `Status`, `Risk`, `Tools`, `Teams`.
+- Goldens for table and text.
+- An `AccessDenied` test (exit 254) per operation.
+- `--mcp-access`, `--mcp-servers`, `--mcp-mode` and `--mcp-blocks` on agent and pool update commands.
+- `user-docs/reference` is regenerated.
+
+## Appendix F. Non-functional requirements
+
+| Area | Requirement |
+|---|---|
+| Performance | Gateway overhead p99 < 15 ms for `tools/call` (excluding upstream); `afs_search` p95 < 50 ms with 5,000 indexed primitives per team; admission and policy changes enforced within 60 s (p95); a list-changed refresh applied within 2 minutes |
+| Scale | Per team: 50 servers, 2,000 primitives per server, 500 MCP calls per second across replicas, 1,000 concurrent streams; service-wide: 300 teams; `mcp_events` 50 million rows per day with daily partitions |
+| Availability | MCP on the team gateway shares its 99.9% target; one upstream failing never affects another server (per-server pools and circuit breakers); hosted servers restart in under 30 s (p95) |
+| Security | No MCP credential in an agent pod (TC-30 every release); no token passthrough; upstream hosts reachable only from the gateway and hosted pods (isolation tests); hosted images pinned and signed; threat model and penetration test of the OAuth connect flow before production |
+| Privacy | No arguments, results or query text stored outside an audited capture window |
+| Observability | Metrics per §11.2; alerts on refusal spikes, auth expiry, drift pending over 24 h, upstream error rate |
+| Accessibility | WCAG 2.2 AA on screens 46 to 55 and the federated identities panel |
+| Compatibility | Agents without MCP settings are unchanged. 1.2.0 clients keep working. MCP is additive in contract versions (minor) |
+| Recovery | Catalog, policy and reviews are desired state (backed up with the database); the index is rebuilt from upstream on gateway start in under 60 s for 2,000 primitives |
+
+## Appendix G. Release plan and dependencies
+
+| Milestone | Scope | Exit criteria |
+|---|---|---|
+| M0 Contracts | MCP-DOC-1 | Contracts merged on root main after 1.2.0's |
+| M1 Data | MCP-DB-1 to MCP-DB-7 | `-db` 1.3.0 merged with gates and integration tests green |
+| M2 Gateway and API | MCP-RA-1 to MCP-RA-9 | `-restapi` 1.3.0 merged; conformance and isolation tests green; `mcp.enabled` false by default until rollout |
+| M3 Clients | MCP-SDK-1, MCP-WEB-1 to 5, MCP-CLI-1 and 2 | `-website` and `-cli` 1.3.0 merged; baselines for J |
+| M4 Docs | MCP-DOC-2 | READMEs, diagrams, user docs, skills updated |
+| Rollout | `mcp.enabled` on per environment; canary teams first | J pushes the 1.3.0 tags |
+
+| Dependency | Needed for | Owner |
+|---|---|---|
+| 1.2.0 team gateway, contracts and federation code on main | Everything | Model gateway work |
+| Official MCP Go SDK (or a thin JSON-RPC layer) supporting 2026-07-28 and 2025-11-25 | MCP-RA-2, MCP-RA-3 | Recheck at M0 (MCP-OQ-15) |
+| Cluster OIDC issuer trusted by target IdPs | Federation | Enterprise identity and cloud teams |
+| Image signing (cosign or Notation) and admission verification policy | Hosted servers | Platform |
+| A public HTTPS URL for the AFS Client ID Metadata Document per environment | OAuth connect | Platform |
+
+## Appendix H. Existing MCP traffic
+
+- External systems that point at known MCP hosts can be tagged with category `mcp`. Once an enterprise or team server
+  exists for the same host, that external system can no longer be granted to agents. This mirrors the model gateway's
+  rule for direct provider access. The console says to use the MCP server instead, and denied direct attempts show in
+  the traffic report.
+- A service-admin override per team keeps direct access, shown as *Ungoverned*. It is the same pattern as model
+  routes.
+- Agent-local stdio servers are unchanged (§10.3).
+
+## Appendix I. Additional test cases
+
+| ID | Layer | Case | Expected | Stories |
+|---|---|---|---|---|
+| TC-47 | db | Team slug equals enterprise slug, and the reverse | `23514` both ways | MCP-DB-1 |
+| TC-48 | db | Primitive transitions not in the guard | Refused | MCP-DB-2 |
+| TC-49 | db | `create_team` with two default-for-new-teams servers | Both `team_mcp_servers` rows enabled; other teams unchanged | MCP-DB-3, MCP-US-3 |
+| TC-50 | db | UPDATE or DELETE on `mcp_events` | Refused by trigger | MCP-DB-5 |
+| TC-51 | api | Each Appendix D operation × each role | Matches Appendix A | MCP-RA-1 |
+| TC-52 | api | Federated identity with audience `sts.amazonaws.com`, a disallowed audience, an 11th identity | `ValidationError` with the matching reason | Appendix C |
+| TC-53 | rec | Federated identity added | Pod rolls; projected volume and env var present with the audience and expiry | Appendix C |
+| TC-54 | api | Start a query capture for 30 days | `capture_window_too_long`; 7 days accepted and audited | Appendix B |
+| TC-55 | gw | Upstream on 2025-11-25 with stateful sessions behind two gateway replicas | Calls succeed on either replica | MCP-RA-3 |
+| TC-56 | gw | One upstream times out repeatedly | Circuit opens for that server only; other servers unaffected | Appendix F |
+| TC-57 | gw | Gateway restart | Index rebuilt and searchable in < 60 s for 2,000 primitives | Appendix F |
+| TC-58 | api | External system tagged `mcp` with a matching MCP server; grant to an agent | Refused unless the team override is set | Appendix H |
+| TC-59 | ui | Approval policy radio on Service settings; team approve button under each policy | Button enabled or disabled with the policy-naming tooltip | MCP-WEB-1, MCP-WEB-3 |
+| TC-60 | sdk | Contract replay for every new operation | Pass | MCP-SDK-1 |
+| TC-61 | cli | Golden output and `AccessDenied` for every new command | Pass | MCP-CLI-2 |
+| TC-62 | perf | 500 calls per second, 1,000 streams per team gateway | Overhead and search latency within Appendix F | Appendix F |
