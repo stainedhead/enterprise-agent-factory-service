@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Built (release 1.3.0, 2026-11-25; tags pending J)**. `-db` PR #28 (docs; migrations 000024 to 000026 merged earlier), `-restapi` PR #17 (with parts 1 to 3 merged earlier) and `-cli` PR #14 merged; `-website` PR #15 (SDK and screens 46 to 55) in review, stacked on its 1.2.0 PR #14. What was built and what is deferred: [§21](#21-built-and-deferred-130). Approved by J for implementation on 2026-11-25 with the answers of section 14.3 and the implementation appendices A to I |
+| **Status** | **Built (release 1.3.0, 2026-11-25; tags pending J)**. `-db` PR #28 (docs; migrations 000024 to 000026 merged earlier), `-restapi` PR #17 (with parts 1 to 3 merged earlier), `-cli` PR #14 and `-website` PR #15 (SDK and screens 46 to 55, baselines approved by J) merged. What was built and what is deferred: [§21](#21-built-and-deferred-130). Approved by J for implementation on 2026-11-25 with the answers of section 14.3 and the implementation appendices A to I |
 | **Kind** | Change PRD to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md) (EXT-1..7, TEAM-3, SEC-6, RPT), the [team orchestration agent PRD](team-orchestration-agent-PRD.md) and the [gateway contract](docs/contracts/gateway-contract.md) v1.1.0. **Depends on** the per-namespace team gateway proposed in root PR #24 (`model-endpoint-gateway-PRD.md`, decision MEG-D1) |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
