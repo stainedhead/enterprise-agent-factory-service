@@ -23,7 +23,7 @@ Sub-directory names match the repository names. Clone each one next to this file
 | `enterprise-agent-factory-service-db/` | SQL, Go 1.27 | PostgreSQL schema and migrations, roles and row-level security, `afs-migrate`, Go module embedding the migrations | Feature complete (migrations 000001–000026); release 1.3.0, shared with `-restapi` (lockstep) |
 | `enterprise-agent-factory-service-restapi/` | Go 1.27 | `afs-api` (REST, RBAC, audit), `afs-reconciler`, `afs-gateway`, `afs-billing`, `afs-edge`; owns `api/openapi.yaml` | Feature complete; release 1.3.0 (API 1.6.0, 276 operations; governed MCP servers), lockstep with `-db` |
 | `enterprise-agent-factory-service-cli/` | Go 1.27 | `afs` CLI, AWS CLI conventions | Feature complete; release 1.3.0 (contract 1.6, 273 commands for 276 operations) |
-| `enterprise-agent-factory-service-website/` | TypeScript 7 (Bun workspace) | `@afs/sdk` accelerator SDK (`packages/sdk`) and the web console (`apps/console`) | Feature complete at 1.1.0; releases 1.2.0 (contract 1.5, PR #14) and 1.3.0 (contract 1.6, MCP screens) in review |
+| `enterprise-agent-factory-service-website/` | TypeScript 7 (Bun workspace) | `@afs/sdk` accelerator SDK (`packages/sdk`) and the web console (`apps/console`) | Feature complete at 1.1.0; releases 1.2.0 (contract 1.5, PR #14) and 1.3.0 (contract 1.6, MCP screens, PR #15) in review |
 
 All remotes are `github.com/stainedhead/<name>`. When a repository is added or changes status, update
 this table and the README table in the same change.
