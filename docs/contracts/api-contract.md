@@ -1079,12 +1079,13 @@ team's servers and switches only through `/v1/teams/{teamId}/…` paths, which t
 | `ListMcpReviews` | `GET /v1/mcp-reviews` (pending servers and held primitives of every team; filters `kind` `server`\|`primitive`, `riskTier`, `teamId`, `approver` `security`\|`team_admin`) | `mcp-servers:review` | `mcp-servers list-mcp-reviews` | `mcpReviews.list()` | 49 | P0 |
 | `ListMcpEvents` | `GET /v1/mcp-events` (filters `from`, `to`, `teamId`, `agentId`, `poolId`, `serverId`, `method`, `name`, `outcome`, `reason`; CSV with `Accept: text/csv`) | `mcp-events:read` | `audit list-mcp-events` | `mcpEvents.list()` | 55 | P0 |
 | `GetMcpUsageReport` | `GET /v1/reports/mcp` (`groupBy` `server`\|`primitive`\|`team`\|`agent`\|`day`; `view` `usage`\|`unused`\|`refusals`\|`discovery`\|`adoption`; `window` days for `unused`, 30 or 90; CSV) | `mcp-events:read` | `reports get-mcp-usage-report` | `reports.mcp()` | 55 | P0 |
-| `StartMcpQueryCapture`, `StopMcpQueryCapture` | `POST /v1/mcp-settings/query-capture:start` (`days` ≤ `mcp.query_capture_max_days`, `reason` required), `:stop`; `GET /v1/mcp-settings/query-capture` is `GetMcpQueryCapture` | `mcp-settings:write` (get: `mcp-events:read`) | `mcp-servers start-mcp-query-capture`, `stop-mcp-query-capture`, `get-mcp-query-capture` | `mcpSettings.startQueryCapture()`, `.stopQueryCapture()`, `.getQueryCapture()` | 55 | P1 |
+| `StartMcpQueryCapture`, `StopMcpQueryCapture` | `POST /v1/mcp-settings/query-capture:start` (`days` ≤ `mcp.query_capture_max_days`, `reason` required), `:stop` | `mcp-settings:write` | `mcp-servers start-mcp-query-capture`, `stop-mcp-query-capture` | `mcpSettings.startQueryCapture()`, `.stopQueryCapture()` | 55 | P1 |
+| `GetMcpQueryCapture` | `GET /v1/mcp-settings/query-capture` (the open window, if any) | `mcp-events:read` | `mcp-servers get-mcp-query-capture` | `mcpSettings.getQueryCapture()` | 55 | P1 |
 | `ListTeamMcpServers` | `GET /v1/teams/{teamId}/mcp-servers` (published enterprise servers with the team's switch and mode, and the team's own servers; filter `state` `on`\|`off`\|`pending`) | `team-mcp-servers:read` | `teams list-team-mcp-servers` | `teams.mcpServers.list()` | 50, 54 | P0 |
 | `GetTeamMcpServer` | `GET /v1/teams/{teamId}/mcp-servers/{mcpServerId}` (an enterprise server the team can see, or a team server) | `team-mcp-servers:read` | `teams describe-team-mcp-server` | `teams.mcpServers.get()` | 51, 54 | P0 |
 | `PutTeamMcpServer` | `PUT /v1/teams/{teamId}/mcp-servers/{mcpServerId}` (`{enabled, mode: full\|read_only}`; enterprise needs `published`; `409 team_gateway_required` while the team gateway is `shared`, CD-44) | `team-mcp-servers:write` | `teams put-team-mcp-server` | `teams.mcpServers.put()` | 50 | P0 |
 | `CreateTeamMcpServer` | `POST /v1/teams/{teamId}/mcp-servers` (needs `mayAddMcpServers`, else `403 team_servers_not_allowed`; created `draft`) | `team-mcp-servers:write` | `teams create-team-mcp-server` | `teams.mcpServers.create()` | 53 | P0 |
-| `UpdateTeamMcpServer`, `DeleteTeamMcpServer` | `PATCH`, `DELETE /v1/teams/{teamId}/mcp-servers/{mcpServerId}` (team servers only; an enterprise id → `403 not_team_server`) | `team-mcp-servers:write` | `teams update-team-mcp-server`, `delete-team-mcp-server` | `teams.mcpServers.update()`, `.delete()` | 51 | P0 |
+| `UpdateTeamMcpServer`, `DeleteTeamMcpServer` | `PATCH`/`DELETE /v1/teams/{teamId}/mcp-servers/{mcpServerId}` (team servers only; an enterprise id → `403 not_team_server`) | `team-mcp-servers:write` | `teams update-team-mcp-server`, `delete-team-mcp-server` | `teams.mcpServers.update()`, `.delete()` | 51 | P0 |
 | `SubmitMcpServerForReview` | `POST /v1/teams/{teamId}/mcp-servers/{mcpServerId}:submit` (runs the automatic checks; → `pending_review` with `riskTier` and `approver`) | `team-mcp-servers:write` | `teams submit-mcp-server-for-review` | `teams.mcpServers.submit()` | 53 | P0 |
 | `ApproveTeamMcpServer`, `RejectTeamMcpServer` | `POST /v1/teams/{teamId}/mcp-servers/{mcpServerId}:approve`, `:reject` (`note` required; refused with `403 approval_not_permitted_by_policy` when `mcp.team_server_approval` sends this tier to security) | `team-mcp-servers:approve` | `teams approve-team-mcp-server`, `reject-team-mcp-server` | `teams.mcpServers.approve()`, `.reject()` | 51 | P0 |
 | `RefreshTeamMcpInventory` | `POST /v1/teams/{teamId}/mcp-servers/{mcpServerId}:refresh` | `team-mcp-servers:write` | `teams refresh-team-mcp-inventory` | `teams.mcpServers.refresh()` | 51 | P1 |
@@ -1099,10 +1100,12 @@ team's servers and switches only through `/v1/teams/{teamId}/…` paths, which t
 | `GetEffectiveAgentMcp` | `GET /v1/teams/{teamId}/agents/{agentId}/mcp` and `GET /v1/teams/{teamId}/pools/{poolId}/mcp` (`GetEffectivePoolMcp`): servers, effective primitives with the deciding level and reason, URLs, env names | `team-mcp-servers:read` | `agents get-effective-agent-mcp`, `pools get-effective-pool-mcp` | `agents.mcp()`, `pools.mcp()` | 52 | P0 |
 | `ListTeamMcpEvents` | `GET /v1/teams/{teamId}/mcp-events` (filters as `ListMcpEvents` without `teamId`) | `mcp-events:read` | `audit list-team-mcp-events` | `teams.mcpEvents.list()` | 54 | P0 |
 | `GetTeamMcpUsageReport` | `GET /v1/teams/{teamId}/reports/mcp` (as `GetMcpUsageReport` without `team`, `adoption`) | `mcp-events:read` | `reports get-team-mcp-usage-report` | `teams.reports.mcp()` | 54 | P0 |
-| `ListAgentFederatedIdentities`, `PutAgentFederatedIdentity`, `DeleteAgentFederatedIdentity` | `GET /v1/teams/{teamId}/agents/{agentId}/federated-identities`, `PUT`, `DELETE …/federated-identities/{name}` (`{audience, expirationSeconds, filePath?, envVar?}`) | `agents:read` / `agent-federated-identities:write` | `agents list-agent-federated-identities`, `put-agent-federated-identity`, `delete-agent-federated-identity` | `agents.federatedIdentities.*` | 52 | P0 |
-| `ListPoolFederatedIdentities`, `PutPoolFederatedIdentity`, `DeletePoolFederatedIdentity` | the same under `/v1/teams/{teamId}/pools/{poolId}/…` | `pools:read` / `agent-federated-identities:write` | `pools list-pool-federated-identities`, … | `pools.federatedIdentities.*` | 52 | P1 |
+| `ListAgentFederatedIdentities` | `GET /v1/teams/{teamId}/agents/{agentId}/federated-identities` | `agents:read` | `agents list-agent-federated-identities` | `agents.federatedIdentities.list()` | 52 | P0 |
+| `PutAgentFederatedIdentity`, `DeleteAgentFederatedIdentity` | `PUT`/`DELETE /v1/teams/{teamId}/agents/{agentId}/federated-identities/{name}` (`{audience, expirationSeconds, filePath?, envVar?}`) | `agent-federated-identities:write` | `agents put-agent-federated-identity`, `delete-agent-federated-identity` | `agents.federatedIdentities.put()`, `.delete()` | 52 | P0 |
+| `ListPoolFederatedIdentities` | `GET /v1/teams/{teamId}/pools/{poolId}/federated-identities` | `pools:read` | `pools list-pool-federated-identities` | `pools.federatedIdentities.list()` | 52 | P1 |
+| `PutPoolFederatedIdentity`, `DeletePoolFederatedIdentity` | `PUT`/`DELETE /v1/teams/{teamId}/pools/{poolId}/federated-identities/{name}` (as for agents) | `agent-federated-identities:write` | `pools put-pool-federated-identity`, `delete-pool-federated-identity` | `pools.federatedIdentities.put()`, `.delete()` | 52 | P1 |
 
-That is 48 operations (counting each named operation once, and `GetMcpQueryCapture` and `GetEffectivePoolMcp`).
+That is 55 operations (counting each named operation once, including `GetEffectivePoolMcp`).
 
 Changes to existing operations:
 
@@ -1376,7 +1379,7 @@ Events written by database functions use the same envelope (`afs.event_detail`, 
 
 ## 9. Changelog
 
-- **v1.6.0 (2026-11-25), governed MCP servers ([PRD](../../mcp-gateway-PRD.md), approved by J):** §4.14: 48
+- **v1.6.0 (2026-11-25), governed MCP servers ([PRD](../../mcp-gateway-PRD.md), approved by J):** §4.14: 55
   operations for the enterprise catalog, import, publish, suspend, inventory and primitive review, service and team
   policy, credentials and OAuth connect for service accounts, federation tests, team switches (full or read-only) and
   team servers with a three-level approval policy, the review queue, effective agent and pool MCP, the MCP ledger and
