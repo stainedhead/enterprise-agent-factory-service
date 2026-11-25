@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract **v1.2.0** (2026-11-25): team gateway per namespace, OpenAI-compatible model routes, Chat Completions → Converse on `bedrock`, provider switches including Bedrock, federated upstream auth (§12; [model endpoint gateway PRD](../../model-endpoint-gateway-PRD.md), approved by J; `-restapi` 1.2.0). v1.1.0 (2026-11-23): model admission by service, team, agent and price, and model delivery to the pod ([team orchestration agent PRD](../../team-orchestration-agent-PRD.md) MOD-4, MOD-5, approved by J; `-restapi` 1.1.0, not yet built). v1.0.0, draft for implementation (2026-11-21); root PRD decisions D28 and D57 |
+| **Status** | Contract **v1.3.0** (2026-11-25): MCP servers on the team gateway: `/mcp` and `/mcp/{server}`, search meta-tools, admission and pinning, `AFS_MCP_*` and `/etc/afs/mcp.json`, federated identities for agent pods (§13; [MCP gateway PRD](../../mcp-gateway-PRD.md), approved by J; `-restapi` 1.3.0). v1.2.0 (2026-11-25): team gateway per namespace, OpenAI-compatible model routes, Chat Completions → Converse on `bedrock`, provider switches including Bedrock, federated upstream auth (§12; [model endpoint gateway PRD](../../model-endpoint-gateway-PRD.md), approved by J; `-restapi` 1.2.0). v1.1.0 (2026-11-23): model admission by service, team, agent and price, and model delivery to the pod ([team orchestration agent PRD](../../team-orchestration-agent-PRD.md) MOD-4, MOD-5, approved by J; `-restapi` 1.1.0, not yet built). v1.0.0, draft for implementation (2026-11-21); root PRD decisions D28 and D57 |
 | **Provider** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi) (`afs-gateway`) |
 | **Consumers** | Agents and pool workers in team namespaces; the Agentic Teammates runtime and its harnesses |
 | **Requirements** | [Root PRD](../../enterprise-agent-factory-service-initial-PRD.md) BUD-2, BUD-3, AGT-4, SEC-6, TAG-4, IF-5; [orchestration PRD](../../team-orchestration-agent-PRD.md) MOD-1 to MOD-6; [database contract](database-contract.md) §4.2 for the spend functions |
@@ -284,8 +284,173 @@ Spans and metrics follow the OpenTelemetry GenAI semantic conventions plus `afs.
 and `afs.usage_source`; agent and pool ids are on spans only, never metric labels. No prompt or completion content is
 captured. `traceparent` is continued and propagated upstream only to `corporate` and `in_namespace` endpoints.
 
+## 13. MCP servers on the team gateway (v1.3.0)
+
+Source: [MCP gateway PRD](../../mcp-gateway-PRD.md) §6, §7, §9 to §12, Appendix C and D (approved by J, 2026-11-25;
+`-restapi` 1.3.0). Everything in §1 to §12 still holds. Nothing an existing agent relies on changes (minor).
+
+### 13.1 Endpoints
+
+MCP is served **only by team gateways** (§12.1), on the same listener, TLS and caller identity as model routes (§3). A
+team switches on its first MCP server only when its `gateway_deployment` is `per_namespace` (API contract §4.14,
+CD-44). The shared gateway answers every `/mcp` path with `404 NotFound`.
+
+| Path | Methods | What the agent sees |
+|---|---|---|
+| `/mcp` | `POST`, `GET` (2025-11-25 server stream), `DELETE` (2025-11-25 session end) | The **aggregated** endpoint: one virtual MCP server named `afs`. In `search` mode `tools/list` returns the three meta-tools of §13.3; in `full` mode it returns every allowed tool of every effective server as `<server>__<tool>`. Resources and prompts are listed with the same prefix in both modes |
+| `/mcp/{server}` | as above | One effective server under its own primitive names, definitions as pinned (§13.6) |
+
+`{server}` is the server slug (`^[a-z][a-z0-9-]{1,30}$`; `afs` reserved). A slug outside the caller's effective set and
+an unknown slug both answer `404 NotFound` (no JSON-RPC body), so a caller cannot probe the catalog. Both endpoints are
+Streamable HTTP. `Origin` is validated; requests with a browser `Origin` are refused (`403`).
+
+### 13.2 Protocol versions, sessions and headers
+
+| Topic | Rule |
+|---|---|
+| Versions downstream | `2026-07-28` (stateless, the default) and `2025-11-25`. The version comes from `MCP-Protocol-Version`; absent means `2025-11-25` until `initialize` says otherwise. Other versions → JSON-RPC `-32602` with `data.supported` |
+| `server/discover` (2026-07-28) | Answered by the gateway: `serverInfo` `{name: "afs" or the slug, version: <gateway version>}`, capabilities `tools` (`listChanged`), `resources` (`listChanged`, `subscribe: false`), `prompts` (`listChanged`), `tasks` when any effective server offers it; `instructions` names the meta-tools in `search` mode |
+| Sessions (2025-11-25) | `initialize` is answered by the gateway with an `Mcp-Session-Id` that is a **sealed token** (AES-GCM, key from the gateway's sealing secret; carries version, client capabilities, agent or pool id, expiry 24 h). Any replica serves it; no shared state. A session of another agent or an expired one → HTTP `404`, as the spec requires, and the client re-initialises |
+| `Mcp-Method`, `Mcp-Name` | Required on 2026-07-28 requests. Admission (§13.4) runs on the headers before the body is parsed; the body is then checked against them. A difference → JSON-RPC `-32020` `HeaderMismatch`, HTTP `400`, recorded as `refused` / `header_mismatch` |
+| Limits | Per server (catalog `limits`, defaults from `mcp.limits`): request 1 MiB (`413` with JSON-RPC `-32600`), response 8 MiB (the call fails with `-32603`, `data.reason = response_too_large`), timeout 60 s (`-32001`, `data.reason = timeout`), 8 concurrent calls per agent per server (`429` with `Retry-After: 1`) |
+| Pagination | `tools/list`, `resources/list`, `resources/templates/list`, `prompts/list` page with `cursor`; cursors are opaque, sealed and bound to the caller. Order is deterministic (qualified name) |
+| List changes | 2026-07-28: `subscriptions/listen` delivers `notifications/tools/list_changed` (and resources, prompts) when the caller's effective set or a pinned definition changes. 2025-11-25: the same notifications on the `GET` stream |
+| `_meta` | `traceparent` and `tracestate` in `_meta` or the HTTP headers continue the trace (§13.8). The gateway strips every other `_meta` key under `io.afs/` from requests and adds `io.afs/requestId` to every result |
+
+### 13.3 Meta-tools (aggregated endpoint, `search` mode)
+
+The three definitions are fixed (byte-identical across teams and releases within a major version), so `tools/list`
+never changes and a model provider's prompt cache stays warm.
+
+| Tool | `inputSchema` (required in bold) | Result `structuredContent` |
+|---|---|---|
+| `afs_search` | **`query`** string 1..500; `servers` string[] ≤ 20; `kinds` (`tool`, `resource`, `prompt`)[]; `limit` integer 1..25, default 8 (capped by `mcp.search_limit_max`) | `{"results": [{"name": "github__create_pull_request", "server": "github", "kind": "tool", "title", "summary" (first sentence, ≤ 200 chars), "annotations": {readOnlyHint, destructiveHint, openWorldHint}, "score"}]}`; `kind: resource` also returns resource templates. No schemas |
+| `afs_describe` | **`names`** string[] 1..10 (qualified names) | `{"definitions": [{"name", "kind", "title", "description", "inputSchema", "outputSchema", "annotations", "uriTemplate", "arguments"}]}`; unknown or disallowed names are omitted and listed in `"notFound"` |
+| `afs_call` | **`name`** string; `arguments` object | The upstream result unchanged: a tool result (`content`, `structuredContent`, `isError`), resource contents, or prompt messages |
+
+- `<server>__<tool>` may be called directly with `tools/call` in either mode, without `afs_describe` first.
+- `resources/read` and `prompts/get` take the qualified name (`<server>__<uri>` and `<server>__<prompt>`) on the
+  aggregated endpoint and the plain name on `/mcp/{server}`.
+- Ranking is BM25 over name, title, description and parameter names (field weights 3, 2, 1, 1), with a per-server boost
+  from the agent's own use in the last 7 days; ties break by qualified name. Results are filtered to the caller's
+  effective set before ranking, so a disallowed primitive is never returned.
+- `full` mode lists the meta-tools after the server tools, so an agent can still search.
+
+### 13.4 Admission and refusals
+
+Effective primitives = (published enterprise servers the team switched on ∪ the team's approved servers) ∩ the agent's
+or pool's selection, then service ∩ team ∩ agent policy (a block at any level wins), then pinning (§13.6). The gateway
+reads `afs.mcp_admission(subject_kind, subject_id)` (database contract §7.5.4), cached at most 60 s and dropped on
+change-feed notifications for the 000024 tables.
+
+A refused primitive looks like a missing one: JSON-RPC `-32602` "Unknown tool" (or resource, prompt), HTTP `200`, and
+it is never listed. The reason goes to the ledger and the gateway log only, first match in this order (CD-46):
+
+`server_not_published`, `server_suspended`, `server_not_enabled_for_team`, `server_not_enabled_for_agent`,
+`primitive_blocked_service`, `primitive_blocked_team`, `primitive_blocked_agent`, `primitive_pending_review`.
+
+Refusals that are not about visibility answer differently:
+
+| Condition | JSON-RPC | HTTP | `data.reason` |
+|---|---|---|---|
+| Per-primitive or per-agent rate limit | `-32000` | `429` with `Retry-After` | `rate_limited` |
+| User-delegated OAuth refresh token expired or revoked | `-32000` | `200` | `auth_reconnect_needed` |
+| Workload federation not trusted or failing | `-32000` | `503` | `federation_not_ready` |
+| Upstream unreachable, 5xx or circuit open | `-32000` | `502` | `upstream_unavailable` |
+| Upstream timeout | `-32001` | `504` | `timeout` |
+| `mcp.enabled` false | none | `404` | none |
+
+A tool that fails upstream (`isError: true`) is returned unchanged and recorded as `tool_error`, not as a refusal.
+
+### 13.5 Delivery to the pod (additions to §3 and §12.4)
+
+| Item | Value |
+|---|---|
+| `AFS_MCP_URL` | `AFS_GATEWAY_URL` + `/mcp`; set only when the agent has at least one effective server |
+| `AFS_MCP_MODE` | `search` or `full` |
+| `AFS_MCP_SERVERS` | Comma-separated effective server slugs, sorted |
+| `AFS_MCP_<SERVER>_URL` | `AFS_GATEWAY_URL` + `/mcp/<slug>`; `<SERVER>` is the slug upper-cased with `-` → `_` |
+| `/etc/afs/mcp.json` | `{"version": 1, "aggregated": {"url": "<AFS_MCP_URL>", "mode": "search"}, "servers": [{"name": "<slug>", "url": "<url>", "kind": "enterprise\|team", "readOnly": <bool>}], "mcpServers": {"afs": {"type": "http", "url": "<AFS_MCP_URL>", "headers": {}}}}`. The `mcpServers` block is the shape most MCP hosts read; `headers` carries `X-Afs-Gateway-Token` only when §3 uses it |
+| `AFS_FEDERATED_TOKEN_FILE_<NAME>` and `/var/run/secrets/afs/federation/<name>/token` | Per federated identity (§13.9) |
+
+Same roll rules as §12.4: the agent's own change rolls the pod; team and service changes apply on the next roll and
+are enforced by the gateway at once. No MCP credential is ever delivered to an agent pod.
+
+### 13.6 Upstream servers, credentials and pinning
+
+- The gateway is an MCP client of each server at the version recorded at registration; it translates between the two
+  versions it supports on each side. Upstream HTTP+SSE (2024-11-05) is not supported.
+- Credentials by `auth_kind`: `none`; `static` (header from `<prefix>/<namespace>/_gateway/mcp/<slug>` or
+  `<prefix>/_service/gateway/mcp/<slug>`); `oauth_client` (client credentials with RFC 8707 `resource` = the server's
+  canonical URI); `workload_federation` (the team gateway's projected token, audience per target, at
+  `/var/run/secrets/afs/gateway/federation/<audience>/token`, exchanged by RFC 8693 or presented as a client
+  assertion; nothing stored); `oauth_user` (a service account's refresh token at the gateway path; access tokens minted
+  per call); `aws_sigv4` (signed with the team gateway's Pod Identity role). Access tokens live in memory only, keyed by
+  (team, server), and are refreshed before expiry.
+- **No token passthrough.** The agent's `Authorization` and `X-Afs-Gateway-Token` are removed; upstream receives only a
+  token issued for it. Upstream auth headers are redacted in every log.
+- Every primitive's definition is canonicalised (RFC 8785) and hashed (`sha256:<hex>`). A new primitive, or one whose
+  digest differs from `approved_digest`, is `pending_review` and is neither listed nor callable until approved, unless
+  the server's `drift_policy` is `auto_approve_compatible` and the change is description-only or schema-compatible and
+  crosses no risk line (a new destructive tool, a new host). The gateway always serves the **approved** definition.
+- Inventory refresh: on list-changed notifications, the upstream `ttlMs`, and at most every
+  `mcp.refresh_interval_minutes` otherwise. Only one replica per team refreshes (lease); the others read the result.
+
+### 13.7 Server requests for input
+
+An upstream `input_required` or elicitation request is answered for the agent with a tool error: `isError: true`,
+text "This server needs a person to answer. Unattended agents cannot.", ledger outcome `tool_error`, `data.reason =
+elicitation_unsupported`. Sampling requests reach the agent only when the server's policy allows sampling
+(`allow_sampling`, default off); otherwise they are refused upstream with `-32601`. URL-mode elicitation for OAuth
+consent raises `McpAuthExpired` on the team instead.
+
+### 13.8 Ledger and telemetry
+
+One `mcp_events` row per request (database contract §7.5.5), written in batches; a failed write never fails the call
+(telemetry fails open, admission fails closed). No argument, result or query text is stored; `args_sha256` only when the
+server enables it, and `afs_search` query text only during an audited capture window (API contract §4.14).
+Spans: `gen_ai.operation.name = execute_tool`, `gen_ai.tool.name`, `mcp.method.name`, `mcp.session.id` (hashed),
+`jsonrpc.request.id`, `server.address`, `error.type`, plus `afs.team_id`, `afs.mcp.server`, `afs.mcp.server_kind`,
+`afs.mcp.outcome`. Metrics `afs_mcp_requests_total`, `afs_mcp_request_duration_seconds`,
+`afs_mcp_upstream_duration_seconds` with labels `team_id`, `server`, `method`, `outcome` and, for tools, `name`; agent
+ids on spans and in the ledger only. `traceparent` is propagated upstream only to `in_namespace` and `corporate` servers.
+
+### 13.9 Federated identities for agent pods
+
+For an agent's own CLIs and SDKs (§9 case 6 of the PRD). The reconciler projects a ServiceAccount token per identity
+into the agent's pod at `/var/run/secrets/afs/federation/<name>/token` (audience and expiry from the identity, rotated
+by the kubelet) and sets `AFS_FEDERATED_TOKEN_FILE_<NAME>`. The subject is
+`system:serviceaccount:afs-t-<slug>:<agent service account>`. The gateway never sees these calls and never exchanges
+these tokens.
+
+### 13.10 Errors (additions to §7 and §12.5)
+
+| HTTP | `code` | `details.reason` | When |
+|---|---|---|---|
+| 400 | `ValidationError` | `header_mismatch` | `Mcp-Method` or `Mcp-Name` differs from the body (JSON-RPC `-32020` in the body) |
+| 404 | `NotFound` | none | `/mcp` on the shared gateway, `mcp.enabled` off, or a server outside the effective set |
+| 413 | `ValidationError` | `request_too_large` | Over the server's request limit |
+| 429 | `Throttled` | `rate_limited` | Per-primitive or concurrency limit |
+| 502 | `UpstreamError` | `upstream_unavailable` | Upstream failure or open circuit |
+| 503 | `Unavailable` | `federation_not_ready` | Workload federation not set up or failing |
+| 504 | `UpstreamTimeout` | `timeout` | Per-call timeout |
+
+On MCP paths the JSON-RPC error is in the body and the AFS envelope is in `error.data` (`{code, reason, requestId}`).
+
+| # | Decision |
+|---|---|
+| CD-44 | MCP is served only by team gateways. A team needs `gateway_deployment = per_namespace` before its first server is switched on, so MCP egress, federation tokens and credentials are always scoped to one namespace |
+| CD-46 | Visibility refusals answer as an unknown name (`-32602`) and are never listed, so an agent cannot tell a blocked tool from a missing one; `server_suspended` sits after `server_not_published` because a suspended server is still published |
+| CD-47 | Meta-tool definitions are fixed per major version, and `full` mode lists them after server tools, so switching mode never changes their bytes |
+
 ## 11. Change log
 
+- **v1.3.0 (2026-11-25):** MCP on team gateways only (§13.1, CD-44); Streamable HTTP for 2026-07-28 and 2025-11-25
+  with sealed session ids, `Mcp-Method`/`Mcp-Name` checks and limits (§13.2); fixed meta-tools `afs_search`,
+  `afs_describe`, `afs_call` (§13.3, CD-47); admission from `afs.mcp_admission` with refusals that look like unknown names
+  (§13.4, CD-46); `AFS_MCP_*` and `/etc/afs/mcp.json` (§13.5); upstream credentials, no token passthrough and pinning
+  (§13.6); elicitation and sampling (§13.7); ledger and telemetry (§13.8); federated identities for agent pods (§13.9);
+  errors (§13.10). Minor: additions only.
 - **v1.2.0 (2026-11-25):** team gateway per namespace and opaque `AFS_GATEWAY_URL` (§12.1); OpenAI-compatible route
   paths, body form and Chat Completions → Converse on `bedrock` (§12.2); route admission and `provider_disabled` (§12.3);
   `AFS_LLM_*`, `OPENAI_*` and `/etc/afs/llm-routes.json` (§12.4); new error reasons and `504 UpstreamTimeout` (§12.5);

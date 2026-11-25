@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract **v1.5.0** (2026-11-25) adds migration **000023** (team model gateway, routes and provider switches, [model-endpoint-gateway-PRD.md](../../model-endpoint-gateway-PRD.md) Appendix D.2, specified in §7.4; release 1.2.0, lockstep with `-restapi`). Contract v1.4.0 (2026-11-23) adds migration **000022** (team orchestration agent and model access, [team-orchestration-agent-PRD.md](../../team-orchestration-agent-PRD.md) DB-US-58 to DB-US-61, specified in §7.3; release 1.1.0, lockstep with `-restapi`); not yet built. Contract v1.3.2 (2026-11-22) at schema 000021: migration 000020 (Paperclip team collaboration, [paperclip-team-collaboration-PRD.md](../../paperclip-team-collaboration-PRD.md) DB-US-44 to DB-US-47, specified in §7.2) and 000021 (`collab_routes()` provider client ids, §7.2.10) are built in `-db` at `main` (0d87776) and ship in release 1.0.1, which `-db` and `-restapi` share. Earlier history: contract v1 at schema 000019. Corrected on 2026-11-22 (contract corrections round, PC-D20 to PC-D31) to match the `-db` PRD §9.1 decisions DB-D1 to DB-D16 and the `-restapi` gaps G1 to G10. 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). 000017 adds `afs.schema_version()` for the startup check of services that cannot read the tracking table, and `identity_providers.cli_client_id` (the CLI public client, D48; `client_id` is the console client). Planned first release containing 000011 to 000017: `v0.13.0` 000018 adds daily report rollups and the follow-ups `-restapi` asked for (X-DB-8 to X-DB-10, `agent_secret_bindings` triggers, ETag-stable report schedules); 000019 adds `afs.record_work_order_secret` (template secrets for remediation teams) and `afs.event_detail`, and gives the outbox payloads written by `afs.instantiate_work_order_team` the API contract §7 envelope. Schema 000019 is at `-db` `main` (83f0345) and is not yet tagged; `-restapi` pins its pseudo-version until the tag exists |
+| **Status** | Contract **v1.6.0** (2026-11-25) adds migration **000024** (governed MCP servers, policy, ledger and federated identities, [mcp-gateway-PRD.md](../../mcp-gateway-PRD.md) Appendix E.2, specified in §7.5; release 1.3.0, lockstep with `-restapi`). Contract v1.5.0 (2026-11-25) adds migration **000023** (team model gateway, routes and provider switches, [model-endpoint-gateway-PRD.md](../../model-endpoint-gateway-PRD.md) Appendix D.2, specified in §7.4; release 1.2.0, lockstep with `-restapi`). Contract v1.4.0 (2026-11-23) adds migration **000022** (team orchestration agent and model access, [team-orchestration-agent-PRD.md](../../team-orchestration-agent-PRD.md) DB-US-58 to DB-US-61, specified in §7.3; release 1.1.0, lockstep with `-restapi`); not yet built. Contract v1.3.2 (2026-11-22) at schema 000021: migration 000020 (Paperclip team collaboration, [paperclip-team-collaboration-PRD.md](../../paperclip-team-collaboration-PRD.md) DB-US-44 to DB-US-47, specified in §7.2) and 000021 (`collab_routes()` provider client ids, §7.2.10) are built in `-db` at `main` (0d87776) and ship in release 1.0.1, which `-db` and `-restapi` share. Earlier history: contract v1 at schema 000019. Corrected on 2026-11-22 (contract corrections round, PC-D20 to PC-D31) to match the `-db` PRD §9.1 decisions DB-D1 to DB-D16 and the `-restapi` gaps G1 to G10. 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). 000017 adds `afs.schema_version()` for the startup check of services that cannot read the tracking table, and `identity_providers.cli_client_id` (the CLI public client, D48; `client_id` is the console client). Planned first release containing 000011 to 000017: `v0.13.0` 000018 adds daily report rollups and the follow-ups `-restapi` asked for (X-DB-8 to X-DB-10, `agent_secret_bindings` triggers, ETag-stable report schedules); 000019 adds `afs.record_work_order_secret` (template secrets for remediation teams) and `afs.event_detail`, and gives the outbox payloads written by `afs.instantiate_work_order_team` the API contract §7 envelope. Schema 000019 is at `-db` `main` (83f0345) and is not yet tagged; `-restapi` pins its pseudo-version until the tag exists |
 | **Provider** | [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db): migrations, roles, row-level security, `migrate` Go package, `afs-migrate` |
 | **Consumer** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi): `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing` |
 | **Full data dictionary** | `-db/docs/data-model.md` (every table, column rule and function). This document is the interface: who connects how, what each service may touch, and how failures surface |
@@ -939,6 +939,98 @@ Every team-owned new table (`model_endpoints` team rows, `endpoint_models`, `end
 TC-DB-01 to TC-DB-15 of the PRD; each constraint above has a rejected-case test; isolation and
 `TestCrossTeamWritesChangeNothing` cover every team-owned table; up/down/up is clean.
 
+## 7.5 Migration 000024: MCP servers, policy, ledger and federated identities (contract v1.6.0)
+
+Source: [MCP gateway PRD](../../mcp-gateway-PRD.md) §7, §8, §11, §13.2 and Appendix C and E.2 (approved by J,
+2026-11-25). Release `-db` 1.3.0 with `-restapi` 1.3.0; applies after 000023 (§7.4). All objects in schema `afs`; ids
+are prefixed ULIDs (`mcp_`, `mpr_`, `mpol_`, `mcr_`, `mrv_`, `afi_`, `pfi_`, `mqc_`). Desired-state tables carry `version`,
+`created_at/by`, `updated_at`, the touch and revision triggers and a notify trigger on `afs_desired_state` (payload
+`<table>:<team_id>:<id>`, empty team for enterprise rows).
+
+### 7.5.1 Catalog
+
+| Object | Definition |
+|---|---|
+| `mcp_servers` | `id text PRIMARY KEY CHECK (afs.ulid_ok(id,'mcp'))`, `team_id text REFERENCES afs.teams (id) ON DELETE CASCADE` (NULL = enterprise), `slug text NOT NULL CHECK (slug ~ '^[a-z][a-z0-9-]{1,30}$' AND slug !~ '--' AND slug !~ '-$' AND slug <> 'afs')`, `display_name` (≤ 100), `owner`, `purpose` (≤ 1000), `doc_url`, `data_classification text NOT NULL CHECK (… IN ('public','internal','confidential','restricted'))`, `transport text NOT NULL CHECK (… IN ('streamable_http','hosted'))`, `location text NOT NULL CHECK (… IN ('external','corporate','in_namespace'))` (`hosted` ⇔ `in_namespace`; remote needs `url` with `https://`, `23514` `mcp_servers_url`), `url text` (≤ 500), `ca_bundle text` (PEM, ≤ 16 KiB), `auth_kind text NOT NULL CHECK (… IN ('none','static','oauth_client','workload_federation','oauth_user','aws_sigv4'))`, `auth_header text`, `credential_mode text NOT NULL DEFAULT 'per_team' CHECK (… IN ('shared','per_team'))`, `federation jsonb` (`{issuer, audience, subjectTemplate, tokenEndpoint, grant}`; required for `workload_federation`), `oauth jsonb` (`{authorizationServer, scopes[]}`; metadata only), `protocol_version text`, `review_status text NOT NULL DEFAULT 'draft' CHECK (… IN ('draft','pending_review','approved','rejected','suspended'))`, `published boolean NOT NULL DEFAULT false` (enterprise only; needs `approved`), `risk_tier text CHECK (… IN ('low','elevated','high'))`, `risk_reasons text[] NOT NULL DEFAULT '{}'`, `checks jsonb NOT NULL DEFAULT '[]'` (findings, never the offending text in full), `drift_policy text NOT NULL DEFAULT 'hold' CHECK (… IN ('hold','auto_approve_compatible'))`, `default_for_new_teams boolean NOT NULL DEFAULT false` (enterprise only), `allow_sampling boolean NOT NULL DEFAULT false`, `trust_annotations boolean NOT NULL DEFAULT false`, `args_hashing boolean NOT NULL DEFAULT false`, `limits jsonb NOT NULL DEFAULT '{}'`, `suspended_reason text`, `promoted_from text` (the team server id it was promoted from), `refresh_requested_at timestamptz` (set by `afs_app`, cleared by `afs_gateway`), `version`, `generation`; `UNIQUE (team_id, id)`. Slug unique among enterprise rows (partial unique index), unique per team, and a team slug never equals an enterprise slug nor the reverse (trigger, `23505` `mcp_servers_slug_taken`) |
+| Review transitions | `BEFORE UPDATE` trigger allows `draft → pending_review`, `pending_review → approved \| rejected \| draft` (changes requested), `rejected → draft`, `approved → pending_review` (a change of `url`, `location`, `auth_kind` or hosted spec), any → `suspended` and `suspended →` the status before it (kept in `suspended_from`); else `23514` `mcp_review_transition`. `published = true` needs `approved` (`23514` `mcp_servers_publish`) |
+| `mcp_hosted_specs` | `(server_id)` PK and FK `ON DELETE CASCADE`, `team_id` (copied), `image text NOT NULL CHECK (image ~ '^[^@]+@sha256:[0-9a-f]{64}$')` (`23514` `mcp_hosted_specs_image`), `args text[]`, `env_names text[]` (names only, `^[A-Z_][A-Z0-9_]{0,63}$`), `instance_mode text NOT NULL DEFAULT 'per_team' CHECK (… IN ('per_team','per_agent'))`, `egress_hosts text[] NOT NULL DEFAULT '{}'`, `resources jsonb`, `needs_aws boolean NOT NULL DEFAULT false`, `signature_verified_at timestamptz` |
+| `mcp_primitives` | `id` (`mpr_`), `server_id` FK `ON DELETE CASCADE`, `team_id` (copied), `kind text NOT NULL CHECK (… IN ('tool','resource','resource_template','prompt'))`, `name text NOT NULL` (≤ 500), `title`, `summary` (≤ 200), `annotations jsonb NOT NULL DEFAULT '{}'`, `definition jsonb NOT NULL` (the approved definition, tool metadata only), `digest text NOT NULL CHECK (digest ~ '^sha256:[0-9a-f]{64}$')`, `approved_digest text` (same check), `pending_definition jsonb`, `status text NOT NULL CHECK (… IN ('approved','pending_review','blocked'))`, `decided_by`, `decided_at`, `first_seen`, `last_seen`, `removed_at`; `UNIQUE (server_id, kind, name)`. Transition guard: `pending_review → approved \| blocked`, `approved → pending_review` only with a changed `digest`, `blocked → approved` by review; else `23514` `mcp_primitive_transition`. At most 2,000 live primitives per server (`23514` `mcp_primitives_limit`) |
+
+### 7.5.2 Opt-in, narrowing and policy
+
+| Object | Definition |
+|---|---|
+| `teams` | `may_add_mcp_servers boolean NOT NULL DEFAULT false` and `mcp_placement text CHECK (… IN ('combined','separate'))` (NULL = service default), both in `teams_guardrail_guard` |
+| `team_mcp_servers` | `(team_id, server_id)` PK, `enabled boolean NOT NULL`, `mode text NOT NULL DEFAULT 'full' CHECK (… IN ('full','read_only'))`, `enabled_by`, `enabled_at`, `version`. The server must be a published enterprise server or a server of the same team (trigger, `23514` `team_mcp_servers_scope`); `enabled = true` needs `teams.gateway_deployment = 'per_namespace'` (`23514` `team_gateway_required`, CD-44) |
+| `agents`, `agent_pools` | `mcp_access text NOT NULL DEFAULT 'all' CHECK (… IN ('all','selected'))`, `mcp_mode text CHECK (… IN ('search','full'))` (NULL = `mcp.default_agent_mode`) |
+| `agent_mcp_servers`, `pool_mcp_servers` | `(team_id, agent_id\|pool_id, server_id)` PK, composite FK to the agent or pool `ON DELETE CASCADE`; the server must be enabled for the team at write time (`23514` `agent_mcp_servers_team`) |
+| `mcp_policies` | `id` (`mpol_`), `level text NOT NULL CHECK (… IN ('service','team','agent','pool'))`, `team_id`, `agent_id`, `pool_id`, `server_id` FK, `name text` or `class text CHECK (… IN ('read_only','destructive','open_world'))` (exactly one), `effect text NOT NULL CHECK (… IN ('allow','block'))`, `rate_limit_per_minute integer CHECK (> 0)`; CHECK that level and scope columns agree (`service`: no team; `team`: team only; `agent`/`pool`: team and subject); composite FKs `(team_id, agent_id)` and `(team_id, pool_id)`. At most 500 rules per server per scope |
+| `afs.mcp_admission(p_subject_kind text, p_subject_id text)` | `STABLE`, `SECURITY INVOKER`; returns `(server_id, slug, server_kind, mode, primitive_id, kind, name, digest, allowed, level, reason, rate_limit_per_minute)` for every primitive of every server the subject's team could reach; `reason` NULL or the first of the gateway contract §13.4 list. Read-only mode, trusted annotation classes and a block at any level winning are applied here, so the gateway and the API share one decision |
+| `afs.effective_agent_mcp` | View, `security_invoker`: the allowed rows of `afs.mcp_admission` for every agent and pool, for `GetEffectiveAgentMcp` and the reconciler's `/etc/afs/mcp.json` |
+| `afs.create_team` (and `afs.instantiate_work_order_team`) | Switch on every published enterprise server with `default_for_new_teams` for a new team (mode `full`), writing `team_mcp_server.enabled` outbox rows; skipped while the new team's gateway is `shared` |
+
+### 7.5.3 Credentials, reviews, captures and federated identities
+
+| Object | Definition |
+|---|---|
+| `mcp_credentials` | `id` (`mcr_`), `server_id` FK, `scope text NOT NULL` (team id or `_shared`), `team_id` (NULL for `_shared`), `kind text NOT NULL CHECK (… IN ('static','oauth_client','oauth_user'))`, `secret_arn text NOT NULL` checked by `afs.secret_path(team, '_gateway', 'mcp/' || slug)` or `<prefix>/_service/gateway/mcp/<slug>` (`23514` `mcp_credential_path`), `subject text` (connected account display name), `scopes text[]`, `expires_at`, `status text NOT NULL CHECK (… IN ('set','missing','expired'))`, `rotated_at`; `UNIQUE (server_id, scope)`. No value column. `oauth_user` rows must name a `subject` (`23514` `service_account_required` is decided by the API; the column records who) |
+| `afs.secret_path` | Accepts `_gateway` with the sub-path `mcp/<slug>` |
+| `mcp_oauth_states` | `state_hash text PRIMARY KEY` (sha256 of the state), `team_id`, `server_id`, `created_by`, `code_verifier_arn` (ARN only), `expires_at` (≤ 10 minutes), `used_at`. Single use (`UPDATE … SET used_at` only when NULL). Deny-all RLS for `afs_app` except through `afs.claim_mcp_oauth_state(p_state_hash)` (`SECURITY DEFINER`) |
+| `mcp_reviews` | `id` (`mrv_`), `server_id`, `team_id`, `primitive_id` (NULL for a server review), `at`, `checks jsonb`, `risk_tier`, `approver text CHECK (… IN ('team_admin','security'))`, `decision text CHECK (… IN ('approved','rejected','changes_requested','blocked','auto_approved'))`, `note` (≤ 2000, required for every decision but `auto_approved`), `decided_by`. Append-only by trigger |
+| `mcp_federation_states` | `(server_id, team_id)` PK, `status text NOT NULL DEFAULT 'pending' CHECK (… IN ('pending','ready','failing'))`, `last_error text` (≤ 500), `checked_at`, `test_requested_at`. `afs_app` writes `test_requested_at`; `afs_gateway` writes the rest (column grants) |
+| `mcp_query_captures` | `id` (`mqc_`), `started_by`, `reason`, `started_at`, `until` (≤ `mcp.query_capture_max_days`), `stopped_at`, `stopped_by`. At most one open row (partial unique index, `23505` `capture_active`) |
+| `agent_federated_identities`, `pool_federated_identities` | `(team_id, agent_id\|pool_id, name)` PK, `id` (`afi_` / `pfi_`), `name text CHECK (name ~ '^[a-z][a-z0-9-]{0,30}$')`, `audience text NOT NULL` (≤ 300; not `sts.amazonaws.com` and not `afs-gateway`, `23514` `audience_reserved`), `file_path text NOT NULL` (default `/var/run/secrets/afs/federation/<name>/token`, must start with `/var/run/secrets/afs/federation/`), `env_var text NOT NULL` (default `AFS_FEDERATED_TOKEN_FILE_<NAME>`, `^[A-Z_][A-Z0-9_]{0,63}$`), `expiration_seconds integer NOT NULL DEFAULT 3600 CHECK (600..86400)`, `created_at/by`, `version`; composite FK to the agent or pool `ON DELETE CASCADE`; at most 10 per subject (`23514` `federated_identity_limit`). The audience must match `federation.allowed_audiences` (trigger, `23514` `audience_not_allowed`) |
+| `external_systems` | `category` accepts `mcp`; `afs.mcp_governed_host(p_host)` returns the MCP server id that covers a host, and a grant of an `mcp` system whose host is covered is refused (`23514` `governed_by_mcp_server`) |
+
+### 7.5.4 Ledger and rollups
+
+| Object | Definition |
+|---|---|
+| `mcp_events` | Partitioned by `RANGE (at)`, one partition per day created ahead by `afs.ensure_mcp_event_partitions(days)`; `id bigint` (identity), `at timestamptz NOT NULL`, `request_id text NOT NULL`, `team_id text NOT NULL`, `agent_id`, `pool_id`, `worker_pod`, `server_id`, `server_kind text CHECK (… IN ('enterprise','team','afs'))`, `method text NOT NULL` (≤ 64), `name text` (≤ 500; normalised resource URI or template), `primitive_id`, `digest`, `outcome text NOT NULL CHECK (… IN ('ok','tool_error','protocol_error','refused','upstream_unavailable','timeout','cancelled'))`, `reason text`, `jsonrpc_code integer`, `http_status smallint`, `gateway_ms integer`, `upstream_ms integer`, `request_bytes integer`, `response_bytes integer`, `auth_kind`, `protocol_downstream`, `protocol_upstream`, `args_sha256 text CHECK (~ '^[0-9a-f]{64}$')`, `search_results text[]` (qualified names, `afs_search` only), `search_hit boolean`, `query_text text` (only while a capture row is open; trigger nulls it otherwise, CD-50), `capture_id`. Append-only (UPDATE, DELETE and TRUNCATE rejected by trigger, as `audit_log`); retention drops whole partitions older than `mcp.events_retention_months` (`afs.drop_old_mcp_event_partitions()`) |
+| `mcp_usage_daily` | `(day, team_id, agent_or_pool, server_id, method, name, outcome)` PK, `calls bigint`, `errors bigint`, `p50_ms`, `p95_ms`, `bytes_in`, `bytes_out`; written by `afs.rollup_mcp_usage(p_day date)` (idempotent: replaces the day) |
+
+### 7.5.5 Grants, RLS and change feed
+
+| Role | Grants |
+|---|---|
+| `afs_app` | `SELECT, INSERT, UPDATE, DELETE` on the catalog, opt-in, selection, policy, credential, federated identity and capture tables (RLS: team rows by `afs.caller_sees_team`; enterprise rows readable by all callers, writable only with `afs.service_admin`; security operators reach every row through `afs.service_admin`-free read paths of `SECURITY DEFINER` functions `afs.mcp_review_queue()` and `afs.mcp_events_for_review(…)`); `INSERT, SELECT` on `mcp_reviews`; `SELECT` on `mcp_events` and `mcp_usage_daily`; `EXECUTE` on the functions |
+| `afs_gateway` | `SELECT` on every 000024 table except `mcp_oauth_states` and `mcp_query_captures` (it reads the open capture through `afs.mcp_capture_open()`); `INSERT` on `mcp_events` for its team only (`afs.team_ids`, RLS `WITH CHECK`); `INSERT, UPDATE (digest, pending_definition, status, last_seen, removed_at, title, summary, annotations)` on `mcp_primitives` (a gateway can hold a change, never approve one: a trigger refuses `status = 'approved'` from `afs_gateway` unless `drift_policy = 'auto_approve_compatible'` and the row is marked compatible); `UPDATE (status, expires_at)` on `mcp_credentials`; `UPDATE (status, last_error, checked_at)` on `mcp_federation_states`; `UPDATE (refresh_requested_at, protocol_version)` on `mcp_servers`; `EXECUTE` on `afs.mcp_admission` |
+| `afs_reconciler` | `SELECT` on every 000024 table; `UPDATE (signature_verified_at)` on `mcp_hosted_specs`; `UPDATE (stopped_at, stopped_by)` on `mcp_query_captures`; `EXECUTE` on the partition and rollup functions |
+| `afs_billing` | `SELECT` on `mcp_usage_daily` |
+| `afs_readonly` | `SELECT` on every 000024 table except `mcp_oauth_states` |
+
+Every team-owned new table (`mcp_servers` team rows, `mcp_hosted_specs`, `mcp_primitives`, `team_mcp_servers`,
+`agent_mcp_servers`, `pool_mcp_servers`, `mcp_policies` team, agent and pool rows, `mcp_credentials`, `mcp_reviews`,
+`mcp_oauth_states`, `mcp_federation_states`, `agent_federated_identities`, `pool_federated_identities`, `mcp_events`, `mcp_usage_daily`) enables
+RLS and gets rows in `seedOtherTeams`. The catalog, opt-in, selection, policy, primitive and credential tables notify
+on change.
+
+### 7.5.6 Error mapping (additions to §6)
+
+| SQLSTATE and constraint | API |
+|---|---|
+| `23505` `mcp_servers_slug_taken` | `409 Conflict`, `details.reason = slug_taken` |
+| `23505` `capture_active` | `409 Conflict`, `capture_active` |
+| `23514` `team_gateway_required` | `409 Conflict`, `team_gateway_required` |
+| `23514` `mcp_review_transition`, `mcp_primitive_transition` | `409 Conflict`, `invalid_review_transition` |
+| `23514` `mcp_servers_publish` | `409 Conflict`, `server_not_approved` |
+| `23514` `team_mcp_servers_scope` | `409 Conflict`, `server_not_published` |
+| `23514` `federated_identity_limit` | `409 Conflict`, `federated_identity_limit` |
+| `23514` `governed_by_mcp_server` | `409 Conflict`, `governed_by_mcp_server` |
+| `23514` `audience_reserved`, `audience_not_allowed`, `mcp_credential_path`, `mcp_servers_url`, `mcp_hosted_specs_image`, `agent_mcp_servers_team`, `mcp_primitives_limit` | `400 ValidationError` with the constraint as reason (`mcp_hosted_specs_image` → `image_not_pinned`, `agent_mcp_servers_team` → `mcp_server_not_enabled_for_team`) |
+
+### 7.5.7 Tests
+
+`TestMcpServers/*`, `TestMcpPrimitives/*`, `TestMcpAdmission/*`, `TestMcpCredentials/*`, `TestMcpEvents/*` and
+`TestFederatedIdentities/*` (PRD Appendix E.2 and TC-47 to TC-62); each constraint above has a rejected-case test;
+isolation and `TestCrossTeamWritesChangeNothing` cover every team-owned table; up/down/up is clean.
+
+| # | Decision |
+|---|---|
+| CD-50 | `query_text` can only be written while a capture window is open: a trigger on `mcp_events` sets it to NULL when `afs.mcp_capture_open()` is false, so a gateway bug cannot store query text outside the audited window |
+| CD-51 | The policy decision lives in `afs.mcp_admission`, not in the gateway alone, so the API's effective view (`GetEffectiveAgentMcp`), the reconciler's `/etc/afs/mcp.json` and the gateway's admission can never disagree. The gateway's pure policy package re-implements the same rules for its cache and is tested against the function |
+| CD-52 | The gateway may write held definitions and digests but never approve, except auto-approval under `auto_approve_compatible`, so the review boundary is enforced by the database as well as by the API |
+
 ## 8. Change process
 
 1. Schema change: a `-db` PR with the migration, integration tests (rejected case for every new
@@ -949,6 +1041,15 @@ TC-DB-01 to TC-DB-15 of the PRD; each constraint above has a rejected-case test;
 3. A breaking change follows expand and contract across two `-db` releases.
 
 ## 9. Change log
+
+- **v1.6.0 (2026-11-25), governed MCP servers ([PRD](../../mcp-gateway-PRD.md), approved by J):** migration 000024
+  (§7.5): `mcp_servers` with review transitions and the enterprise and team slug rule, hosted specs pinned by digest,
+  `mcp_primitives` with pinning and a transition guard, team switches gated on a per-namespace gateway, agent and pool
+  selections and modes, `mcp_policies` at four levels, `afs.mcp_admission` and `afs.effective_agent_mcp`,
+  default-for-new-teams in `create_team`, `mcp_credentials` at `_gateway/mcp` paths, OAuth states, federation states,
+  reviews, query captures, agent and pool federated identities, the partitioned append-only `mcp_events` ledger and
+  `mcp_usage_daily`, `teams.may_add_mcp_servers` and `mcp_placement`, the `mcp` external system category; CD-50 to
+  CD-52. Minor (1.3.0).
 
 - **v1.5.0 (2026-11-25), team model gateway ([PRD](../../model-endpoint-gateway-PRD.md), approved by J):** migration 000023
   (§7.4): `inference_providers` with the Bedrock-off guard, model endpoints, route models, prices and proposals,
