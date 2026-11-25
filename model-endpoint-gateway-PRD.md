@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Proposed; J answered every open question (MEG-OQ-1 to MEG-OQ-23) on 2026-11-24 (§13.3)**, awaiting approval to implement. Nothing here is built, and no contract, schema or release changes until J approves. Release 1.1.0 is not changed by this document. Target release if approved: 1.2.0 in every repository (`-db` and `-restapi` in lockstep) |
+| **Status** | **Approved for build (J, 2026-11-25)**: every open question answered (MEG-OQ-1 to MEG-OQ-23, §13.3); build checklist in Appendix D. Release 1.1.0 is not changed by this document. Target release if approved: 1.2.0 in every repository (`-db` and `-restapi` in lockstep) |
 | **Kind** | Change PRD to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md) (BUD-2, BUD-3, EXT-6, RPT-7), the [team orchestration agent PRD](team-orchestration-agent-PRD.md) (model access, section 6.9) and the [gateway contract](docs/contracts/gateway-contract.md) v1.1.0 |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
@@ -159,8 +159,7 @@ No new roles. New permissions mirror external systems and models.
 | See routes, models, prices, usage and cost | Yes | Yes | Yes (no credential metadata beyond name and last rotation) | Own routes via `/etc/afs/llm-routes.json` |
 | Call a route | No | No | No | Yes, within its effective set |
 
-Permissions (proposed): `model-endpoints:read`, `model-endpoints:write` (service), `team-model-endpoints:write`,
-`model-endpoint-prices:approve`, `inference-provider-policy:write` (service admins only). Every one gets allowed and denied tests per role in `-restapi`.
+Permissions (API contract v1.5.0 §3): `admin:model-endpoints`, `admin:inference-providers` and the existing `admin:pricing` (service admins); `model-endpoints:read` (every team role) and `model-endpoints:write` (team-admins). Every one gets allowed and denied tests per role in `-restapi`.
 
 ## 5. Per-namespace versus shared gateway
 
@@ -276,11 +275,13 @@ All tables in schema `afs`, team-scoped tables with `team_id`, composite foreign
 | `team_model_endpoints` | `(team_id, endpoint_id)`, `selected_by` (`team_admin` or `service_admin`) | The team's opt-in rows. Insert of a `requires_terms` endpoint by a caller who is not a service admin → `42501` |
 | `agent_model_endpoints`, `pool_model_endpoints` | `(team_id, agent_id\|pool_id, endpoint_id)` | Selection rows when the agent's or pool's `route_access = selected` |
 | `endpoint_capacity_costs` | `(endpoint_id, team_id, effective_from)`, `monthly_usd` or `hourly_usd`, `allocation` (`by_tokens`, `by_agent`) | Optional, for `capacity` routes not costed by CUR (section 9.3) |
+| `endpoint_federations` | `(endpoint_id, team_id)`, `kind` (`azure`, `google`), Azure `tenant_id`, `client_id`; Google `project_number`, `pool_id`, `provider_id`, `project_id`, `location`; `status`, `last_error`, `checked_at` | Metadata only, no secret (§11.1). Team-owned: RLS; written by service admins |
+| `provider_statements` | `id` (`pst_…`), `endpoint_id`, `period` (month), `source` (`nous_statement`, `opencode_csv`), `rows` (per team and model: amount USD, tokens if given), `imported_by`, `imported_at` | Service-wide; read by `afs-billing` for monthly reconciliation (§9.4) |
 | `inference_providers` | `provider` (key), `display_name`, `hosts` (FQDN globs, for example `api.openai.com`, `*.openai.azure.com`, `*-aiplatform.googleapis.com`), `enabled`, `team_selection` (`team_admin` or `service_admin`), `disabled_reason`, `changed_by`, `changed_at` | Service-wide, no `team_id`. Seeded per section 7.4; `other` matches any external host not listed; `internal` (corporate and in-namespace endpoints) has no switch. Audited on every change |
 
 
 Column additions: `teams.may_add_model_endpoints` (service-admin only, guarded like
-`may_add_external_systems`); `agents.route_access`, `agent_pools.route_access`; `usage_events.endpoint_id` (NULL for
+`may_add_external_systems`); `teams.gateway_deployment` (`shared` default, `per_namespace`, §12.6); `agents.default_route`; `agents.route_access`, `agent_pools.route_access`; `usage_events.endpoint_id` (NULL for
 Bedrock), `usage_events.model_name` (text, for route calls, since `model_id` is an FK to Bedrock `models`),
 `usage_events.usage_source` (`response`, `estimated`, `provider_cost`), `usage_events.reasoning_tokens`, the timing columns `ttft_ms`, `upstream_ms`, `gateway_ms` and `http_status` (§10.4);
 `cost_daily.source` gains `route` and `route_capacity`. View `effective_agent_routes` (security invoker), like
@@ -683,7 +684,7 @@ tests and `seedOtherTeams` rows for every new team-owned table.
 - `afs-billing`: endpoint price proposals from LiteLLM's list and provider pages; daily OpenAI, OpenRouter, Azure Cost
   Management and Google billing export pulls (MEG-OQ-11); Nous Portal monthly statements and OpenCode usage CSV imports;
   capacity allocation; reports by route.
-- `afs-api`: about 16 operations (contract v1.5.0): `ListModelEndpoints`, `GetModelEndpoint`, `CreateModelEndpoint`,
+- `afs-api`: the operations listed in Appendix D.3.4 (contract v1.5.0), including: `ListModelEndpoints`, `GetModelEndpoint`, `CreateModelEndpoint`,
   `UpdateModelEndpoint`, `DeleteModelEndpoint` (service and team scope), `PutEndpointModels`,
   `PutEndpointModelPrice`, `List/Approve/RejectEndpointPriceProposal`, `PutModelEndpointCredential`,
   `RotateModelEndpointCredential`, `PutTeamModelEndpoints` (opt-in list), `ListInferenceProviders` and
@@ -796,6 +797,9 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`, `list-inference-
 | Transfer price | A per-token internal price service admins set for a shared internal inference platform |
 
 ## 15. Review record
+
+- 2026-11-25: J approved the build of 1.2.0. Completeness review added Appendix D (requirements by repository, the full
+  operation list, definition of done) and the `endpoint_federations` and `provider_statements` tables.
 
 - 2026-11-24: J asked to add OpenCode Go and to let service admins turn external providers off; §7.4 provider policy,
   screens 68 and 68a, US-78, US-79, MEG-D11, MEG-D12, MEG-OQ-22, MEG-OQ-23 and their tests added. J chose OpenCode's
@@ -1212,3 +1216,131 @@ chaos. Every authorization rule has a denied case.
 | TC-P-02 | P | 300 team gateways against RDS through RDS Proxy | No connection exhaustion; reservation p99 < 10 ms |
 | TC-P-03 | P | Team A gateway crash-looping and saturated by slow upstreams | Team B error rate and p99 unchanged (US-77) |
 | TC-P-04 | P | Migration of a canary team under load (US-76) | No refused call during the switch and the rollback |
+
+## Appendix D. Requirements by repository (build checklist for 1.2.0)
+
+Added on 2026-11-25 when J approved the build. Every requirement names the stories (Appendix B) and test cases
+(Appendix C) that prove it. Each child repository copies its section into its spec (`specs/261125-model-endpoint-gateway/`)
+and records progress in that spec's `status.md`. Release 1.2.0 in every repository; `-db` and `-restapi` in lockstep.
+
+### D.1 Root (`enterprise-agent-factory-service`)
+
+| ID | Requirement | Proves |
+|---|---|---|
+| MEG-ROOT-1 | Database contract: migration 000023 tables, columns, functions (`afs.route_admission`, `afs.provider_enabled`), roles and grants, RLS, change-feed rows, seed of `inference_providers` | TC-DB-* |
+| MEG-ROOT-2 | API contract v1.5.0: the operations of D.3.4, schemas, permissions and scopes, error reasons, outbox event types `model_endpoint.*` and `inference_provider.*` | TC-API-* |
+| MEG-ROOT-3 | Gateway contract v1.2.0: route paths, body form, `/r/bedrock` translation, admission reasons, provider error mappings, `AFS_LLM_*` variables and `/etc/afs/llm-routes.json`, default-model delivery for route models, headers, telemetry attributes | TC-GW-* |
+| MEG-ROOT-4 | Cross-repo spec `specs/261125-model-endpoint-gateway/` and ADR-018 (team gateway per namespace; providers as switches) | — |
+| MEG-ROOT-5 | Solution design, README, diagrams (team gateway topology; provider switches) and `skills/` CLI entry updated after the children merge | — |
+
+### D.2 `-db` (migration 000023, v1.2.0)
+
+| ID | Requirement | Proves |
+|---|---|---|
+| MEG-DB-1 | Tables `inference_providers`, `model_endpoints`, `endpoint_models`, `endpoint_model_prices`, `endpoint_price_proposals`, `endpoint_credentials`, `endpoint_federations`, `team_model_endpoints`, `agent_model_endpoints`, `pool_model_endpoints`, `endpoint_capacity_costs`, `provider_statements` with the constraints of §7.3 | TC-DB-01, 02, 05, 06 |
+| MEG-DB-2 | Columns: `teams.may_add_model_endpoints`, `teams.gateway_deployment` (`shared` default, `per_namespace`), `agents.route_access`, `agent_pools.route_access`, `agents.default_route`, `usage_events` route and timing columns, `cost_daily.source` values | TC-DB-01, TC-DB-10 |
+| MEG-DB-3 | `afs.route_admission(subject_kind, subject_id)` returning the effective routes and models with denial reasons in the fixed order; `effective_agent_routes` view; `afs.secret_path` `_gateway` scope | TC-DB-07, 08, 12 |
+| MEG-DB-4 | RLS on every team-owned table, rows in `seedOtherTeams`, grants per role (`afs_gateway` reads its team's routes; `afs_billing` reads statements; service-only tables writable only by service admins through `afs_app`) | TC-DB-03, 04, 13 |
+| MEG-DB-5 | Seed of providers (Bedrock, OpenAI, OpenRouter, Nous, OpenCode, other on; Azure and Google off, `service_admin` selection) and built-in catalog entries, all off | TC-DB-14 |
+| MEG-DB-6 | Bedrock-off guard: provider update refused unless the service default is a route model selected for every team | TC-DB-15 |
+| MEG-DB-7 | Change feed for every new table; up/down/up clean; `docs/data-model.md` updated | TC-DB-09, 10 |
+
+### D.3 `-restapi` (v1.2.0, API contract v1.5.0, gateway contract v1.2.0)
+
+#### D.3.1 `afs-gateway`
+
+| ID | Requirement | Proves |
+|---|---|---|
+| MEG-GW-1 | Team mode (`--team-namespace`): one binary serves the shared or a team gateway | TC-GW-22, TC-P-03 |
+| MEG-GW-2 | Route resolution (path and body forms), admission from `afs.route_admission` with 60 s cache and change-feed invalidation | TC-GW-02, 09, 18, 26 |
+| MEG-GW-3 | OpenAI pass-through for Chat Completions, Responses, Embeddings, SSE; reservation cap written into the request; `include_usage` injected and stripped; usage parsing; provider `usage.cost` settles to the larger | TC-GW-01, 03 to 07, 24, 27 |
+| MEG-GW-4 | Chat Completions → Bedrock Converse on `/r/bedrock`, `unsupported_parameter` for unmapped fields | TC-GW-10, 23 |
+| MEG-GW-5 | Upstream auth from files (bearer, header), Azure and Google federation (§11.1), rotation without restart; agent `Authorization` replaced and redacted | TC-GW-11 to 13, 28, 29 |
+| MEG-GW-6 | Error mapping: `credential_missing`, `federation_not_ready`, `provider_balance_exhausted`, `provider_budget_exhausted`, upstream 429/5xx/timeout, fail closed on database loss | TC-GW-12, 16, 17 |
+| MEG-GW-7 | `GET /v1/models` per route from the agent's effective models; unsupported paths 404 | TC-GW-14, 15 |
+| MEG-GW-8 | Telemetry: GenAI spans and metrics, no agent label, `traceparent` rules, timing columns | TC-GW-19 to 21 |
+
+#### D.3.2 `afs-reconciler`
+
+| ID | Requirement | Proves |
+|---|---|---|
+| MEG-RC-1 | Render the team gateway per namespace (Deployment, PDB, Service, certificate, ServiceAccount, Pod Identity, ExternalSecret, network policies) behind `teams.gateway_deployment`; ring rollout | TC-RC-01, 10, US-76 |
+| MEG-RC-2 | Egress: route hosts only from the team gateway; agents never; `llm` systems linked to a route not rendered unless overridden; providers off removed | TC-RC-02 to 04, 09, 12 |
+| MEG-RC-3 | Agent delivery: `AFS_LLM_*`, `OPENAI_BASE_URL`, `/etc/afs/llm-routes.json`, route default model; roll on agent change | TC-RC-07, 08 |
+| MEG-RC-4 | Credentials and federation: `_gateway` secrets, projected token for Azure, nothing mounted into agents | TC-RC-06, 14 |
+| MEG-RC-5 | Provider switches incl. Bedrock off (remove `bedrock:Invoke*`, fallback defaults, `ModelUnavailable`, `Degraded` for Anthropic-only templates) | TC-RC-13 |
+| MEG-RC-6 | Route health conditions and `model_endpoint.degraded` / `recovered` events | TC-RC-11 |
+
+#### D.3.3 `afs-billing`
+
+| ID | Requirement | Proves |
+|---|---|---|
+| MEG-BL-1 | Daily provider pulls (OpenAI costs, OpenRouter key usage, Azure Cost Management, Google billing export) behind a provider interface with recorded fixtures; variance over `billing.variance_alert_pct` emits `cost.variance_detected` | TC-BL-01, 04 |
+| MEG-BL-2 | Statement imports (Nous monthly statement, OpenCode usage CSV) and *Not reconciled* state | TC-BL-05, 06 |
+| MEG-BL-3 | Capacity allocation by token share; endpoint price proposals | TC-BL-02, 03 |
+
+#### D.3.4 `afs-api` operations (contract v1.5.0)
+
+| Operation | Method and path | Permission | Story |
+|---|---|---|---|
+| `ListModelEndpoints` | `GET /v1/admin/model-endpoints` | `admin:model-endpoints` | US-62 |
+| `CreateModelEndpoint` | `POST /v1/admin/model-endpoints` | `admin:model-endpoints` | US-62 |
+| `GetModelEndpoint` | `GET /v1/admin/model-endpoints/{endpointId}` | `admin:model-endpoints` | US-62 |
+| `UpdateModelEndpoint` | `PATCH /v1/admin/model-endpoints/{endpointId}` (If-Match; includes `enabled`) | `admin:model-endpoints` | US-63 |
+| `DeleteModelEndpoint` | `DELETE /v1/admin/model-endpoints/{endpointId}` | `admin:model-endpoints` | US-62 |
+| `PutEndpointModels` | `PUT /v1/admin/model-endpoints/{endpointId}/models` | `admin:model-endpoints` | US-62 |
+| `CreateEndpointModelPrice` | `POST /v1/admin/model-endpoints/{endpointId}/prices` | `admin:pricing` | US-64 |
+| `ListEndpointPriceProposals` | `GET /v1/admin/endpoint-price-proposals` | `admin:model-endpoints` | US-64 |
+| `ApproveEndpointPriceProposal` / `RejectEndpointPriceProposal` | `POST /v1/admin/endpoint-price-proposals/{proposalId}:approve` / `:reject` | `admin:pricing` | US-64 |
+| `ListEndpointTeams` | `GET /v1/admin/model-endpoints/{endpointId}/teams` | `admin:model-endpoints` | US-65 |
+| `PutModelEndpointCredential` | `PUT /v1/admin/model-endpoints/{endpointId}/credentials/{scope}` (`scope` = team id or `_shared`; write-only) | `admin:model-endpoints` | US-65 |
+| `RotateModelEndpointCredential` | `POST /v1/admin/model-endpoints/{endpointId}/credentials/{scope}:rotate` | `admin:model-endpoints` | US-65 |
+| `PutEndpointFederation` | `PUT /v1/admin/model-endpoints/{endpointId}/federations/{teamId}` (metadata only) | `admin:model-endpoints` | US-81 |
+| `ImportProviderStatement` | `POST /v1/admin/model-endpoints/{endpointId}/statements` | `admin:model-endpoints` | US-79, TC-BL-05 |
+| `ListInferenceProviders` | `GET /v1/admin/inference-providers` | `admin:model-endpoints` | US-78 |
+| `UpdateInferenceProvider` | `PATCH /v1/admin/inference-providers/{provider}` (If-Match; Bedrock fallback fields) | `admin:inference-providers` | US-78, US-80 |
+| `PutTeamGatewaySettings` | `PUT /v1/admin/teams/{teamId}/gateway-settings` (`deployment`, `mayAddModelEndpoints`) | `teams:set-guardrails` | US-66, US-76 |
+| `ListTeamModelEndpoints` | `GET /v1/teams/{teamId}/model-endpoints` (opted-in, own and available) | `model-endpoints:read` | US-63, US-75 |
+| `PutTeamModelEndpoints` | `PUT /v1/teams/{teamId}/model-endpoint-selections` (opt-in list) | `model-endpoints:write` | US-63 |
+| `CreateTeamModelEndpoint` / `UpdateTeamModelEndpoint` / `DeleteTeamModelEndpoint` | `/v1/teams/{teamId}/model-endpoints[/{endpointId}]` | `model-endpoints:write` | US-67 |
+| `PutTeamEndpointModels` | `PUT /v1/teams/{teamId}/model-endpoints/{endpointId}/models` (prices inline for team endpoints) | `model-endpoints:write` | US-67 |
+| `PutTeamModelEndpointCredential` | `PUT /v1/teams/{teamId}/model-endpoints/{endpointId}/credential` | `model-endpoints:write` | US-65, US-67 |
+| Agent and pool routes | existing `PutAgentModels` / `PutPoolModels` bodies gain `routeAccess`, `routes`, `defaultRoute`, `defaultModel` may be `<route>/<model>` | existing | US-68 |
+| Reports | `GET /v1/reports/inference`, `groupBy=route` and `route` filter on usage and cost reports | existing reports permission | US-73 |
+
+| ID | Requirement | Proves |
+|---|---|---|
+| MEG-API-1 | Every operation above with allowed and denied tests per role; team scope from the path | TC-API-01, 05, 07 |
+| MEG-API-2 | Row, audit and outbox in one transaction; If-Match on updates | TC-API-02, 03 |
+| MEG-API-3 | Credential values never stored, returned or logged; federation is metadata only | TC-API-04 |
+| MEG-API-4 | Provider rules: disabled-provider host refused; Bedrock fallback guard | TC-API-08 |
+| MEG-API-5 | Inference report percentiles from the ledger, JSON and CSV | TC-API-06 |
+
+### D.4 `-cli` (v1.2.0)
+
+| ID | Requirement | Proves |
+|---|---|---|
+| MEG-CLI-1 | New service `model-endpoints` with one command per operation of D.3.4 (kebab-case of the operationId), examples, columns and goldens | TC-CLI-01, 05 |
+| MEG-CLI-2 | `teams put-team-gateway-settings`, `teams put-team-model-endpoints`; agent and pool route options on the existing model commands | TC-CLI-01 |
+| MEG-CLI-3 | Credential values only from file, stdin or prompt; redaction under `--debug` | TC-CLI-02, 04 |
+| MEG-CLI-4 | AccessDenied tests for every new command; generated reference docs | TC-CLI-03 |
+
+### D.5 `-website` (v1.2.0)
+
+| ID | Requirement | Proves |
+|---|---|---|
+| MEG-WEB-1 | `@afs/sdk` regenerated from contract v1.5.0; resource helpers for endpoints, providers and the inference report | TC-UI-08 (SDK replay) |
+| MEG-WEB-2 | Service admin screens 56 to 60 and 68/68a (catalog, create wizard with CLI preview, endpoint detail with credentials and federation, inference report, team routes, provider policy with Bedrock fallback) | TC-UI-01, 07, 11 |
+| MEG-WEB-3 | Team-admin screens 61 to 65 (team endpoints with opt-in, create team endpoint, agent models and routes with env preview, team inference report, budget by route) | TC-UI-02, 03, 05, 10 |
+| MEG-WEB-4 | Team viewer screens 66 and 67, every changing control disabled with the role named | TC-UI-04 |
+| MEG-WEB-5 | Permission mirror updated with the new permissions; credential values never in state, URL, storage or logs | TC-UI-06 |
+| MEG-WEB-6 | Visual baselines for the new screens, for J's approval | TC-UI-07 |
+
+### D.6 Definition of done for 1.2.0
+
+- Every requirement above is implemented with its tests; each repository's gate is green; coverage holds the existing
+  floors.
+- Release 1.1.0 behaviour is unchanged for teams on the shared gateway: the existing conformance and contract tests pass.
+- Contracts merge first in the root (for the MCP 1.3.0 build), then `-db`, `-restapi`, and `-cli` and `-website`.
+- Each repository's CHANGELOG records 1.2.0; tag targets are reported to J (tags are pushed by J).
+- Real-cloud checks (EKS, Azure and Google federation against live tenants) wait for J's cloud access, as for 1.1.0.

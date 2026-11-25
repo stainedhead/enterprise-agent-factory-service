@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract v1.4.0 (2026-11-23) adds migration **000022** (team orchestration agent and model access, [team-orchestration-agent-PRD.md](../../team-orchestration-agent-PRD.md) DB-US-58 to DB-US-61, specified in §7.3; release 1.1.0, lockstep with `-restapi`); not yet built. Contract v1.3.2 (2026-11-22) at schema 000021: migration 000020 (Paperclip team collaboration, [paperclip-team-collaboration-PRD.md](../../paperclip-team-collaboration-PRD.md) DB-US-44 to DB-US-47, specified in §7.2) and 000021 (`collab_routes()` provider client ids, §7.2.10) are built in `-db` at `main` (0d87776) and ship in release 1.0.1, which `-db` and `-restapi` share. Earlier history: contract v1 at schema 000019. Corrected on 2026-11-22 (contract corrections round, PC-D20 to PC-D31) to match the `-db` PRD §9.1 decisions DB-D1 to DB-D16 and the `-restapi` gaps G1 to G10. 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). 000017 adds `afs.schema_version()` for the startup check of services that cannot read the tracking table, and `identity_providers.cli_client_id` (the CLI public client, D48; `client_id` is the console client). Planned first release containing 000011 to 000017: `v0.13.0` 000018 adds daily report rollups and the follow-ups `-restapi` asked for (X-DB-8 to X-DB-10, `agent_secret_bindings` triggers, ETag-stable report schedules); 000019 adds `afs.record_work_order_secret` (template secrets for remediation teams) and `afs.event_detail`, and gives the outbox payloads written by `afs.instantiate_work_order_team` the API contract §7 envelope. Schema 000019 is at `-db` `main` (83f0345) and is not yet tagged; `-restapi` pins its pseudo-version until the tag exists |
+| **Status** | Contract **v1.5.0** (2026-11-25) adds migration **000023** (team model gateway, routes and provider switches, [model-endpoint-gateway-PRD.md](../../model-endpoint-gateway-PRD.md) Appendix D.2, specified in §7.4; release 1.2.0, lockstep with `-restapi`). Contract v1.4.0 (2026-11-23) adds migration **000022** (team orchestration agent and model access, [team-orchestration-agent-PRD.md](../../team-orchestration-agent-PRD.md) DB-US-58 to DB-US-61, specified in §7.3; release 1.1.0, lockstep with `-restapi`); not yet built. Contract v1.3.2 (2026-11-22) at schema 000021: migration 000020 (Paperclip team collaboration, [paperclip-team-collaboration-PRD.md](../../paperclip-team-collaboration-PRD.md) DB-US-44 to DB-US-47, specified in §7.2) and 000021 (`collab_routes()` provider client ids, §7.2.10) are built in `-db` at `main` (0d87776) and ship in release 1.0.1, which `-db` and `-restapi` share. Earlier history: contract v1 at schema 000019. Corrected on 2026-11-22 (contract corrections round, PC-D20 to PC-D31) to match the `-db` PRD §9.1 decisions DB-D1 to DB-D16 and the `-restapi` gaps G1 to G10. 000013 implements root PRD decisions D30, D31, D33 to D36 and D45; some D35 rules landed in 000011 and 000012, as marked below. 000014 implements D54 (agent template catalog) and D49 (export and import transport). 000015 closes the gaps that proving the `-db` PRD revealed; 000016 adds the service access paths `-restapi` requested (X-DB-1 to X-DB-6). 000017 adds `afs.schema_version()` for the startup check of services that cannot read the tracking table, and `identity_providers.cli_client_id` (the CLI public client, D48; `client_id` is the console client). Planned first release containing 000011 to 000017: `v0.13.0` 000018 adds daily report rollups and the follow-ups `-restapi` asked for (X-DB-8 to X-DB-10, `agent_secret_bindings` triggers, ETag-stable report schedules); 000019 adds `afs.record_work_order_secret` (template secrets for remediation teams) and `afs.event_detail`, and gives the outbox payloads written by `afs.instantiate_work_order_team` the API contract §7 envelope. Schema 000019 is at `-db` `main` (83f0345) and is not yet tagged; `-restapi` pins its pseudo-version until the tag exists |
 | **Provider** | [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db): migrations, roles, row-level security, `migrate` Go package, `afs-migrate` |
 | **Consumer** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi): `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing` |
 | **Full data dictionary** | `-db/docs/data-model.md` (every table, column rule and function). This document is the interface: who connects how, what each service may touch, and how failures surface |
@@ -848,6 +848,97 @@ exactly as the `paperclip` rules of §7.2.4 (name derivation, the partial unique
 EXCLUSIVE` (small). `service_settings`: two CHECKs and seeded rows. Functions and views: `CREATE OR REPLACE`. Expected
 run time well under the 10 s `lock_timeout`; run it in the upgrade window that also runs the backfill hook.
 
+## 7.4 Migration 000023: team model gateway, routes and provider switches (contract v1.5.0)
+
+Source: [model endpoint gateway PRD](../../model-endpoint-gateway-PRD.md) §7, §9, §11 and Appendix D.2 (approved by J,
+2026-11-25). Release `-db` 1.2.0 with `-restapi` 1.2.0. All objects in schema `afs`; ids are prefixed ULIDs
+(`mep_`, `epp_`, `pst_`). Desired-state tables carry `version`, `created_at/by`, `updated_at`, the touch and revision
+triggers and a notify trigger on `afs_desired_state` (payload `<table>:<team_id>:<id>`, empty team for service rows).
+
+### 7.4.1 Providers
+
+| Object | Definition |
+|---|---|
+| `inference_providers` | `provider text PRIMARY KEY CHECK (provider ~ '^[a-z][a-z0-9_]{1,30}$')`, `display_name text NOT NULL`, `hosts text[] NOT NULL DEFAULT '{}'` (FQDN globs, each `^(\*\.)?[a-z0-9.-]+$` or `*-aiplatform.googleapis.com` style; at most 20), `enabled boolean NOT NULL`, `team_selection text NOT NULL DEFAULT 'team_admin' CHECK (team_selection IN ('team_admin','service_admin'))`, `disabled_reason text` (≤ 500), `fallback_model text` (Bedrock only: `<route>/<model>` chosen when it was turned off), `version`, `changed_by`, `changed_at`. No `team_id`: service-wide. `afs_app` may `UPDATE (enabled, team_selection, disabled_reason, fallback_model)` only when `afs.service_admin` is set (`42501`); no insert or delete by `afs_app` except provider `other`-style rows added by service admins (`INSERT` with the same check) |
+| Seed | `bedrock` (hosts `bedrock-runtime.*.amazonaws.com`), `openai` (`api.openai.com`), `openrouter` (`openrouter.ai`), `nous` (`inference-api.nousresearch.com`), `opencode` (`opencode.ai`): `enabled = true`, `team_admin`. `azure` (`*.openai.azure.com`, `*.services.ai.azure.com`, `*.cognitiveservices.azure.com`) and `google` (`aiplatform.googleapis.com`, `*-aiplatform.googleapis.com`): `enabled = false`, `service_admin`. `other` (no hosts: matches any external host not listed): `true`, `team_admin`. `internal` is not a row: `corporate` and `in_namespace` endpoints have no provider switch |
+| `afs.provider_for_host(p_host text) RETURNS text` | `STABLE`; first provider whose `hosts` glob matches, else `'other'` |
+| Bedrock-off guard | `BEFORE UPDATE` trigger: setting `bedrock.enabled = false` requires `models.default_model_id` to be a route model (`<route>/<model>`) whose endpoint is enabled, on an enabled provider, and selected for every team that is not `deleted`; else `23514` (`no_fallback_model`). `afs-api` performs the "select for every team" step in the same transaction before the update |
+
+`models.default_model_id` (000022) widens: the trigger accepts an existing `models.id` **or** `<slug>/<model>` naming a
+row of `endpoint_models` on a service endpoint. Agents' and pools' `default_model_id` gains a sibling
+`default_route text` (FK by `(team_id, …)` is not possible across service rows, so a deferred constraint trigger checks it
+is in the subject's effective routes at commit, `23514` `agents_default_route_allowed`); when `default_route` is set,
+`default_model_id` holds the route's model name and the `models` FK is not applied (the FK moves to a check trigger,
+CD-42).
+
+### 7.4.2 Endpoints, models and prices
+
+| Object | Definition |
+|---|---|
+| `model_endpoints` | `id text PRIMARY KEY CHECK (afs.ulid_ok(id,'mep'))`, `team_id text REFERENCES afs.teams (id) ON DELETE CASCADE` (NULL = service), `slug text NOT NULL CHECK (slug ~ '^[a-z][a-z0-9-]{1,30}$' AND slug <> 'bedrock')`, `display_name`, `description`, `owner` and `purpose` (both required when `team_id IS NOT NULL`, `23514`), `provider text NOT NULL` (FK to `inference_providers`, or `internal`; set from `afs.provider_for_host` for team endpoints by trigger), `protocols text[] NOT NULL` (non-empty subset of `openai_chat`, `openai_responses`, `openai_embeddings`), `location text NOT NULL CHECK (location IN ('external','corporate','in_namespace'))` (`in_namespace` only with `team_id`; `external` and `corporate` need `https://`, `23514`), `base_url text NOT NULL` (≤ 500), `ca_bundle text` (PEM, ≤ 16 KiB), `auth_kind text NOT NULL CHECK (auth_kind IN ('none','bearer','header','azure_federated','google_federated'))`, `auth_header text` (required for `header`), `metrics_port integer` (`in_namespace` only), `credential_mode text NOT NULL DEFAULT 'per_team' CHECK (… IN ('shared','per_team'))` (team endpoints: always `per_team`), `pricing_mode text NOT NULL CHECK (pricing_mode IN ('per_token','capacity','free'))`, `requires_terms boolean NOT NULL DEFAULT false`, `use_provider_cost boolean NOT NULL DEFAULT false`, `enabled boolean NOT NULL DEFAULT false`, `timeout_seconds integer NOT NULL DEFAULT 300 CHECK (5..3600)`, `max_body_mib integer NOT NULL DEFAULT 20 CHECK (1..100)`, `external_system_id text` (FK to `external_systems`), `builtin boolean NOT NULL DEFAULT false`; `UNIQUE (team_id, id)`; slug unique among service rows and unique per team **and** not equal to any service slug (trigger, `23505` `model_endpoints_slug_taken`). Creating or updating an endpoint whose `provider` is disabled → `23514` (`provider_disabled`) |
+| Built-in rows | `openrouter`, `nous-portal`, `opencode` (service, off, `per_token`, `bearer`, `per_team`) seeded with no models; `azure-openai` and `vertex-ai` (off, `azure_federated` / `google_federated`). Their base URLs carry placeholders (`<resource>`, `<project>`, `<location>`) that a service admin must replace before `enabled = true` (`23514` `endpoint_base_url_placeholder`) |
+| `endpoint_models` | `(endpoint_id, model_name)` PK, `team_id` (copied, for RLS on team endpoints), `max_output_tokens integer NOT NULL CHECK (1..1000000)`, `context_tokens integer`, `enabled boolean NOT NULL DEFAULT true`; `model_name` printable, ≤ 200, no `/` at the start. At most 500 per endpoint |
+| `endpoint_model_prices` | `(endpoint_id, model_name, effective_from)` PK, `input_per_mtok_usd`, `output_per_mtok_usd`, `cached_input_per_mtok_usd numeric(14,6)` (≥ 0), `request_fee_usd numeric(14,8) NOT NULL DEFAULT 0`, `source text CHECK (source IN ('manual','price_list','transfer','provider'))`, `approved_by`; append-only (UPDATE and DELETE rejected by trigger, as `model_prices`) |
+| `endpoint_price_proposals` | as `model_price_proposals` with `endpoint_id` and `model_name`; `state` `pending`, `approved`, `rejected` |
+| `endpoint_capacity_costs` | `(endpoint_id, team_id, effective_from)` PK, `monthly_usd` or `hourly_usd` (exactly one), `allocation text CHECK (allocation IN ('by_tokens','by_agent'))` |
+
+### 7.4.3 Credentials, federation and statements
+
+| Object | Definition |
+|---|---|
+| `endpoint_credentials` | `(endpoint_id, scope)` PK where `scope` is a team id or `_shared`; `team_id` (NULL for `_shared`), `secret_arn text NOT NULL` checked by `afs.secret_path(team, '_gateway', slug)` or `<prefix>/_service/gateway/<slug>` (`23514` `endpoint_credential_path`), `status text CHECK (status IN ('set','missing'))`, `rotated_at`. No value column (the existing guard test covers it) |
+| `afs.secret_path` | Accepts the reserved scope `_gateway` beside `_shared` |
+| `endpoint_federations` | `(endpoint_id, team_id)` PK, `kind text CHECK (kind IN ('azure','google'))`, Azure: `tenant_id`, `client_id` (UUID form); Google: `project_number` (digits), `pool_id`, `provider_id`, `project_id`, `location`; `status text CHECK (status IN ('pending','ready','failing'))`, `last_error text` (≤ 500), `checked_at`. Metadata only. Written by service admins (`afs_app`); `status`, `last_error`, `checked_at` also by `afs_gateway` (column grant) |
+| `provider_statements` | `id` (`pst_`), `endpoint_id`, `period date` (first of month), `source text CHECK (source IN ('nous_statement','opencode_csv'))`, `rows jsonb NOT NULL` (array of `{teamId, model, amountUsd, tokens?}`, ≤ 10 000), `imported_by`, `imported_at`; `UNIQUE (endpoint_id, period, source)` |
+
+### 7.4.4 Selections and agents
+
+| Object | Definition |
+|---|---|
+| `team_model_endpoints` | `(team_id, endpoint_id)` PK, `selected_by text NOT NULL CHECK (selected_by IN ('team_admin','service_admin'))`, `created_at/by`. Insert of an endpoint with `requires_terms` or whose provider has `team_selection = 'service_admin'` without `afs.service_admin` → `42501`. Service endpoints only (team endpoints are always in their team's set) |
+| `teams` | `may_add_model_endpoints boolean NOT NULL DEFAULT false` and `gateway_deployment text NOT NULL DEFAULT 'shared' CHECK (… IN ('shared','per_namespace'))`, both in `teams_guardrail_guard` (service admins only) |
+| `agents`, `agent_pools` | `route_access text NOT NULL DEFAULT 'all' CHECK (… IN ('all','selected'))`, `default_route text` (§7.4.1) |
+| `agent_model_endpoints`, `pool_model_endpoints` | `(team_id, agent_id|pool_id, endpoint_id)` PK, composite FK to the agent or pool `ON DELETE CASCADE`; the endpoint must be in the team's set at write time (`23514` `agent_routes_team`) |
+| `afs.effective_agent_routes` | View, `security_invoker`: `(team_id, subject_kind, subject_id, endpoint_id, slug, model_name, is_default)` for routes in (team's opted-in enabled service endpoints ∪ team endpoints that are enabled) ∩ subject, on enabled providers, for callable models (`per_token` needs a price in force) |
+| `afs.route_admission(p_subject_kind, p_subject_id)` | `STABLE`, `SECURITY INVOKER`, returns `(endpoint_id, slug, model_name, reason)` for every route model reachable in principle for the subject's team; `reason` NULL or the first of `provider_disabled`, `route_not_enabled_for_service`, `route_not_enabled_for_team`, `route_not_enabled_for_agent`, `model_not_priced` (`model_not_on_route` is decided by the gateway for names absent from the result). Also `afs.provider_enabled(p_provider text) RETURNS boolean` for Bedrock paths |
+
+### 7.4.5 Usage and cost
+
+`usage_events` (partitioned) gains nullable `endpoint_id text`, `model_name text`, `usage_source text CHECK (… IN
+('response','estimated','provider_cost'))`, `reasoning_tokens bigint`, `ttft_ms integer`, `upstream_ms integer`,
+`gateway_ms integer`, `http_status smallint`; `model_id` becomes nullable with `CHECK ((model_id IS NULL) <>
+(endpoint_id IS NULL) OR outcome <> 'ok')`. `cost_daily.source` accepts `route` and `route_capacity`. Columns are added on
+the parent; no rewrite (metadata-only on PostgreSQL 17). Lock: `ACCESS EXCLUSIVE` on the parent briefly.
+
+### 7.4.6 Grants, RLS and change feed
+
+| Role | Grants |
+|---|---|
+| `afs_app` | `SELECT, INSERT, UPDATE, DELETE` on endpoint tables (RLS: team rows by `afs.caller_sees_team`; service rows readable by all callers, writable only with `afs.service_admin`); `SELECT, UPDATE (listed columns)` on `inference_providers`; `INSERT, SELECT` on `provider_statements`; `EXECUTE` on the functions |
+| `afs_gateway` | `SELECT` on every 000023 table except `provider_statements`; `UPDATE (status, last_error, checked_at)` on `endpoint_federations`; `EXECUTE` on `afs.route_admission`, `afs.provider_enabled`; per-namespace gateways set `afs.team_ids` to their team |
+| `afs_reconciler` | `SELECT` on every 000023 table; `UPDATE (status)` on `endpoint_credentials` |
+| `afs_billing` | `SELECT` on endpoints, prices, capacity costs, statements, federations; `INSERT` on `endpoint_price_proposals` |
+| `afs_readonly` | `SELECT` on every 000023 table |
+
+Every team-owned new table (`model_endpoints` team rows, `endpoint_models`, `endpoint_credentials`,
+`endpoint_federations`, `team_model_endpoints`, `agent_model_endpoints`, `pool_model_endpoints`,
+`endpoint_capacity_costs`) enables RLS and gets rows in `seedOtherTeams`. Every new table notifies on change.
+
+### 7.4.7 Error mapping (additions to §6)
+
+| SQLSTATE and constraint | API |
+|---|---|
+| `23505` `model_endpoints_slug_taken` | `409 Conflict`, `details.reason = slug_taken` |
+| `23514` `provider_disabled` | `400 ValidationError`, `provider_disabled` |
+| `23514` `no_fallback_model` | `400 ValidationError`, `no_fallback_model` |
+| `23514` `endpoint_credential_path`, `endpoint_base_url_placeholder`, `agent_routes_team`, `agents_default_route_allowed` | `400 ValidationError` with the constraint as reason |
+| `42501` on selections of extra-terms or service-selected providers | `403 AccessDenied`, `needs_service_admin` |
+
+### 7.4.8 Tests
+
+TC-DB-01 to TC-DB-15 of the PRD; each constraint above has a rejected-case test; isolation and
+`TestCrossTeamWritesChangeNothing` cover every team-owned table; up/down/up is clean.
+
 ## 8. Change process
 
 1. Schema change: a `-db` PR with the migration, integration tests (rejected case for every new
@@ -858,6 +949,17 @@ run time well under the 10 s `lock_timeout`; run it in the upgrade window that a
 3. A breaking change follows expand and contract across two `-db` releases.
 
 ## 9. Change log
+
+- **v1.5.0 (2026-11-25), team model gateway ([PRD](../../model-endpoint-gateway-PRD.md), approved by J):** migration 000023
+  (§7.4): `inference_providers` with the Bedrock-off guard, model endpoints, route models, prices and proposals,
+  credentials at `_gateway` paths, federation metadata, provider statements, team selections, agent and pool routes,
+  `teams.may_add_model_endpoints` and `gateway_deployment`, `afs.route_admission`, `afs.effective_agent_routes`,
+  `afs.provider_enabled`, `afs.provider_for_host`, usage row columns. Minor (1.2.0).
+
+| # | Decision |
+|---|---|
+| CD-42 | A default model may be a route model: `default_route` plus `default_model_id` holding the route's model name. The FK of `default_model_id` to `models` becomes a check trigger that applies only when `default_route` is NULL |
+| CD-43 | Built-in service endpoints ship off with placeholder base URLs that must be replaced before they can be switched on |
 
 - **v1.4.0 (2026-11-23), team orchestration agent and model access ([PRD](../../team-orchestration-agent-PRD.md), approved by J):** migration 000022 (§7.3): role `collaboration` renamed `orchestration` with `agents_team_orchestration_uq`; `teams.orchestration_required` and its deferred check; reserved name `orchestrator`; delete guard; `team_collaboration.tool`, `web_ui_exposure`, `web_api_exposure` and `teams.max_collaboration_exposure`, kept in step with the 1.0.1 booleans; exposure check trigger; capabilities `orchestration`, `tool:paperclip`, `tool:buzz`; `orchestration.*` and `models.*` settings; `afs.orchestration_routes()`, `afs.orchestration_settings()`, `exposure` in `record_collab_access` and `collaboration_access`; `afs.create_orchestration_agent`; work order teams get an orchestration agent; Buzz reserved secret names; model access columns and tables (`teams.model_access`, `agents`/`agent_pools.model_access` and `default_model_id`, `agent_models`, `pool_models`, `team_inference_profiles`), view `afs.effective_agent_models` and `afs.model_admission`. Minor (1.1.0); removals in 2.0.0.
 
