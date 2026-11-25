@@ -1,9 +1,9 @@
 # Skill: the `afs` CLI
 
-> **Status banner.** Release `v1.2.0` of `enterprise-agent-factory-service-cli` is built and merged on `main`
-> (team model gateway, contract 1.5: 219 commands for 221 operations); the repository owner pushes the tag, and it is
-> not yet published: no signed archives, no Homebrew formula and no tap exist yet. The 1.2.0 commands need an `afs-api`
-> at release 1.2.0 or later. Until the release is published, build from source (`make build` writes `bin/afs`). This
+> **Status banner.** Release `v1.3.0` of `enterprise-agent-factory-service-cli` is built on `main` (governed MCP
+> servers, contract 1.6: 273 commands for 276 operations; 1.2.0 added the team model gateway); the repository owner
+> pushes the tag, and it is not yet published: no signed archives, no Homebrew formula and no tap exist yet. The 1.3.0
+> commands need an `afs-api` at release 1.3.0 or later. Until the release is published, build from source (`make build` writes `bin/afs`). This
 > file describes the CLI at `main`; check `afs --version` and `afs <service> <operation> help` for the truth on a given
 > build.
 
@@ -36,7 +36,7 @@ Secret values come from `file://PATH`, `fileb://PATH` or `-` (standard input) on
 ## Command shape
 
 `afs <service> <operation> [--options]`. Services: `teams`, `agents`, `pools`, `secrets`, `budgets`, `members`,
-`api-keys`, `audit`, `reports`, `models`, `model-endpoints`, `work-orders`, `swarm-templates`, `collaboration`, `orchestration`, `admin`, plus `configure`,
+`api-keys`, `audit`, `reports`, `models`, `model-endpoints`, `mcp-servers`, `work-orders`, `swarm-templates`, `collaboration`, `orchestration`, `admin`, plus `configure`,
 `sso` and `completion`. Operations are kebab-case verb-noun and map to one API call each (`list-teams` is `ListTeams`).
 Options mirror API fields (`--team-id`, `--amount-usd`); lists are space-separated.
 
@@ -56,6 +56,44 @@ Global options: `--profile --endpoint-url --output json|yaml|table|text|csv --qu
 
 Errors go to stderr as `An error occurred (<Code>) when calling the <Operation> operation: <message>`.
 Exit codes: 0 success, 252 usage error, 254 service error (including `AccessDenied`), 255 other (network, config).
+
+## Governed MCP servers (1.3.0)
+
+Contract: API 1.6 and later. Reference: `user-docs/mcp-servers.md`, `user-docs/reference/mcp-servers.md`. Agents reach
+MCP servers only through their team gateway (`AFS_MCP_URL`); the catalog is governed and credentials stay with AFS.
+
+```bash
+# Service admins and security operators: the catalog and its review
+afs mcp-servers list-mcp-servers [--scope enterprise|team] [--review-status pending_review]
+afs mcp-servers create-mcp-server --slug github --display-name GitHub --data-classification internal \
+  --transport streamable_http --location external --url https://... --auth-kind static --credential-mode per_team
+afs mcp-servers put-mcp-server-credential --mcp-server-id mcp_... --scope team_...|_shared --secret-value file://token
+afs mcp-servers refresh-mcp-inventory --mcp-server-id mcp_...
+afs mcp-servers list-mcp-reviews [--approver security]
+afs mcp-servers approve-mcp-server | reject-mcp-server | request-mcp-server-changes --mcp-server-id mcp_... --note "..."
+afs mcp-servers publish-mcp-server | suspend-mcp-server | resume-mcp-server | retire-mcp-server --mcp-server-id mcp_...
+afs mcp-servers list-mcp-primitives --mcp-server-id mcp_... --status pending_review
+afs mcp-servers get-mcp-primitive-change | approve-mcp-primitive | reject-mcp-primitive --mcp-server-id mcp_... --primitive-id mpr_...
+afs mcp-servers put-mcp-policy --mcp-server-id mcp_... --rules '[{"class":"destructive","effect":"block"}]'
+
+# Team-admins: switch servers on, the team's own servers, credentials, OAuth
+afs teams list-team-mcp-servers --team-id team_...
+afs teams put-team-mcp-server --team-id team_... --mcp-server-id mcp_... --enabled --mode full|read_only
+afs teams put-team-mcp-policy --team-id team_... --mcp-server-id mcp_... --rules file://rules.json
+afs teams create-team-mcp-server ... ; afs teams submit-mcp-server-for-review --team-id team_... --mcp-server-id mcp_...
+afs teams start-mcp-oauth-connect --team-id team_... --mcp-server-id mcp_... --query authorizationUrl --output text
+
+# Agents and pools: narrow, inspect, federated identities
+afs agents update-agent --team-id team_... --agent-id agt_... --mcp '{"access":"selected","serverIds":["mcp_..."],"mode":"search"}'
+afs agents get-effective-agent-mcp --team-id team_... --agent-id agt_...
+afs agents put-agent-federated-identity --team-id team_... --agent-id agt_... --name vault --audience vault.corp.example
+
+# Ledger and reports
+afs audit list-team-mcp-events --team-id team_... --outcome refused
+afs reports get-mcp-usage-report --from ... --to ... --group-by server --view usage|unused|refusals|discovery|adoption
+```
+
+Secret values (`--secret-value`, `--client-secret`) are read only from `file://`, `fileb://`, `-` or a no-echo prompt.
 
 ## Model endpoints, routes and providers (1.2.0)
 
