@@ -1219,6 +1219,9 @@ page("31-tv-collaboration", "tv", team_nav("collab", "tv", collab=True), collab_
 # Orchestration agent redesign screens (team-orchestration-agent-PRD.md)
 exec((pathlib.Path(__file__).parent / "orch_screens.py").read_text())
 
+# Team model gateway screens (model-endpoint-gateway-PRD.md)
+exec((pathlib.Path(__file__).parent / "gw_screens.py").read_text())
+
 # Governed MCP servers screens (mcp-gateway-PRD.md)
 exec((pathlib.Path(__file__).parent / "mcp_screens.py").read_text())
 
