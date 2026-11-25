@@ -6,7 +6,8 @@ as SVG (used in the READMEs) and as a 2x PNG (for slides and documents).
 
 | Diagram | Shows | Used in |
 |---|---|---|
-| [architecture-overview](architecture-overview.svg) | Clients, control plane, database, EKS tenancy and AWS services | Root README |
+| [architecture-overview](architecture-overview.svg) | Clients, control plane, database, EKS tenancy, AWS services, and the team gateway in front of Bedrock and OpenAI-compatible providers (1.2.0) | Root README; copies in every child README |
+| [model-gateway](model-gateway.svg) | A route call through the team gateway: admission, reserve, forward with the route credential, settle; provider cost pulls, statements and variance (1.2.0) | Root README, solution design |
 | [orchestration-agent](orchestration-agent.svg) | Each team's orchestration agent, public and private endpoints through afs-edge, and model admission (service ∩ team ∩ agent) | Root README |
 | [tenant-isolation](tenant-isolation.svg) | One team's namespace and the eight isolation layers | Root README, adoption guide |
 | [budget-enforcement](budget-enforcement.svg) | Reserve, invoke, settle; fail closed; IAM deny; daily CUR reconciliation | Root and -restapi READMEs |

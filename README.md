@@ -57,8 +57,8 @@ Proposed changes to it are change PRDs at this root:
 [Paperclip team collaboration](paperclip-team-collaboration-PRD.md) (built, release 1.0.1),
 [Team orchestration agent](team-orchestration-agent-PRD.md) (built, release 1.1.0), which makes an
 orchestration agent part of every team and adds service, team and agent model access,
-[Team model gateway](model-endpoint-gateway-PRD.md) (proposed, not built), a per-namespace gateway that
-meters and caps OpenAI-compatible model endpoints, including internal inference, and
+[Team model gateway](model-endpoint-gateway-PRD.md) (built, release 1.2.0), a per-namespace gateway that
+meters and caps OpenAI-compatible model endpoints, including internal inference, with a switch per provider, and
 [Governed MCP servers](mcp-gateway-PRD.md) (decided, not built, target 1.3.0), which adds MCP to that gateway
 with an enterprise catalog teams opt into, team-managed servers, tool-level policy and search-first discovery.
 
@@ -71,7 +71,7 @@ with an enterprise catalog teams opt into, team-managed servers, tool-level poli
 | **Agent identity** | A Kubernetes service account and an IAM role (shared per team or dedicated per agent) through EKS Pod Identity, plus cross-account role links filtered by allowed accounts |
 | **Secrets without exposure** | Write-only values in AWS Secrets Manager under a managed path, delivered as env vars or files with no change to the container |
 | **An orchestration agent** | Created with every team: one container with a hidden orchestration runtime and a collaboration tool (Paperclip AI by default, or Buzz). It is the only part of a team reachable from outside the cluster, with its Web UI and Web API each Off, Private or Public within a limit the service admin sets |
-| **Metered model access** | Bedrock through the AFS gateway with a per-team inference profile; Bedrock and Anthropic SDKs work unchanged. Service admins choose the models enabled for the service and for each team (both default to All); team-admins can narrow each agent's list and set its default model |
+| **Metered model access** | Bedrock through the AFS gateway with a per-team inference profile; Bedrock and Anthropic SDKs work unchanged. Service admins choose the models enabled for the service and for each team (both default to All); team-admins can narrow each agent's list and set its default model. Since 1.2.0 a team can run its own gateway in its namespace that also fronts OpenAI-compatible routes (OpenAI, OpenRouter, Nous Portal, OpenCode, Azure, Google, internal inference), metered and capped the same way |
 | **Hard budgets** | Every call reserves its worst-case cost first; at the cap calls stop, and an IAM deny backs it up |
 | **Reporting and showback** | Real-time usage, daily billed cost from CUR, activity and external traffic per agent, grouped by cost-allocation tags |
 | **Human access** | Okta or Entra ID sign-in, roles per team, API keys for pipelines, a full audit trail |
@@ -112,12 +112,23 @@ model lists at the gateway. The full design is in the [team orchestration agent 
 | **Orchestration agent configuration** | **Orchestration agent, as a team viewer** |
 | ![Orchestration agent configuration with models](docs/images/screenshots/38-orchestration-agent-config.png) | ![Read-only orchestration agent](docs/images/screenshots/43-viewer-orchestration.png) |
 
+### The team model gateway (1.2.0)
+
+A team can run its own `afs-gateway` in its namespace. Besides Bedrock, it fronts OpenAI-compatible **routes**: service
+endpoints the team opts in to (OpenAI, OpenRouter, Nous Portal, OpenCode, Azure OpenAI, Vertex AI) and the team's own,
+including inference it runs itself. Agents get one base URL per route (`AFS_LLM_<ROUTE>_BASE_URL`) and never hold the
+upstream key; per-token routes are reserved and settled against the team budget like Bedrock, and `afs-billing`
+reconciles each provider's bill. Service admins switch each provider on or off, Bedrock included. Design:
+[team model gateway PRD](model-endpoint-gateway-PRD.md); wire format: [gateway contract §12](docs/contracts/gateway-contract.md#12-model-routes-team-gateway-and-provider-switches-v120).
+
+![Team model gateway: admission, metering and billing reconcile](docs/diagrams/model-gateway.svg)
+
 | Component | Repository | Role |
 |---|---|---|
 | `afs-api` | [-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi) | The REST API and the security boundary. Authenticates, authorizes every route, writes desired state with an audit record and an outbox event in one transaction |
 | `afs-reconciler` | -restapi | Leader-elected. Listens to the database change feed and converges namespaces, workloads, policies, IAM, secrets, inference profiles and log delivery; reverts drift |
-| `afs-gateway` | -restapi | The only path from agents to Bedrock. Identifies the caller by pod, reserves spend, invokes, settles; fails closed |
-| `afs-billing` | -restapi | Daily CUR reconciliation, price proposals from the AWS Price List, scheduled reports |
+| `afs-gateway` | -restapi | The only path from agents to Bedrock and, since 1.2.0, to OpenAI-compatible model routes. Shared in `afs-system` or one per team namespace. Identifies the caller by pod, admits, reserves spend, invokes, settles; fails closed |
+| `afs-billing` | -restapi | Daily CUR reconciliation, provider cost pulls and statements for routes, price proposals from the AWS Price List and LiteLLM's list, scheduled reports |
 | PostgreSQL schema | [-db](https://github.com/stainedhead/enterprise-agent-factory-service-db) | Desired state, audit, usage ledger, outbox; roles per service and row-level security |
 | `afs` CLI | [-cli](https://github.com/stainedhead/enterprise-agent-factory-service-cli) | AWS CLI conventions for people and automation |
 | `@afs/sdk` and console | [-website](https://github.com/stainedhead/enterprise-agent-factory-service-website) | TypeScript SDK generated from the API contract, and the web console built on it |
@@ -178,10 +189,10 @@ Each child is an independent repository. Clone them next to this one (see
 
 | Repository | Language | What it is | Read first | User docs |
 |---|---|---|---|---|
-| [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db) | SQL, Go 1.27 | PostgreSQL 17 schema and migrations, roles and row-level security, `afs-migrate`; migrations 000001–000022; release 1.1.0, lockstep with `-restapi` | [README](https://github.com/stainedhead/enterprise-agent-factory-service-db#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-db/blob/main/user-docs/README.md) |
-| [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi) | Go 1.27 | `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing`, `afs-edge`; release 1.1.0 (API 1.4.0), lockstep with `-db`; owns `api/openapi.yaml` | [README](https://github.com/stainedhead/enterprise-agent-factory-service-restapi#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-restapi/blob/main/user-docs/README.md) |
-| [enterprise-agent-factory-service-cli](https://github.com/stainedhead/enterprise-agent-factory-service-cli) | Go 1.27 | `afs` CLI, AWS CLI conventions, 187 operations | [README](https://github.com/stainedhead/enterprise-agent-factory-service-cli#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-cli/blob/main/user-docs/README.md) |
-| [enterprise-agent-factory-service-website](https://github.com/stainedhead/enterprise-agent-factory-service-website) | TypeScript 7, Bun | `@afs/sdk` and the web console | [README](https://github.com/stainedhead/enterprise-agent-factory-service-website#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-website/blob/main/user-docs/README.md) |
+| [enterprise-agent-factory-service-db](https://github.com/stainedhead/enterprise-agent-factory-service-db) | SQL, Go 1.27 | PostgreSQL 17 schema and migrations, roles and row-level security, `afs-migrate`; migrations 000001–000023 in release 1.2.0 (000024 on `main` for 1.3.0); lockstep with `-restapi` | [README](https://github.com/stainedhead/enterprise-agent-factory-service-db#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-db/blob/main/user-docs/README.md) |
+| [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi) | Go 1.27 | `afs-api`, `afs-reconciler`, `afs-gateway`, `afs-billing`, `afs-edge`; release 1.2.0 (API 1.5.0, 221 operations), lockstep with `-db`; owns `api/openapi.yaml` | [README](https://github.com/stainedhead/enterprise-agent-factory-service-restapi#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-restapi/blob/main/user-docs/README.md) |
+| [enterprise-agent-factory-service-cli](https://github.com/stainedhead/enterprise-agent-factory-service-cli) | Go 1.27 | `afs` CLI, AWS CLI conventions; release 1.2.0, 219 commands for 221 operations | [README](https://github.com/stainedhead/enterprise-agent-factory-service-cli#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-cli/blob/main/user-docs/README.md) |
+| [enterprise-agent-factory-service-website](https://github.com/stainedhead/enterprise-agent-factory-service-website) | TypeScript 7, Bun | `@afs/sdk` and the web console; release 1.1.0, 1.2.0 in progress (PR #14) | [README](https://github.com/stainedhead/enterprise-agent-factory-service-website#readme) | [user-docs](https://github.com/stainedhead/enterprise-agent-factory-service-website/blob/main/user-docs/README.md) |
 
 ![Repositories and contracts](docs/diagrams/repository-map.svg)
 
@@ -230,7 +241,7 @@ requests are reviewed. Each repository also has an `AGENTS.md` with its rules fo
 
 All four code repositories are feature complete on `main` against the PRD and pass their quality gates in
 CI. Still to come: end-to-end runs on a real EKS cluster and AWS account (restore drill and full-scale load
-test included), and publishing the releases: `-db` and `-restapi` share version 1.1.0 (lockstep), and the `afs` CLI, `@afs/sdk` and the console are 1.1.0. Until the releases are published, build from source as each repository's getting-started guide shows.
+test included), and publishing the releases: `-db` and `-restapi` share version 1.2.0 (lockstep, tags pending), the `afs` CLI is 1.2.0, and `@afs/sdk` and the console are 1.1.0 with 1.2.0 in progress. Release 1.2.0 adds the team model gateway; live Azure and Google federation and provider billing fixtures wait for cloud access ([what is deferred](model-endpoint-gateway-PRD.md#16-built-and-deferred-120)). Until the releases are published, build from source as each repository's getting-started guide shows.
 
 ## License
 

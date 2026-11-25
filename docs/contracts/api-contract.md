@@ -1000,7 +1000,7 @@ With `dryRun=true` (the default) nothing is written. A bundle over 100 MB → `4
 ### 4.13 Model endpoints, routes and providers (v1.5.0)
 
 Source: [model endpoint gateway PRD](../../model-endpoint-gateway-PRD.md) Appendix D.3.4 (approved by J, 2026-11-25).
-Every mutation writes audit and outbox in one transaction; updates need `If-Match`; credential values are write-only
+The section adds 27 operations (one row each; 221 in total). Every mutation writes audit and outbox in one transaction; updates need `If-Match`; credential values are write-only
 and never returned (`credentialState` only). Team-scoped paths take `teamId` from the path.
 
 | Operation | Method and path | Permission | CLI | SDK | Screen | Pri |
@@ -1030,11 +1030,16 @@ and never returned (`credentialState` only). Team-scoped paths take `teamId` fro
 | `DeleteTeamModelEndpoint` | `DELETE /v1/teams/{teamId}/model-endpoints/{endpointId}` | `model-endpoints:write` | `model-endpoints delete-team-model-endpoint` | `teams.modelEndpoints.delete()` | 61 | P0 |
 | `PutTeamEndpointModels` | `PUT /v1/teams/{teamId}/model-endpoints/{endpointId}/models` (prices inline for team endpoints) | `model-endpoints:write` | `model-endpoints put-team-endpoint-models` | `teams.modelEndpoints.putModels()` | 62 | P0 |
 | `PutTeamModelEndpointCredential` | `PUT /v1/teams/{teamId}/model-endpoints/{endpointId}/credential` (team endpoints, and the team's credential of a `per_team` service endpoint) | `model-endpoints:write` | `model-endpoints put-team-model-endpoint-credential` | `teams.modelEndpoints.putCredential()` | 61, 62 | P0 |
-| `GetInferenceReport` | `GET /v1/reports/inference` (service) and `GET /v1/teams/{teamId}/reports/inference` (`groupBy=route\|model\|agent\|hour`, CSV) | `admin:reports` / `reports:read` | `reports get-inference-report`, `reports get-team-inference-report` | `reports.inference()` | 59, 64 | P0 |
+| `GetInferenceReport` | `GET /v1/reports/inference` (service; `groupBy=route\|model\|agent\|hour`, CSV) | `admin:reports` | `reports get-inference-report` | `reports.inference()` | 59 | P0 |
+| `GetTeamInferenceReport` | `GET /v1/teams/{teamId}/reports/inference` (team; `groupBy=route\|model\|agent\|hour`, CSV) | `reports:read` | `reports get-team-inference-report` | `reports.teamInference()` | 64 | P0 |
 
-Changes to existing operations: `PutAgentModels` and `PutPoolModels` (and `CreateAgent` / `CreatePool` model fields) gain
-`routeAccess` (`all`\|`selected`), `routes[]` (endpoint slugs) and `defaultModel` may be `<route>/<model>`; responses add
-`effectiveRoutes[]` and `env` (the `AFS_LLM_*` names the agent will receive). Usage and cost reports gain
+Changes to existing operations: the `models` object of `CreateAgent`, `UpdateAgent`, `CreatePool`, `UpdatePool` (and
+`CreateTeam.orchestration.models`) gains `routeAccess` (`all`\|`selected`), `routes[]` (endpoint slugs, at most 50) and
+`defaultRoute`; `defaultModelId` may be `<route>/<model>` or the model name beside `defaultRoute` (CD-42). There is no
+`PutAgentModels` or `PutPoolModels` operation: routes are saved through `UpdateAgent` and `UpdatePool` with `If-Match`
+(CD-53). Responses add `effectiveRoutes[]` and `env` (the `AFS_LLM_*` and `OPENAI_*` variables the agent will receive;
+empty for a team on the shared gateway, CD-56). `Team` gains read-only `gatewayDeployment` and `mayAddModelEndpoints`,
+changed only through `PutTeamGatewaySettings`. Usage and cost reports gain
 `groupBy=route` and a `route` filter. `ListModels` items gain `providerState` (`on`\|`off`). `GetMe` permissions include
 the new ones.
 
@@ -1388,8 +1393,27 @@ Events written by database functions use the same envelope (`afs.event_detail`, 
   `team_mcp_server.*`, `mcp_settings.changed`, `mcp_query_capture.*` and `agent.federated_identity_changed` events;
   CD-45, CD-48, CD-49. Minor (1.3.0).
 
+- **v1.5.0 amendment (2026-11-25), build of release 1.2.0 (`-db` 000023, `-restapi` PR #11 and #14, `-cli` PR #12,
+  `-website` PR #14):** records what the build settled; no wire change. §4.13 adds **27** operations, not 26: the
+  inference report is two operations, `GetInferenceReport` (service) and `GetTeamInferenceReport` (team path, SDK
+  `reports.teamInference()`), now one row each (221 operations in total with the 194 of v1.4.0). The agent and pool
+  route members live in the existing `models` object (no `PutAgentModels`/`PutPoolModels`). Permissions stay as in the
+  table where PRD Appendix D.3.4 differed (`ListEndpointPriceProposals` and `ImportProviderStatement` need
+  `admin:pricing`; the PRD is corrected). Decisions CD-53 to CD-60 below.
+
+| # | Decision |
+|---|---|
+| CD-53 | Agent and pool routes are members of the existing `models` object (`AgentModelsInput`) on create and update; there is no separate models operation. A caller saves routes with `UpdateAgent`/`UpdatePool` and `If-Match` |
+| CD-54 | `PutTeamGatewaySettings` (`/v1/admin/teams/{teamId}/gateway-settings`, `teams:set-guardrails`) is a team-scoped route like `PutTeamModels` (unbound caller `404`, team-admin `403`); `PutEndpointFederation` names a team in its path but is a service route (`admin:model-endpoints`). It emits `team.updated` |
+| CD-55 | Credential bodies: `PutModelEndpointCredential` and `RotateModelEndpointCredential` both take `{value}` (an upstream key is issued by the provider, so AFS cannot generate one); the response is metadata (`secretArn`, `status`, `rotatedAt`, `version`). The credential's version is not readable, so `If-Match` is optional on the credential puts |
+| CD-56 | `AgentModels.env` and route delivery exist only for `per_namespace` teams (routes are served only by team gateways, gateway contract §12.1). Inline prices are refused on service endpoints (prices go through `CreateEndpointModelPrice`); team endpoints may carry them inline |
+| CD-57 | Events per operation: endpoint model, price, federation and statement changes emit `model_endpoint.updated`; proposal decisions keep `pricing.proposal_decided`; credentials emit `model_endpoint.credential_set`; `UpdateInferenceProvider` emits `inference_provider.enabled`/`.disabled` and, with `selectForAllTeams`, `model_endpoint.selected` per team. Route health is reported in `resource_status` (kinds `team_route`, `team_gateway`) and `model_endpoint.degraded`/`.recovered` once per transition |
+| CD-58 | `ListInferenceProviders` returns `{items}` without paging; it is the `If-Match` reader for `UpdateInferenceProvider` (there is no single-provider GET). `UpdateInferenceProvider?dryRun=true` validates the body as a real change, so a Bedrock-off preview needs `selectForAllTeams: true` |
+| CD-59 | The `provider` of an endpoint is derived from its base URL host (`afs.provider_for_host`); a team cannot choose it and a claimed one is overwritten. A service admin may name a provider only for an external host that matches no listed provider. Price proposals have a fourth state, `superseded` |
+| CD-60 | Not in v1.5.0, raised by the console build: a *Test connection* operation (screen 62), per-route *Agents using* and spend in `ListTeamModelEndpoints` (screen 61 uses the team inference report), a recent provider changes list (screen 68 links to the audit log), a direct-LLM-access source for screen 56, and the team gateway URL and state. Candidates for a later minor version |
+
 - **v1.5.0 (2026-11-25), team model gateway ([PRD](../../model-endpoint-gateway-PRD.md), approved by J):** §4.13: 26
-  operations for model endpoints, route models and prices, credentials, federation, statements, provider switches
+  operations (27 OpenAPI operations, see the amendment above) for model endpoints, route models and prices, credentials, federation, statements, provider switches
   (including Bedrock off with a fallback), team gateway settings, team selections and team endpoints, and the inference
   report; route fields on agent and pool model access; four permissions; new error reasons and `model_endpoint.*` and
   `inference_provider.*` events. Minor (1.2.0).

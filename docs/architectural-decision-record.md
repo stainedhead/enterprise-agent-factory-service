@@ -343,7 +343,8 @@ Accepted, Proposed (needs review), Superseded.
 
 ## ADR-018 Team model gateway: a gateway per namespace, model routes and provider switches
 
-- **Status:** Accepted (J, 2026-11-24; build approved 2026-11-25). Release 1.2.0.
+- **Status:** Accepted (J, 2026-11-24; build approved 2026-11-25). **Built** in release 1.2.0 (merged 2026-11-25;
+  tags pending J): `-db` PR #23, `-restapi` PR #11 and #14, `-cli` PR #12, `-website` PR #14 (in progress).
 - **Context:** Agents reach non-Bedrock models directly, unmetered and uncapped (EXT-6, RPT-7). J asked whether a
   namespace-scoped gateway fronting OpenAI-compatible endpoints by route name could track and cap their cost, and later
   for per-provider switches (Bedrock included) and Azure and Google as providers.
@@ -357,6 +358,17 @@ Accepted, Proposed (needs review), Superseded.
 - **Consequences:** Two small pods per team and a connection pooler in front of RDS; agents' traffic stays in their
   namespace; one team's gateway trouble stays in that team. Off-the-shelf gateways are not the enforcement point. Real
   EKS, Azure and Google checks wait for cloud access (fakes and recorded fixtures until then).
+- **As built (1.2.0):** one binary in two modes (`--team-namespace`); the router is a mux of route families (Bedrock and
+  Anthropic paths, `/r/<route>/`, `/openai/`, `/r/bedrock` with Chat Completions → Converse). Opt-in is per team through
+  `PutTeamGatewaySettings` (`gateway_deployment = per_namespace`); teams on the shared gateway are unchanged and get no
+  route variables. An endpoint's provider is derived from its host, so a switch cannot be bypassed by naming another
+  provider. `AFS_LLM_ROUTES` leaves out Bedrock, which keeps its 1.1.0 variables. Azure and Google federation both use
+  the gateway's projected Kubernetes token (one audience per pod); the PRD's AWS-signed variant for Google is not built.
+  Billing runs four CronJobs (`route-pull`, `route-statements`, `route-capacity`, `route-price-sync`). The contracts
+  record the build's decisions as API CD-53 to CD-60, database CD-61 to CD-66 and gateway CD-67, CD-68. Deferred: the
+  Pod Identity association of each team gateway (Terraform per team for now), live Azure and Google federation and
+  billing fixtures, OpenRouter past days, the reconciler writing credential status, and real-cloud tests
+  ([PRD §16](../model-endpoint-gateway-PRD.md#16-built-and-deferred-120)). Child ADRs: `-restapi` ADR-031 to ADR-034.
 
 ## ADR-019 Governed MCP servers as a route type on the team gateway
 

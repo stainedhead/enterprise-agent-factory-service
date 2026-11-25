@@ -1,9 +1,11 @@
 # Skill: the `afs` CLI
 
-> **Status banner.** Release `v1.1.0` of `enterprise-agent-factory-service-cli` is prepared on `main`; the
-> repository owner pushes the tag, and it is not yet published: no signed archives, no Homebrew formula and no tap exist yet. Until the
-> release is published, build from source (`make build` writes `bin/afs`). This file describes the CLI at
-> `main`; check `afs --version` and `afs <service> <operation> help` for the truth on a given build.
+> **Status banner.** Release `v1.2.0` of `enterprise-agent-factory-service-cli` is built and merged on `main`
+> (team model gateway, contract 1.5: 219 commands for 221 operations); the repository owner pushes the tag, and it is
+> not yet published: no signed archives, no Homebrew formula and no tap exist yet. The 1.2.0 commands need an `afs-api`
+> at release 1.2.0 or later. Until the release is published, build from source (`make build` writes `bin/afs`). This
+> file describes the CLI at `main`; check `afs --version` and `afs <service> <operation> help` for the truth on a given
+> build.
 
 `afs` is the command line to the Enterprise Agent Factory Service. It calls the AFS REST API; the API decides
 what the caller may do. Full documentation: the CLI repository's `user-docs/` and the generated reference
@@ -34,7 +36,7 @@ Secret values come from `file://PATH`, `fileb://PATH` or `-` (standard input) on
 ## Command shape
 
 `afs <service> <operation> [--options]`. Services: `teams`, `agents`, `pools`, `secrets`, `budgets`, `members`,
-`api-keys`, `audit`, `reports`, `models`, `work-orders`, `swarm-templates`, `collaboration`, `orchestration`, `admin`, plus `configure`,
+`api-keys`, `audit`, `reports`, `models`, `model-endpoints`, `work-orders`, `swarm-templates`, `collaboration`, `orchestration`, `admin`, plus `configure`,
 `sso` and `completion`. Operations are kebab-case verb-noun and map to one API call each (`list-teams` is `ListTeams`).
 Options mirror API fields (`--team-id`, `--amount-usd`); lists are space-separated.
 
@@ -54,6 +56,49 @@ Global options: `--profile --endpoint-url --output json|yaml|table|text|csv --qu
 
 Errors go to stderr as `An error occurred (<Code>) when calling the <Operation> operation: <message>`.
 Exit codes: 0 success, 252 usage error, 254 service error (including `AccessDenied`), 255 other (network, config).
+
+## Model endpoints, routes and providers (1.2.0)
+
+Contract: API 1.5 and later. Reference: `user-docs/model-endpoints.md`, `user-docs/reference/model-endpoints.md`.
+A team on its own gateway (`per_namespace`) gives agents OpenAI-compatible **routes**: service endpoints it opts in to
+and its own endpoints, metered and capped like Bedrock. The upstream credential stays with AFS.
+
+```bash
+# Service admins: endpoints (created off), models, prices, credentials, federation, providers
+afs model-endpoints list-model-endpoints | create-model-endpoint | describe-model-endpoint | update-model-endpoint | delete-model-endpoint
+afs model-endpoints put-endpoint-models --endpoint-id mep_... --models file://models.json
+afs model-endpoints create-endpoint-model-price | list-endpoint-price-proposals | approve-endpoint-price-proposal | reject-endpoint-price-proposal
+afs model-endpoints list-endpoint-teams --endpoint-id mep_...
+afs model-endpoints put-model-endpoint-credential --endpoint-id mep_... --scope team_...|_shared --secret-value file://key
+afs model-endpoints rotate-model-endpoint-credential --endpoint-id mep_... --scope team_...      # prompts without echo
+afs model-endpoints put-endpoint-federation --endpoint-id mep_... --team-id team_... --tenant-id <uuid> --client-id <uuid>
+afs model-endpoints import-provider-statement --endpoint-id mep_... --period 2026-11 --source opencode_csv --statement file://s.csv
+afs model-endpoints list-inference-providers
+afs model-endpoints update-inference-provider --provider bedrock --no-enabled --fallback-model <route>/<model> \
+  --select-for-all-teams --reason "..." --dry-run                                               # then without --dry-run
+afs teams put-team-gateway-settings --team-id team_... --deployment per_namespace --may-add-model-endpoints
+
+# Team-admins: opt in, declare the team's own endpoints, credentials
+afs model-endpoints list-team-model-endpoints --team-id team_... [--relation available]
+afs teams put-team-model-endpoints --team-id team_... --endpoint-ids mep_... mep_...         # the full list; others are deselected
+afs model-endpoints create-team-model-endpoint | update-team-model-endpoint | delete-team-model-endpoint | put-team-endpoint-models --team-id team_... ...
+afs model-endpoints put-team-model-endpoint-credential --team-id team_... --endpoint-id mep_... --secret-value file://key
+
+# Agents and pools: routes and a route default (also create-agent, create-pool, update-pool)
+afs agents update-agent --team-id team_... --agent-id agt_... --routes <route> <route> --default-route <route> --default-model-id <model>
+afs pools update-pool --team-id team_... --pool-id pool_... --routes all
+
+# Reports
+afs reports get-team-inference-report --team-id team_... --range 24h --group-by route,model
+afs reports get-inference-report --range mtd --group-by route                                   # service-wide
+```
+
+- Credential values come only from `file://`, `fileb://`, `-` (stdin) or a no-echo prompt; `--value` is refused. The API
+  returns state (`set`/`missing`) and `rotatedAt`, never a value. Credential puts send `If-Match` only with `--if-match`.
+- `--default-model-id` may also be `<route>/<model>`. `--routes all` follows the team's routes now and later; at most 50.
+- Refusals name a reason: `provider_disabled`, `needs_service_admin`, `team_endpoints_not_allowed`, `endpoint_enabled`
+  (switch off before deleting), `slug_taken`, `no_fallback_model`.
+- Usage and cost reports also take `--route` and `--group-by route`.
 
 ## Team orchestration agent and model access (1.1.0)
 

@@ -1,6 +1,6 @@
 # Agent Factory Service: Solution Design
 
-Status: Draft for review · 2026-11-20, aligned with the contracts 2026-11-21 · Owner: J (Enterprise Architecture) · Requirements: [initial PRD](../enterprise-agent-factory-service-initial-PRD.md)
+Status: Draft for review · 2026-11-20, aligned with the contracts 2026-11-21, team model gateway added 2026-11-25 (release 1.2.0) · Owner: J (Enterprise Architecture) · Requirements: [initial PRD](../enterprise-agent-factory-service-initial-PRD.md)
 
 The [contracts](contracts/README.md) are the single source for operation names, CLI and SDK names,
 permissions, enums, events, the database interface and the gateway wire format. Where this document and
@@ -195,7 +195,41 @@ Agents' own Pod Identity role has **no** `bedrock:*` permissions, so the gateway
 
 At higher scale the spend counters move to ElastiCache (Redis/Valkey) with Postgres as the durable ledger; the interface is designed for that swap.
 
-**afs-billing-ingestor (Go).** Daily job. Reads CUR 2.0 (with EKS split cost allocation enabled) via Athena, attributes Bedrock cost by the `afs-team-id` cost allocation tag on inference profiles and EKS compute by namespace, writes `cost_daily` and `cost_reconciliations` (gateway estimate vs. billed actual, variance). Variance over `billing.variance_alert_pct` (default 5%) raises an alert to service admins. The billing job proposes price changes from the AWS Price List for approval; it never adjusts the catalog itself (BUD-9).
+**Team gateway and model routes (1.2.0).** The [team model gateway PRD](../model-endpoint-gateway-PRD.md) (ADR-018) runs
+the same `afs-gateway` binary in team mode inside a team's namespace when service admins set the team's
+`gateway_deployment` to `per_namespace`; other teams keep the shared gateway above and see no change. The wire format is
+[gateway contract §12](contracts/gateway-contract.md); the operations are [API contract §4.13](contracts/api-contract.md);
+the tables are [database contract §7.4](contracts/database-contract.md) (migration 000023).
+
+- **Topology.** The reconciler renders, per team, the gateway's ServiceAccount, Deployment (two replicas), Service
+  (`https://afs-gateway.afs-t-<slug>.svc:8443`), PodDisruptionBudget, certificate, ExternalSecrets and a
+  CiliumNetworkPolicy that lets only the gateway reach route hosts; agents never get that egress and never hold an
+  upstream credential. `AFS_GATEWAY_URL` moves to the team gateway and agents roll.
+- **Route families.** The router is a mux of route families: the 1.1.0 Bedrock and Anthropic paths, `/r/<route>/v1/…`
+  (Chat Completions, Responses, Embeddings, `GET /v1/models` answered from the agent's effective models),
+  `/openai/v1/…` with `model = <route>/<model>`, and `/r/bedrock`, which translates Chat Completions to Bedrock
+  Converse on the team's inference profile. A route is a model endpoint: a service endpoint the team opted in to, or the
+  team's own (corporate host or a Service in its namespace). The agent's selection narrows the team's routes.
+- **Delivery.** `AFS_LLM_ROUTES`, `AFS_LLM_<ROUTE>_BASE_URL`, `OPENAI_BASE_URL`, `OPENAI_API_KEY=afs-gateway` and
+  `/etc/afs/llm-routes.json`, for `per_namespace` teams only. Bedrock keeps `AFS_DEFAULT_MODEL` and `AFS_MODELS`.
+- **Admission and caps.** `afs.route_admission` gives, in order, `provider_disabled`, `route_not_enabled_for_service`,
+  `_for_team`, `_for_agent`, `model_not_on_route`, `model_not_priced`, cached 60 s and refreshed on the change feed.
+  Per-token routes reserve the output cap × price (the cap is written into the forwarded request) and settle to the
+  usage the provider returns, or its `usage.cost` when larger; capacity and free routes are metered and reported.
+- **Provider switches.** Each provider (`bedrock`, `openai`, `openrouter`, `nous`, `opencode`, `azure`, `google`,
+  `other`) has one switch and a team-selection rule set by service admins; an endpoint's provider is derived from its
+  host. Azure and Google start off. Turning Bedrock off needs a route model as the service default, selected for every
+  team, and removes `bedrock:Invoke*` from the team gateways' roles.
+- **Upstream credentials.** Keys live in Secrets Manager under `_gateway` paths and reach only the gateway as files.
+  Azure and Google can use workload identity federation from the gateway's projected service account token, so no
+  secret is stored (one token audience per gateway pod).
+
+Real EKS, Azure and Google checks and the Pod Identity association of each team gateway are deferred
+([PRD §16](../model-endpoint-gateway-PRD.md#16-built-and-deferred-120)).
+
+![Team model gateway](diagrams/model-gateway.svg)
+
+**afs-billing-ingestor (Go).** Daily job. Reads CUR 2.0 (with EKS split cost allocation enabled) via Athena, attributes Bedrock cost by the `afs-team-id` cost allocation tag on inference profiles and EKS compute by namespace, writes `cost_daily` and `cost_reconciliations` (gateway estimate vs. billed actual, variance). Variance over `billing.variance_alert_pct` (default 5%) raises an alert to service admins. The billing job proposes price changes from the AWS Price List for approval; it never adjusts the catalog itself (BUD-9). Since 1.2.0 it also reconciles model routes with four CronJobs: `route-pull` (daily provider costs from OpenAI, OpenRouter, Azure Cost Management and the Google billing export, attributed to a team only when the provider side names it), `route-statements` (monthly Nous Portal and OpenCode statements imported by service admins), `route-capacity` (capacity routes allocated by token share as `route_capacity` rows) and `route-price-sync` (endpoint price proposals from LiteLLM's price list). Gateway rollups write route calls to `cost_daily` as source `route`; a variance over the threshold emits `cost.variance_detected` per route, team and period.
 
 **Event outbox and notifications.** Every mutation writes an `outbox_events` row in the same transaction. A publisher (inside the reconciler process) sends them to an EventBridge bus `afs-events` with at-least-once delivery. The reconciler reconciles each row of `notification_channels` into one EventBridge rule plus target: an API destination for Slack, Jira and webhooks, SES for email (D46). Work order events (the `work_order.*` list of [API contract §7](contracts/api-contract.md#7-events-eventbridge-from-the-outbox): `created`, `assigned`, `repo_updated`, `pr_opened`, `merged`, `sla_warning`, `sla_breached`, `completed`, `failed`, `cancelled`) use the same path to notify owning teams (§9).
 
@@ -347,7 +381,8 @@ CloudTrail attributes every agent call through the role (name and `afs-team-id` 
 - `spend_counters`: one row per budget period: `spent_usd`, `reserved_usd`. Hot path for the gateway. Opened on demand by `afs.ensure_spend_counter` (gateway) and at period start by the reconciler, which emits `budget.reset` (D31).
 - `spend_reservations`: one row per held reservation with `expires_at` (`gateway.reservation_ttl_seconds`, default 900); released by the reconciler if never settled.
 - `usage_events`: append-only ledger, partitioned by month.
-- `cost_daily`: daily rollup by team/agent/model and source (`gateway` estimate, `cur` billed, `eks_compute`).
+- `cost_daily`: daily rollup by team/agent/model and source (`gateway` estimate, `cur` billed, `eks_compute`; since 1.2.0 `route` and `route_capacity`).
+- Model routes (1.2.0): `endpoint_model_prices` and `endpoint_price_proposals` price route models like `model_prices`; usage rows carry `endpoint_id`, `model_name` and `usage_source` (`response`, `estimated`, `provider_cost`). Reports group and filter by `route`, and the inference report gives latency, time to first token, errors and cost per route, model or agent.
 
 ### 7.2 Enforcement path (near real time)
 

@@ -879,7 +879,7 @@ CD-42).
 | Built-in rows | `openrouter`, `nous-portal`, `opencode` (service, off, `per_token`, `bearer`, `per_team`) seeded with no models; `azure-openai` and `vertex-ai` (off, `azure_federated` / `google_federated`). Their base URLs carry placeholders (`<resource>`, `<project>`, `<location>`) that a service admin must replace before `enabled = true` (`23514` `endpoint_base_url_placeholder`) |
 | `endpoint_models` | `(endpoint_id, model_name)` PK, `team_id` (copied, for RLS on team endpoints), `max_output_tokens integer NOT NULL CHECK (1..1000000)`, `context_tokens integer`, `enabled boolean NOT NULL DEFAULT true`; `model_name` printable, ≤ 200, no `/` at the start. At most 500 per endpoint |
 | `endpoint_model_prices` | `(endpoint_id, model_name, effective_from)` PK, `input_per_mtok_usd`, `output_per_mtok_usd`, `cached_input_per_mtok_usd numeric(14,6)` (≥ 0), `request_fee_usd numeric(14,8) NOT NULL DEFAULT 0`, `source text CHECK (source IN ('manual','price_list','transfer','provider'))`, `approved_by`; append-only (UPDATE and DELETE rejected by trigger, as `model_prices`) |
-| `endpoint_price_proposals` | as `model_price_proposals` with `endpoint_id` and `model_name`; `state` `pending`, `approved`, `rejected` |
+| `endpoint_price_proposals` | as `model_price_proposals` with `endpoint_id`, `model_name` and `team_id` (copied from the endpoint); `state` `pending`, `approved`, `rejected`, `superseded` (a newer proposal or an approved price replaced it; CD-62) |
 | `endpoint_capacity_costs` | `(endpoint_id, team_id, effective_from)` PK, `monthly_usd` or `hourly_usd` (exactly one), `allocation text CHECK (allocation IN ('by_tokens','by_agent'))` |
 
 ### 7.4.3 Credentials, federation and statements
@@ -898,7 +898,7 @@ CD-42).
 | `team_model_endpoints` | `(team_id, endpoint_id)` PK, `selected_by text NOT NULL CHECK (selected_by IN ('team_admin','service_admin'))`, `created_at/by`. Insert of an endpoint with `requires_terms` or whose provider has `team_selection = 'service_admin'` without `afs.service_admin` → `42501`. Service endpoints only (team endpoints are always in their team's set) |
 | `teams` | `may_add_model_endpoints boolean NOT NULL DEFAULT false` and `gateway_deployment text NOT NULL DEFAULT 'shared' CHECK (… IN ('shared','per_namespace'))`, both in `teams_guardrail_guard` (service admins only) |
 | `agents`, `agent_pools` | `route_access text NOT NULL DEFAULT 'all' CHECK (… IN ('all','selected'))`, `default_route text` (§7.4.1) |
-| `agent_model_endpoints`, `pool_model_endpoints` | `(team_id, agent_id|pool_id, endpoint_id)` PK, composite FK to the agent or pool `ON DELETE CASCADE`; the endpoint must be in the team's set at write time (`23514` `agent_routes_team`) |
+| `agent_model_endpoints`, `pool_model_endpoints` | `(team_id, agent_id|pool_id, endpoint_id)` PK, composite FK to the agent or pool `ON DELETE CASCADE`; the endpoint must be in the team's set at write time (`23514` `agent_routes_team`, for agents and pools); at most 50 rows per subject (`agent_model_endpoints_limit`, `pool_model_endpoints_limit`). Bedrock is never a row: it stays under `model_access` |
 | `afs.effective_agent_routes` | View, `security_invoker`: `(team_id, subject_kind, subject_id, endpoint_id, slug, model_name, is_default)` for routes in (team's opted-in enabled service endpoints ∪ team endpoints that are enabled) ∩ subject, on enabled providers, for callable models (`per_token` needs a price in force) |
 | `afs.route_admission(p_subject_kind, p_subject_id)` | `STABLE`, `SECURITY INVOKER`, returns `(endpoint_id, slug, model_name, reason)` for every route model reachable in principle for the subject's team; `reason` NULL or the first of `provider_disabled`, `route_not_enabled_for_service`, `route_not_enabled_for_team`, `route_not_enabled_for_agent`, `model_not_priced` (`model_not_on_route` is decided by the gateway for names absent from the result). Also `afs.provider_enabled(p_provider text) RETURNS boolean` for Bedrock paths |
 
@@ -917,7 +917,7 @@ the parent; no rewrite (metadata-only on PostgreSQL 17). Lock: `ACCESS EXCLUSIVE
 | `afs_app` | `SELECT, INSERT, UPDATE, DELETE` on endpoint tables (RLS: team rows by `afs.caller_sees_team`; service rows readable by all callers, writable only with `afs.service_admin`); `SELECT, UPDATE (listed columns)` on `inference_providers`; `INSERT, SELECT` on `provider_statements`; `EXECUTE` on the functions |
 | `afs_gateway` | `SELECT` on every 000023 table except `provider_statements`; `UPDATE (status, last_error, checked_at)` on `endpoint_federations`; `EXECUTE` on `afs.route_admission`, `afs.provider_enabled`; per-namespace gateways set `afs.team_ids` to their team |
 | `afs_reconciler` | `SELECT` on every 000023 table; `UPDATE (status)` on `endpoint_credentials` |
-| `afs_billing` | `SELECT` on endpoints, prices, capacity costs, statements, federations; `INSERT` on `endpoint_price_proposals` |
+| `afs_billing` | `SELECT` on endpoints, `endpoint_models`, prices, proposals, capacity costs, statements, federations; `INSERT` on `endpoint_price_proposals` and `UPDATE (state, note)` so billing can supersede its own proposals (approval stays with service admins) |
 | `afs_readonly` | `SELECT` on every 000023 table |
 
 Every team-owned new table (`model_endpoints` team rows, `endpoint_models`, `endpoint_credentials`,
@@ -1050,6 +1050,19 @@ isolation and `TestCrossTeamWritesChangeNothing` cover every team-owned table; u
   reviews, query captures, agent and pool federated identities, the partitioned append-only `mcp_events` ledger and
   `mcp_usage_daily`, `teams.may_add_mcp_servers` and `mcp_placement`, the `mcp` external system category; CD-50 to
   CD-52. Minor (1.3.0).
+
+- **v1.5.0 amendment (2026-11-25), build of `-db` 000023 (PR #23, release 1.2.0):** records where the build read §7.4
+  (the `-db` spec's implementation notes list all of them); additive. Proposal state `superseded` and the
+  `afs_billing` grants (§7.4.2, §7.4.6); the 50-route limit per agent or pool (§7.4.4). Decisions CD-61 to CD-66.
+
+| # | Decision |
+|---|---|
+| CD-61 | `model_endpoints.provider` is set by trigger from the base URL host (`afs.provider_for_host`) for every endpoint, team or service; a claimed provider is overwritten. A corporate host that matches a listed provider gets that provider and its switch; only unlisted corporate hosts and in-namespace Services are `internal`. A service admin may name a provider only for an external host that matches none. In-namespace hosts are a bare Service name or `<svc>.<team namespace>[.svc[.cluster.local]]`, and only they may use `http` |
+| CD-62 | Proposals and prices carry `team_id` (copied from the endpoint) so RLS and composite keys cover them. Prices are written by service admins only, also for team endpoints. `cached_input_per_mtok_usd` NULL bills cached input at the input price |
+| CD-63 | `provider_disabled` applies to an insert, to an update that leaves or turns an endpoint on, and to a provider change; an endpoint of a disabled provider may be edited while it stays off. While Bedrock is off, the fallback route's provider cannot be turned off and the service default must stay a valid fallback (`no_fallback_model`). The Bedrock switch also gates `effective_agent_models` and `model_admission` (`provider_disabled` first) |
+| CD-64 | New teams are selected for the service default route (`teams_default_route_select`, `selected_by service_admin`), so "every live team has selected it" keeps holding while Bedrock is off. A service-admin selection is removed by service admins only. Disabled route models are absent from `route_admission`; a team endpoint that is off reports `route_not_enabled_for_team` |
+| CD-65 | Status columns written by runners (`endpoint_credentials.status`, `endpoint_federations.status, last_error, checked_at`) do not bump `version`, so client ETags survive; revision and change-feed triggers still fire. No credential row for `none` or federated endpoints (`endpoint_credentials_auth_kind`). `provider_statements` are readable by service admins only through `afs_app`; the gateway cannot read them |
+| CD-66 | `afs-migrate down 1` refuses (`55000`) while an agent or pool has `default_route` set. `cost_daily.model_id` holds `<route>/<model>` for route rows (the route alone for capacity rows); `models.default_model_id` widens to 240 characters. Change-feed ids are `id`, else `endpoint_id`, else the provider (`inference_providers::bedrock`) |
 
 - **v1.5.0 (2026-11-25), team model gateway ([PRD](../../model-endpoint-gateway-PRD.md), approved by J):** migration 000023
   (§7.4): `inference_providers` with the Bedrock-off guard, model endpoints, route models, prices and proposals,

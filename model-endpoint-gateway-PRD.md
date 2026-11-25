@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Approved for build (J, 2026-11-25)**: every open question answered (MEG-OQ-1 to MEG-OQ-23, §13.3); build checklist in Appendix D. Release 1.1.0 is not changed by this document. Target release if approved: 1.2.0 in every repository (`-db` and `-restapi` in lockstep) |
+| **Status** | **Built (release 1.2.0, merged 2026-11-25; tags pending J)**. `-db` PR #23, `-restapi` PR #11 and #14, `-cli` PR #12, `-website` PR #14. What was built and what is deferred: [§16](#16-built-and-deferred-120). Approved for build by J on 2026-11-25 (MEG-OQ-1 to MEG-OQ-23 answered, §13.3; build checklist in Appendix D). Release 1.1.0 is not changed by this document |
 | **Kind** | Change PRD to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md) (BUD-2, BUD-3, EXT-6, RPT-7), the [team orchestration agent PRD](team-orchestration-agent-PRD.md) (model access, section 6.9) and the [gateway contract](docs/contracts/gateway-contract.md) v1.1.0 |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
@@ -378,7 +378,9 @@ upstream credential, and adds `X-Afs-Request-Id`.
 | `OPENAI_API_KEY` | `afs-gateway` placeholder (like `ANTHROPIC_API_KEY`), only when `OPENAI_BASE_URL` is set by AFS |
 | `/etc/afs/llm-routes.json` | `{"version":1,"defaultRoute":"openai-prod","routes":[{"name":"openai-prod","protocol":"openai_chat","baseUrl":"…","paths":["chat/completions","responses"],"models":[{"name":"gpt-4.1","maxOutputTokens":32768,"metered":true,"capped":true}]}]}` |
 
-Rendered by the reconciler into the agent's ConfigMap from `effective_agent_routes`. A change to the agent's own route
+Rendered by the reconciler into the agent's ConfigMap from `effective_agent_routes`, for teams on a `per_namespace`
+gateway only (routes are served only by team gateways; as built, gateway contract §12.4). `AFS_LLM_ROUTES` leaves out
+`bedrock`, which keeps `AFS_DEFAULT_MODEL` and `AFS_MODELS`. A change to the agent's own route
 access rolls the pod; team and service changes update the file and environment on the next roll, while the gateway
 enforces at once (same rule as gateway contract §3 for models). A route name that would collide with an existing
 config value name is refused at create time.
@@ -649,6 +651,10 @@ same pattern as the token exchange proposed for MCP servers (MCP PRD, MCP-OQ-10)
   exchange with backoff.
 - API keys stay possible for both providers (`bearer`, stored per §11) for enterprises that prefer them; federation is
   the default on new Azure and Google endpoints.
+- **As built (1.2.0):** Google also takes the team gateway's projected Kubernetes token (an OIDC provider on the
+  workload identity pool trusting the cluster's issuer), not a signed AWS request. A gateway pod has one projected
+  token audience: the Azure one when the team has an Azure route, else the first Google provider's, so a team with both
+  must allow the Azure audience on its Google provider (gateway contract §12.6a, CD-68).
 
 ## 12. Impact by layer
 
@@ -798,6 +804,10 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`, `list-inference-
 
 ## 15. Review record
 
+- 2026-11-25: built and merged for release 1.2.0 (tags pending J). After-build corrections: D.3.4 permissions of
+  `ListEndpointPriceProposals` and `ImportProviderStatement` (`admin:pricing`, as the contract), the separate
+  `GetTeamInferenceReport`, routes in the agent's `models` object, US-68's `AFS_LLM_ROUTES`, §8.2 delivery to
+  `per_namespace` teams, §11.1 Google federation as built; §16 added.
 - 2026-11-25: J approved the build of 1.2.0. Completeness review added Appendix D (requirements by repository, the full
   operation list, definition of done) and the `endpoint_federations` and `provider_statements` tables.
 
@@ -818,6 +828,30 @@ file, stdin or prompt only, `rotate-model-endpoint-credential`, `list-inference-
   inference.
 - 2026-11-24: J asked for UI, use cases and test cases to review; Appendix A (screens 56 to 67 by role), Appendix B
   (user stories US-62 to US-77 with acceptance criteria) and Appendix C (test cases) added.
+
+## 16. Built and deferred (1.2.0)
+
+**Built** (merged 2026-11-25; J pushes the tags): `-db` migration 000023 (PR #23); `-restapi` API contract v1.5.0
+(PR #11, 27 new operations, 221 in total) and the implementation (PR #14): the team gateway with route families
+`/r/<route>/` and `/openai/`, Chat Completions → Converse on `/r/bedrock`, route admission, metering and caps, the
+reconciler's team gateway and route delivery, and the billing CronJobs `route-pull`, `route-statements`,
+`route-capacity` and `route-price-sync` (OpenAI, OpenRouter, Azure, Google billing export, LiteLLM price list); `-cli`
+(PR #12): the `model-endpoints` service and four `teams` and `reports` commands; `-website` (PR #14, in progress): SDK
+and screens. The contracts record the build's decisions (API CD-53 to CD-60, database CD-61 to CD-66, gateway CD-67 and
+CD-68). Spec: [specs/261125-model-endpoint-gateway/](specs/261125-model-endpoint-gateway/status.md).
+
+**Deferred** (need cloud access or a later release):
+
+| Item | Why |
+|---|---|
+| Pod Identity association for each team gateway ServiceAccount (`bedrock:Invoke*` on the team's profiles) | Made by Terraform per team; the reconciler does not render it yet |
+| Live Azure and Google federation and token acquisition (gateway and `afs-billing`) | No tenant; tested against fakes |
+| Live Azure Cost Management and BigQuery billing fixtures (MEG-OQ-14) | Fixtures follow the published references until recorded from live tenants |
+| OpenRouter history for past days | The provider has no history endpoint; `route-pull` takes the current UTC day at 23:30 |
+| The reconciler writing `endpoint_credentials.status` from the ExternalSecret's sync state | Not built in 1.2.0 |
+| Local envtest runs of the reconciler | Assets not available locally; CI runs them |
+| Real AWS, EKS, Azure and Google testing | Waits for J's cloud access, as for 1.1.0 |
+| *Test connection*, per-route agents and spend, recent provider changes, gateway URL and state on the console | No operation in contract v1.5.0 (API contract CD-60) |
 
 ---
 
@@ -943,14 +977,15 @@ route, so that agents use it through the gateway and its use is measured. *(§7,
   *Capacity*, then the route appears on T-G1, the team gateway's network policy allows it to reach that Service, and
   no agent's policy does.
 - Given *Test connection* is on, then the gateway calls `GET /v1/models` once and the form shows reachable or the
-  error; nothing is saved when it fails unless I turn the test off.
+  error; nothing is saved when it fails unless I turn the test off. *(Not in API contract v1.5.0, so not built in
+  1.2.0; API contract CD-60.)*
 - Owner and purpose are required; a Service name outside the namespace is refused (`ValidationError`).
 
 **US-68 · Choose an agent's routes and see what it gets.** As a team-admin, I want to pick an agent's routes and a
 default, and see the exact variables it receives. *(§8.2; T-G3)*
 - Given I select routes `bedrock`, `openai-prod`, `coder-vllm` with default `openai-prod` / `gpt-4.1`, when I save with
-  `If-Match`, then the pod restarts and has `AFS_LLM_ROUTES=openai-prod,bedrock,coder-vllm`, one
-  `AFS_LLM_<ROUTE>_BASE_URL` per route, `OPENAI_BASE_URL` pointing at `openai-prod`, `OPENAI_API_KEY=afs-gateway`, and
+  `If-Match`, then the pod restarts and has `AFS_LLM_ROUTES=openai-prod,coder-vllm` (Bedrock is announced by
+  `AFS_LLM_BEDROCK_BASE_URL` only, gateway contract CD-67; corrected 2026-11-25), one `AFS_LLM_<ROUTE>_BASE_URL` per route, `OPENAI_BASE_URL` pointing at `openai-prod`, `OPENAI_API_KEY=afs-gateway`, and
   `/etc/afs/llm-routes.json` matching T-G3's preview.
 - Given a stale version, then `412 PreconditionFailed` and nothing changes.
 - Given the agent calls a route it does not have, then `403` `route_not_enabled_for_agent`.
@@ -1290,13 +1325,13 @@ and records progress in that spec's `status.md`. Release 1.2.0 in every reposito
 | `DeleteModelEndpoint` | `DELETE /v1/admin/model-endpoints/{endpointId}` | `admin:model-endpoints` | US-62 |
 | `PutEndpointModels` | `PUT /v1/admin/model-endpoints/{endpointId}/models` | `admin:model-endpoints` | US-62 |
 | `CreateEndpointModelPrice` | `POST /v1/admin/model-endpoints/{endpointId}/prices` | `admin:pricing` | US-64 |
-| `ListEndpointPriceProposals` | `GET /v1/admin/endpoint-price-proposals` | `admin:model-endpoints` | US-64 |
+| `ListEndpointPriceProposals` | `GET /v1/admin/endpoint-price-proposals` | `admin:pricing` (corrected 2026-11-25, see below) | US-64 |
 | `ApproveEndpointPriceProposal` / `RejectEndpointPriceProposal` | `POST /v1/admin/endpoint-price-proposals/{proposalId}:approve` / `:reject` | `admin:pricing` | US-64 |
 | `ListEndpointTeams` | `GET /v1/admin/model-endpoints/{endpointId}/teams` | `admin:model-endpoints` | US-65 |
 | `PutModelEndpointCredential` | `PUT /v1/admin/model-endpoints/{endpointId}/credentials/{scope}` (`scope` = team id or `_shared`; write-only) | `admin:model-endpoints` | US-65 |
 | `RotateModelEndpointCredential` | `POST /v1/admin/model-endpoints/{endpointId}/credentials/{scope}:rotate` | `admin:model-endpoints` | US-65 |
 | `PutEndpointFederation` | `PUT /v1/admin/model-endpoints/{endpointId}/federations/{teamId}` (metadata only) | `admin:model-endpoints` | US-81 |
-| `ImportProviderStatement` | `POST /v1/admin/model-endpoints/{endpointId}/statements` | `admin:model-endpoints` | US-79, TC-BL-05 |
+| `ImportProviderStatement` | `POST /v1/admin/model-endpoints/{endpointId}/statements` | `admin:pricing` (corrected 2026-11-25, see below) | US-79, TC-BL-05 |
 | `ListInferenceProviders` | `GET /v1/admin/inference-providers` | `admin:model-endpoints` | US-78 |
 | `UpdateInferenceProvider` | `PATCH /v1/admin/inference-providers/{provider}` (If-Match; Bedrock fallback fields) | `admin:inference-providers` | US-78, US-80 |
 | `PutTeamGatewaySettings` | `PUT /v1/admin/teams/{teamId}/gateway-settings` (`deployment`, `mayAddModelEndpoints`) | `teams:set-guardrails` | US-66, US-76 |
@@ -1305,8 +1340,15 @@ and records progress in that spec's `status.md`. Release 1.2.0 in every reposito
 | `CreateTeamModelEndpoint` / `UpdateTeamModelEndpoint` / `DeleteTeamModelEndpoint` | `/v1/teams/{teamId}/model-endpoints[/{endpointId}]` | `model-endpoints:write` | US-67 |
 | `PutTeamEndpointModels` | `PUT /v1/teams/{teamId}/model-endpoints/{endpointId}/models` (prices inline for team endpoints) | `model-endpoints:write` | US-67 |
 | `PutTeamModelEndpointCredential` | `PUT /v1/teams/{teamId}/model-endpoints/{endpointId}/credential` | `model-endpoints:write` | US-65, US-67 |
-| Agent and pool routes | existing `PutAgentModels` / `PutPoolModels` bodies gain `routeAccess`, `routes`, `defaultRoute`, `defaultModel` may be `<route>/<model>` | existing | US-68 |
-| Reports | `GET /v1/reports/inference`, `groupBy=route` and `route` filter on usage and cost reports | existing reports permission | US-73 |
+| Agent and pool routes | the `models` object of the existing `CreateAgent`, `UpdateAgent`, `CreatePool`, `UpdatePool` gains `routeAccess`, `routes` (at most 50), `defaultRoute`; `defaultModelId` may be `<route>/<model>` (there is no `PutAgentModels`/`PutPoolModels`; corrected 2026-11-25) | existing | US-68 |
+| `GetInferenceReport` | `GET /v1/reports/inference` (service) | `admin:reports` | US-73 |
+| `GetTeamInferenceReport` | `GET /v1/teams/{teamId}/reports/inference` (team; a separate operation, corrected 2026-11-25) | `reports:read` | US-73 |
+| Reports | `groupBy=route` and `route` filter on usage and cost reports | existing reports permission | US-73 |
+
+**Corrections (2026-11-25, after the build).** The [API contract](docs/contracts/api-contract.md) §4.13 is the source
+and the built code follows it: `ListEndpointPriceProposals` and `ImportProviderStatement` need `admin:pricing` (this
+table said `admin:model-endpoints`); the inference report is two operations, so §4.13 adds 27 operations, not 26; and
+routes are part of the agent's and pool's `models` object, not a separate models operation (API contract CD-53).
 
 | ID | Requirement | Proves |
 |---|---|---|
