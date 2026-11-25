@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Contract v1.1.0 (2026-11-23): model admission by service, team, agent and price, and model delivery to the pod ([team orchestration agent PRD](../../team-orchestration-agent-PRD.md) MOD-4, MOD-5, approved by J; `-restapi` 1.1.0, not yet built). v1.0.0, draft for implementation (2026-11-21); root PRD decisions D28 and D57 |
+| **Status** | Contract **v1.2.0** (2026-11-25): team gateway per namespace, OpenAI-compatible model routes, Chat Completions → Converse on `bedrock`, provider switches including Bedrock, federated upstream auth (§12; [model endpoint gateway PRD](../../model-endpoint-gateway-PRD.md), approved by J; `-restapi` 1.2.0). v1.1.0 (2026-11-23): model admission by service, team, agent and price, and model delivery to the pod ([team orchestration agent PRD](../../team-orchestration-agent-PRD.md) MOD-4, MOD-5, approved by J; `-restapi` 1.1.0, not yet built). v1.0.0, draft for implementation (2026-11-21); root PRD decisions D28 and D57 |
 | **Provider** | [enterprise-agent-factory-service-restapi](https://github.com/stainedhead/enterprise-agent-factory-service-restapi) (`afs-gateway`) |
 | **Consumers** | Agents and pool workers in team namespaces; the Agentic Teammates runtime and its harnesses |
 | **Requirements** | [Root PRD](../../enterprise-agent-factory-service-initial-PRD.md) BUD-2, BUD-3, AGT-4, SEC-6, TAG-4, IF-5; [orchestration PRD](../../team-orchestration-agent-PRD.md) MOD-1 to MOD-6; [database contract](database-contract.md) §4.2 for the spend functions |
@@ -201,8 +201,95 @@ work.
 3. A conformance suite in `-restapi` runs the official Bedrock and Anthropic SDKs against the gateway
    with a fake Bedrock, covering every path, streaming, every error of §7 and the reservation math.
 
+## 12. Model routes, team gateway and provider switches (v1.2.0)
+
+Everything in §1 to §8 still holds for Bedrock and Anthropic paths. v1.2.0 adds the following; nothing an existing agent
+relies on changes (G8).
+
+### 12.1 Team gateway
+
+When a team's `gateway_deployment` is `per_namespace`, the reconciler renders `afs-gateway` in the team namespace
+(`https://afs-gateway.afs-t-<slug>.svc:8443`, two replicas) and rolls the team's agents with that value in
+`AFS_GATEWAY_URL`. `AFS_GATEWAY_URL` is **opaque**: runtimes read it, never build it. Identity (§3), reservation (§4),
+tags (§6) and usage rows (§8) are unchanged; the team gateway accepts calls only from its own namespace. Model routes
+(§12.2) are served only by team gateways.
+
+### 12.2 Route paths
+
+| Path | Compatible with | Notes |
+|---|---|---|
+| `POST /r/{route}/v1/chat/completions` | OpenAI Chat Completions (stream with SSE) | `model` is a model listed on the route |
+| `POST /r/{route}/v1/responses` | OpenAI Responses | Only when the endpoint lists `openai_responses` |
+| `POST /r/{route}/v1/embeddings` | OpenAI Embeddings | Only when the endpoint lists `openai_embeddings`; reserves input only |
+| `GET /r/{route}/v1/models` | OpenAI List models | Answered by the gateway from the caller's effective models on the route |
+| `POST /openai/v1/chat/completions` (and `/responses`, `/embeddings`) | OpenAI, one base URL | `model` = `<route>/<model>`; routed as the path form |
+| `POST /r/bedrock/v1/chat/completions` | OpenAI Chat Completions → Bedrock Converse | `model` = AFS model id; Bedrock admission (§2.1) and reservation (§4); `n` > 1, `logprobs`, audio and other unmapped fields → `400 ValidationError`, `details.reason = unsupported_parameter`, `details.field` |
+
+`{route}` is the endpoint slug (`^[a-z][a-z0-9-]{1,30}$`). Any other path under `/r/{route}/` → `404 NotFound`. The
+gateway always writes the reserved output cap into the forwarded request (`max_completion_tokens` for Chat,
+`max_output_tokens` for Responses); for streams it sets `stream_options.include_usage = true` and removes the extra
+usage chunk when the client did not ask for it. The agent's `Authorization` header is replaced by the route's upstream
+credential and never logged.
+
+### 12.3 Route admission
+
+Effective routes = (switched-on service endpoints the team opted in to, plus the team's own endpoints) ∩ the agent's or
+pool's selection, all on providers that are on. The gateway reads `afs.route_admission(subject_kind, subject_id)`
+(database contract §7.4), cached at most 60 s and dropped on change-feed notifications for the 000023 tables.
+Denials are `403 AccessDenied` with `details.reason` in this order (CD-41): `provider_disabled`,
+`route_not_enabled_for_service`, `route_not_enabled_for_team`, `route_not_enabled_for_agent`, `model_not_on_route`,
+`model_not_priced` (per-token routes only); `details.route` and `details.model` name them.
+
+`provider_disabled` also applies to Bedrock paths (§2) and `/r/bedrock` while the Bedrock provider is off, ahead of the
+§2.1 reasons.
+
+### 12.4 Delivery to the pod (additions to §3)
+
+| Item | Value |
+|---|---|
+| `AFS_LLM_ROUTES` | Comma-separated effective route slugs, default first |
+| `AFS_LLM_<ROUTE>_BASE_URL` | `AFS_GATEWAY_URL` + `/r/<route>/v1`; `<ROUTE>` is the slug upper-cased with `-` → `_`. Includes `AFS_LLM_BEDROCK_BASE_URL` when Bedrock is on |
+| `AFS_LLM_DEFAULT_ROUTE`, `AFS_LLM_DEFAULT_MODEL` | The agent's default route and model when its default is a route model |
+| `AFS_DEFAULT_MODEL` | Unchanged meaning; when the default is a route model its value is `<route>/<model>` |
+| `OPENAI_BASE_URL`, `OPENAI_API_KEY` | `AFS_GATEWAY_URL` + `/openai/v1` and the placeholder `afs-gateway` |
+| `/etc/afs/llm-routes.json` | `{"version": 1, "defaultRoute": "<slug>", "defaultModel": "<model>", "routes": [{"route": "<slug>", "baseUrl": "<url>", "protocols": ["openai_chat", …], "models": [{"name": "<model>", "maxOutputTokens": <int>}], "pricing": "per_token\|capacity\|free"}]}` |
+
+Same roll rules as `AFS_MODELS` (§3): the agent's own change rolls the pod; team and service changes apply on the next roll
+and are enforced by the gateway at once.
+
+### 12.5 Errors (additions to §7)
+
+| HTTP | `code` | `details.reason` | When |
+|---|---|---|---|
+| 400 | `ValidationError` | `unsupported_parameter` | A field the `bedrock` translation cannot map |
+| 403 | `AccessDenied` | §12.3 reasons | Route or provider admission |
+| 429 | `Throttled` | `provider_budget_exhausted` | The provider's own spending limit refused the call (for example an OpenCode service-account budget) |
+| 503 | `Unavailable` | `credential_missing` | The route has no credential for this team; nothing reserved |
+| 503 | `Unavailable` | `federation_not_ready` | Azure or Google token exchange not set up or failing; nothing reserved |
+| 503 | `Unavailable` | `provider_balance_exhausted` | The provider's prepaid balance is empty (upstream `402`); reservation released |
+
+Upstream `429` passes through as `429 Throttled` with `Retry-After`; upstream 5xx → `502 UpstreamError`; upstream timeout →
+`504 UpstreamTimeout`. In every upstream failure the reservation is released.
+
+### 12.6 Usage rows (additions to §8)
+
+`endpoint_id` (NULL for Bedrock), `model_name` (route model as sent), `usage_source` (`response`, `estimated`,
+`provider_cost`), `reasoning_tokens`, `ttft_ms`, `upstream_ms`, `gateway_ms`, `http_status`. Calls with no usage in the
+response settle to the reservation with `usage_source = estimated`. When the provider reports `usage.cost`, the settled
+cost is the larger of it and the token-price cost.
+
+### 12.7 Telemetry
+
+Spans and metrics follow the OpenTelemetry GenAI semantic conventions plus `afs.team_id`, `afs.route`, `afs.provider`
+and `afs.usage_source`; agent and pool ids are on spans only, never metric labels. No prompt or completion content is
+captured. `traceparent` is continued and propagated upstream only to `corporate` and `in_namespace` endpoints.
+
 ## 11. Change log
 
+- **v1.2.0 (2026-11-25):** team gateway per namespace and opaque `AFS_GATEWAY_URL` (§12.1); OpenAI-compatible route
+  paths, body form and Chat Completions → Converse on `bedrock` (§12.2); route admission and `provider_disabled` (§12.3);
+  `AFS_LLM_*`, `OPENAI_*` and `/etc/afs/llm-routes.json` (§12.4); new error reasons and `504 UpstreamTimeout` (§12.5);
+  usage row columns (§12.6); GenAI telemetry (§12.7). Minor: additions only.
 - **v1.1.0 (2026-11-23):** model admission by service, team, agent or pool and price (§2.1) with four `details.reason`
   values and a 60 s cache refreshed on the change feed; `AFS_DEFAULT_MODEL`, `AFS_MODELS` and `/etc/afs/models.json` (§3);
   `503 model_provisioning`; the orchestration agent replaces the collaboration agent in §3. Minor: new error reasons and
@@ -212,3 +299,4 @@ work.
 |---|---|
 | CD-39 | Admission reasons are reported in the fixed order service, team, agent (or pool), price, so a caller sees the highest level to ask about. A pool's own selection uses `model_not_enabled_for_agent`, because the PRD names four reasons |
 | CD-40 | A callable model whose team inference profile is not yet active answers `503 model_provisioning` with `Retry-After: 30` rather than calling the foundation model directly, so every call stays attributable to the team's profile and cost tags |
+| CD-41 | Route admission reasons follow the model admission pattern, with the provider switch first because it is the highest level a caller can ask about |

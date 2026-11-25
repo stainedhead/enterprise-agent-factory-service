@@ -159,8 +159,7 @@ No new roles. New permissions mirror external systems and models.
 | See routes, models, prices, usage and cost | Yes | Yes | Yes (no credential metadata beyond name and last rotation) | Own routes via `/etc/afs/llm-routes.json` |
 | Call a route | No | No | No | Yes, within its effective set |
 
-Permissions (proposed): `model-endpoints:read`, `model-endpoints:write` (service), `team-model-endpoints:write`,
-`model-endpoint-prices:approve`, `inference-provider-policy:write` (service admins only). Every one gets allowed and denied tests per role in `-restapi`.
+Permissions (API contract v1.5.0 §3): `admin:model-endpoints`, `admin:inference-providers` and the existing `admin:pricing` (service admins); `model-endpoints:read` (every team role) and `model-endpoints:write` (team-admins). Every one gets allowed and denied tests per role in `-restapi`.
 
 ## 5. Per-namespace versus shared gateway
 
@@ -1284,28 +1283,28 @@ and records progress in that spec's `status.md`. Release 1.2.0 in every reposito
 
 | Operation | Method and path | Permission | Story |
 |---|---|---|---|
-| `ListModelEndpoints` | `GET /v1/admin/model-endpoints` | `model-endpoints:read` | US-62 |
-| `CreateModelEndpoint` | `POST /v1/admin/model-endpoints` | `model-endpoints:write` | US-62 |
-| `GetModelEndpoint` | `GET /v1/admin/model-endpoints/{endpointId}` | `model-endpoints:read` | US-62 |
-| `UpdateModelEndpoint` | `PATCH /v1/admin/model-endpoints/{endpointId}` (If-Match; includes `enabled`) | `model-endpoints:write` | US-63 |
-| `DeleteModelEndpoint` | `DELETE /v1/admin/model-endpoints/{endpointId}` | `model-endpoints:write` | US-62 |
-| `PutEndpointModels` | `PUT /v1/admin/model-endpoints/{endpointId}/models` | `model-endpoints:write` | US-62 |
-| `CreateEndpointModelPrice` | `POST /v1/admin/model-endpoints/{endpointId}/prices` | `model-endpoint-prices:approve` | US-64 |
-| `ListEndpointPriceProposals` | `GET /v1/admin/endpoint-price-proposals` | `model-endpoints:read` | US-64 |
-| `ApproveEndpointPriceProposal` / `RejectEndpointPriceProposal` | `POST /v1/admin/endpoint-price-proposals/{proposalId}:approve` / `:reject` | `model-endpoint-prices:approve` | US-64 |
-| `ListEndpointTeams` | `GET /v1/admin/model-endpoints/{endpointId}/teams` | `model-endpoints:read` | US-65 |
-| `PutModelEndpointCredential` | `PUT /v1/admin/model-endpoints/{endpointId}/credentials/{scope}` (`scope` = team id or `_shared`; write-only) | `model-endpoints:write` | US-65 |
-| `RotateModelEndpointCredential` | `POST /v1/admin/model-endpoints/{endpointId}/credentials/{scope}:rotate` | `model-endpoints:write` | US-65 |
-| `PutEndpointFederation` | `PUT /v1/admin/model-endpoints/{endpointId}/federations/{teamId}` (metadata only) | `model-endpoints:write` | US-81 |
-| `ImportProviderStatement` | `POST /v1/admin/model-endpoints/{endpointId}/statements` | `model-endpoints:write` | US-79, TC-BL-05 |
-| `ListInferenceProviders` | `GET /v1/admin/inference-providers` | `model-endpoints:read` | US-78 |
-| `UpdateInferenceProvider` | `PATCH /v1/admin/inference-providers/{provider}` (If-Match; Bedrock fallback fields) | `inference-provider-policy:write` | US-78, US-80 |
-| `PutTeamGatewaySettings` | `PUT /v1/admin/teams/{teamId}/gateway-settings` (`deployment`, `mayAddModelEndpoints`) | `model-endpoints:write` | US-66, US-76 |
-| `ListTeamModelEndpoints` | `GET /v1/teams/{teamId}/model-endpoints` (opted-in, own and available) | `model-endpoints:read` (team scope) | US-63, US-75 |
-| `PutTeamModelEndpoints` | `PUT /v1/teams/{teamId}/model-endpoint-selections` (opt-in list) | `team-model-endpoints:write` | US-63 |
-| `CreateTeamModelEndpoint` / `UpdateTeamModelEndpoint` / `DeleteTeamModelEndpoint` | `/v1/teams/{teamId}/model-endpoints[/{endpointId}]` | `team-model-endpoints:write` | US-67 |
-| `PutTeamEndpointModels` | `PUT /v1/teams/{teamId}/model-endpoints/{endpointId}/models` (prices inline for team endpoints) | `team-model-endpoints:write` | US-67 |
-| `PutTeamModelEndpointCredential` | `PUT /v1/teams/{teamId}/model-endpoints/{endpointId}/credential` | `team-model-endpoints:write` | US-65, US-67 |
+| `ListModelEndpoints` | `GET /v1/admin/model-endpoints` | `admin:model-endpoints` | US-62 |
+| `CreateModelEndpoint` | `POST /v1/admin/model-endpoints` | `admin:model-endpoints` | US-62 |
+| `GetModelEndpoint` | `GET /v1/admin/model-endpoints/{endpointId}` | `admin:model-endpoints` | US-62 |
+| `UpdateModelEndpoint` | `PATCH /v1/admin/model-endpoints/{endpointId}` (If-Match; includes `enabled`) | `admin:model-endpoints` | US-63 |
+| `DeleteModelEndpoint` | `DELETE /v1/admin/model-endpoints/{endpointId}` | `admin:model-endpoints` | US-62 |
+| `PutEndpointModels` | `PUT /v1/admin/model-endpoints/{endpointId}/models` | `admin:model-endpoints` | US-62 |
+| `CreateEndpointModelPrice` | `POST /v1/admin/model-endpoints/{endpointId}/prices` | `admin:pricing` | US-64 |
+| `ListEndpointPriceProposals` | `GET /v1/admin/endpoint-price-proposals` | `admin:model-endpoints` | US-64 |
+| `ApproveEndpointPriceProposal` / `RejectEndpointPriceProposal` | `POST /v1/admin/endpoint-price-proposals/{proposalId}:approve` / `:reject` | `admin:pricing` | US-64 |
+| `ListEndpointTeams` | `GET /v1/admin/model-endpoints/{endpointId}/teams` | `admin:model-endpoints` | US-65 |
+| `PutModelEndpointCredential` | `PUT /v1/admin/model-endpoints/{endpointId}/credentials/{scope}` (`scope` = team id or `_shared`; write-only) | `admin:model-endpoints` | US-65 |
+| `RotateModelEndpointCredential` | `POST /v1/admin/model-endpoints/{endpointId}/credentials/{scope}:rotate` | `admin:model-endpoints` | US-65 |
+| `PutEndpointFederation` | `PUT /v1/admin/model-endpoints/{endpointId}/federations/{teamId}` (metadata only) | `admin:model-endpoints` | US-81 |
+| `ImportProviderStatement` | `POST /v1/admin/model-endpoints/{endpointId}/statements` | `admin:model-endpoints` | US-79, TC-BL-05 |
+| `ListInferenceProviders` | `GET /v1/admin/inference-providers` | `admin:model-endpoints` | US-78 |
+| `UpdateInferenceProvider` | `PATCH /v1/admin/inference-providers/{provider}` (If-Match; Bedrock fallback fields) | `admin:inference-providers` | US-78, US-80 |
+| `PutTeamGatewaySettings` | `PUT /v1/admin/teams/{teamId}/gateway-settings` (`deployment`, `mayAddModelEndpoints`) | `teams:set-guardrails` | US-66, US-76 |
+| `ListTeamModelEndpoints` | `GET /v1/teams/{teamId}/model-endpoints` (opted-in, own and available) | `model-endpoints:read` | US-63, US-75 |
+| `PutTeamModelEndpoints` | `PUT /v1/teams/{teamId}/model-endpoint-selections` (opt-in list) | `model-endpoints:write` | US-63 |
+| `CreateTeamModelEndpoint` / `UpdateTeamModelEndpoint` / `DeleteTeamModelEndpoint` | `/v1/teams/{teamId}/model-endpoints[/{endpointId}]` | `model-endpoints:write` | US-67 |
+| `PutTeamEndpointModels` | `PUT /v1/teams/{teamId}/model-endpoints/{endpointId}/models` (prices inline for team endpoints) | `model-endpoints:write` | US-67 |
+| `PutTeamModelEndpointCredential` | `PUT /v1/teams/{teamId}/model-endpoints/{endpointId}/credential` | `model-endpoints:write` | US-65, US-67 |
 | Agent and pool routes | existing `PutAgentModels` / `PutPoolModels` bodies gain `routeAccess`, `routes`, `defaultRoute`, `defaultModel` may be `<route>/<model>` | existing | US-68 |
 | Reports | `GET /v1/reports/inference`, `groupBy=route` and `route` filter on usage and cost reports | existing reports permission | US-73 |
 

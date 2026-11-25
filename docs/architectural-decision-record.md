@@ -340,3 +340,20 @@ Accepted, Proposed (needs review), Superseded.
   v1.4.0 (§4.4d) and gateway contract v1.1.0 (§2.1). Alternatives rejected: keeping the agent optional (teams without
   coordination), a CIDR allow list on the public ALB as "private" (still internet-facing), letting team-admins pick the
   harness (harness choice is a platform concern), and one model per agent (forces tickets for every task change).
+
+## ADR-018 Team model gateway: a gateway per namespace, model routes and provider switches
+
+- **Status:** Accepted (J, 2026-11-24; build approved 2026-11-25). Release 1.2.0.
+- **Context:** Agents reach non-Bedrock models directly, unmetered and uncapped (EXT-6, RPT-7). J asked whether a
+  namespace-scoped gateway fronting OpenAI-compatible endpoints by route name could track and cap their cost, and later
+  for per-provider switches (Bedrock included) and Azure and Google as providers.
+- **Decision:** Extend `afs-gateway` and run it per team namespace (opt-in per team, then ring by ring). Endpoints are
+  a service → team → agent catalog with team opt-in; each has a route name delivered to agents as `AFS_LLM_*` variables
+  and a file. Per-token routes use the Bedrock reserve-and-settle path and hard caps; capacity and free routes are metered
+  and reported. Every provider has its own switch set by service admins; Bedrock can be turned off once a route model is
+  the service default for every team. Azure and Google authenticate by workload identity federation from the team
+  gateway's identity, so no provider secret is stored. Details: [model endpoint gateway PRD](../model-endpoint-gateway-PRD.md)
+  §13.1 (MEG-D1 to MEG-D12); contracts: gateway v1.2.0, API v1.5.0, database v1.5.0 (000023).
+- **Consequences:** Two small pods per team and a connection pooler in front of RDS; agents' traffic stays in their
+  namespace; one team's gateway trouble stays in that team. Off-the-shelf gateways are not the enforcement point. Real
+  EKS, Azure and Google checks wait for cloud access (fakes and recorded fixtures until then).
