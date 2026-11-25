@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Proposed, for J's review (2026-11-24).** Design proposal only: nothing here is built, and no contract, schema or release changes until J approves. Release 1.1.0 is not changed by this document. Target release if approved: the same release as the [team model gateway proposal](https://github.com/stainedhead/enterprise-agent-factory-service/pull/24) (1.2.0), or the one after it |
+| **Status** | **Decisions answered by J (2026-11-24/25), section 14.3.** Design document: nothing is built, and contracts and schema change only when J approves implementation. Release 1.1.0 is not changed. **Target release 1.3.0** in every repository (`-db` and `-restapi` in lockstep), after the team gateway and model routes of [PR #24](https://github.com/stainedhead/enterprise-agent-factory-service/pull/24) ship in 1.2.0 (MCP-OQ-17) |
 | **Kind** | Change PRD to the [initial PRD](enterprise-agent-factory-service-initial-PRD.md) (EXT-1..7, TEAM-3, SEC-6, RPT), the [team orchestration agent PRD](team-orchestration-agent-PRD.md) and the [gateway contract](docs/contracts/gateway-contract.md) v1.1.0. **Depends on** the per-namespace team gateway proposed in root PR #24 (`model-endpoint-gateway-PRD.md`, decision MEG-D1) |
 | **Author** | J (Enterprise Architecture), drafted with Claude |
 | **Jira** | N/A |
@@ -213,7 +213,7 @@ are refused if called by name.
 - Refreshed on `subscriptions/listen` list-changed notifications (2026-07-28 servers), `notifications/*/list_changed`
   (2025-11-25 servers), the upstream `ttlMs`, and at most every 15 minutes otherwise. A changed definition follows the
   pinning rules of §7.4 before it is searchable.
-- Ranking in 1.2.0: BM25 over name, title, description and parameter names, with a per-server boost from the agent's
+- Ranking in 1.3.0: BM25 over name, title, description and parameter names, with a per-server boost from the agent's
   own recent use. Embedding search (through a model route, metered like any call) is MCP-OQ-6.
 - If a server ever offers a standard search or manifest capability, the gateway uses it to refresh and to check its
   index; agents still see the same meta-tools. When the Progressive Disclosure WG publishes a reference extension, the
@@ -286,7 +286,7 @@ Allowed only where a service admin sets `teams.may_add_mcp_servers` (default off
 | Register | Team-admin gives slug, owner, purpose, documentation, data classification, transport, location, URL or image, auth kind |
 | Automatic checks | Reachability and protocol version; TLS; host against the service's **MCP host deny list** and allowed corporate domains; inventory of primitives with digests; static checks of descriptions for injection patterns (instructions to the model, hidden Unicode, references to other servers' tools, requests for credentials); hosted images: signature, digest pin, vulnerability scan |
 | Risk tier | `low`: in-namespace or corporate host, no `destructive` tools, no credentials beyond the team's own. `elevated`: external host, `destructive` or `open_world` tools, or user-delegated OAuth. `high`: a check failed, or the data classification is above the team's ceiling |
-| Approval | `low`: team-admin approves (recorded). `elevated` and `high`: a security operator or service admin approves (MCP-OQ-4) |
+| Approval | A service-wide policy `mcp.team_server_approval`, set by service admins to fit the organisation (J, MCP-OQ-4): **`team_all` (default)**: team-admins approve every tier; `team_low_security_higher`: team-admins approve `low`, a security operator or service admin approves `elevated` and `high`; `security_all`: a security operator or service admin approves every team server. Every approval is in `audit_log` and visible to security operators whatever the level |
 | Running | Same proxying, policy, pinning, telemetry and reports as enterprise servers; the server shows *Team-managed* everywhere |
 | Promotion | A service admin may promote a team server to the enterprise catalog (it becomes a service server, the team keeps it on) |
 
@@ -306,7 +306,7 @@ identity it holds. What cannot pass the gateway is traffic that does not go thro
 | 2 | **Static API key or bearer** | Secrets Manager `<prefix>/<namespace>/_gateway/mcp/<server>` (team) or `<prefix>/_service/gateway/mcp/<server>` (shared), projected only into the gateway pod (MEG-D7). Per-team keys are the default for service servers | Yes, injected per call |
 | 3 | **OAuth client credentials** (the server trusts a machine client) | Client secret in Secrets Manager, or none when the client authenticates with a signed assertion (case 4) | Yes. The gateway gets an access token with RFC 8707 `resource` = the server's canonical URI, caches it until expiry, refreshes it |
 | 4 | **Workload identity federation / RFC 8693 token exchange** (OIDC temporary credentials) | **Nothing stored.** The team gateway has its own projected ServiceAccount token (an OIDC JWT issued by the cluster's OIDC issuer, audience per target, lifetime ≤ 1 h, rotated by the kubelet). The gateway presents it to the target's authorization server (as `subject_token` in an RFC 8693 exchange, or as a `client_assertion` / federated credential) and receives a short-lived access token scoped to that server | **Yes**, if the target's authorization server trusts the cluster's OIDC issuer (or the enterprise IdP that federates it). Examples: Entra ID workload identity federation, Okta workload federation, GitHub App via a token broker, Google workload identity, AWS `AssumeRoleWithWebIdentity` / SigV4 for AWS-hosted MCP servers (with the team gateway's Pod Identity role). The token is minted per server and team, held in memory, never written |
-| 5 | **User-delegated OAuth** (the server acts as a person: Atlassian, Google, Microsoft 365) | The refresh token, in Secrets Manager at the gateway-only path, one per (team or agent, server) | Yes, with a consent step: a team-admin clicks *Connect* in the console, completes the authorization code + PKCE flow with the server's authorization server (discovered by RFC 9728; client identified by an AFS Client ID Metadata Document per environment; `iss` validated), and the gateway stores the refresh token and mints access tokens per call. Whose authority the agent uses (a named person versus a service account in that SaaS) is a governance choice per server (MCP-OQ-8). Refresh-token expiry or revocation shows as condition `McpAuthExpired` with a reconnect action |
+| 5 | **User-delegated OAuth** (the server acts as an account in the SaaS: Atlassian, Google, Microsoft 365; a service account only, MCP-OQ-8) | The refresh token, in Secrets Manager at the gateway-only path, one per (team or agent, server) | Yes, with a consent step: a team-admin clicks *Connect* in the console, completes the authorization code + PKCE flow with the server's authorization server (discovered by RFC 9728; client identified by an AFS Client ID Metadata Document per environment; `iss` validated), and the gateway stores the refresh token and mints access tokens per call. The connected account must be a **service account** in that SaaS: agents never act as a named person (J, MCP-OQ-8). A server whose SaaS offers no service account cannot use this kind. Refresh-token expiry or revocation shows as condition `McpAuthExpired` with a reconnect action |
 | 6 | **Direct calls by agents' own CLIs and SDKs** (`aws`, `gh`, `kubectl`, a vendor SDK) that do not use MCP or a route | Inside the agent pod: Pod Identity (AWS), a projected SA token with an audience per target that the CLI exchanges itself (a credential helper or `AWS_WEB_IDENTITY_TOKEN_FILE`-style variable), or an agent secret (ADR-006) | **No, by design.** The gateway never sees these calls. AFS gives them identity (projected tokens per audience, rendered by the reconciler) and network control (per-agent Cilium FQDN egress, EXT-5), and visibility only from Cilium flow logs (connections, bytes, denied attempts, RPT). No tool-level telemetry is possible without routing the traffic through a proxy |
 
 Rules that apply to cases 2–5:
@@ -427,7 +427,7 @@ goes through the metered model gateway as usual. URL-mode elicitation for OAuth 
 
 ## 13. Impact by layer
 
-### 13.1 Gateway contract (v1.2.0 or v1.3.0, minor)
+### 13.1 Gateway contract (v1.3.0, minor)
 
 New `/mcp` and `/mcp/<server>` endpoints, meta-tools, refusal reasons, `AFS_MCP_*` variables and `/etc/afs/mcp.json`.
 
@@ -438,7 +438,7 @@ New `/mcp` and `/mcp/<server>` endpoints, meta-tools, refusal reasons, `AFS_MCP_
 | `AFS_MCP_<SERVER>_URL` | Per server, slug upper-snake |
 | `/etc/afs/mcp.json` | `{"version":1,"aggregated":{"url":"…","mode":"search"},"servers":[{"name":"github","url":"…","kind":"enterprise","readOnly":false}],"mcpServers":{"afs":{"type":"http","url":"…"}}}`: the `mcpServers` block is the shape many MCP hosts read, so a runtime can point at the file without code |
 
-### 13.2 `-db` (next migration after PR #24's 000023)
+### 13.2 `-db` (release 1.3.0, next migration after PR #24's)
 
 | Table | Key columns | Notes |
 |---|---|---|
@@ -464,7 +464,7 @@ inserts `mcp_events`), isolation tests and `seedOtherTeams` rows.
   thin JSON-RPC layer (MCP-OQ-15).
 - `afs-reconciler`: hosted server Deployments and bridge, network policies, gateway egress to MCP hosts, federation
   token projections, `/etc/afs/mcp.json`, conditions (`McpServerReady`, `McpAuthExpired`, `McpDriftPending`).
-- `afs-api` (contract v1.5.0 or v1.6.0), about 24 operations: `List/Get/Create/Update/DeleteMcpServer` (service and team
+- `afs-api` (next minor contract version after PR #24's), about 24 operations: `List/Get/Create/Update/DeleteMcpServer` (service and team
   scope), `ImportMcpServerManifest`, `SubmitMcpServerForReview`, `ApproveMcpServer`, `RejectMcpServer`,
   `SuspendMcpServer`, `ListMcpPrimitives`, `ApproveMcpPrimitive`, `PutMcpPolicy`, `PutTeamMcpServers`,
   agent and pool `mcp` in the existing access body, `PutMcpServerCredential`, `StartMcpOAuthConnect` /
@@ -501,7 +501,7 @@ AccessDenied tests for each.
 |---|---|---|
 | MCP-D1 | MCP is a route type on the per-namespace team gateway; `gateway.mcp.placement` can split it into a second Deployment of the same image | One identity, egress and credential boundary per team; no new product (§5) |
 | MCP-D2 | Enterprise servers are opt-in per team; agents default to all of the team's enabled servers | J's "enable from the centralized list"; least privilege at the team boundary |
-| MCP-D3 | Team servers only where a service admin allows; risk-tiered review; same proxying and telemetry | J's team-managed servers, audited at system level (§8) |
+| MCP-D3 | Team servers only where a service admin allows; risk-tiered review under a service-admin-selected approval policy (default: team approves all); same proxying and telemetry | J's team-managed servers, audited at system level (§8) |
 | MCP-D4 | Tool, resource and prompt policy at each level; definitions pinned by digest; drift held for review | Server-level access is too coarse; tool definitions can change under the agent (§7) |
 | MCP-D5 | Search through gateway meta-tools on an aggregated endpoint, default for agents; full listing available | The spec has no search yet (§3.1); this works with every client and maps to a future extension |
 | MCP-D6 | Credential kinds: none, static, OAuth client, workload federation (RFC 8693, nothing stored), user-delegated OAuth (refresh token held by the gateway), SigV4; never token passthrough | Covers OIDC temporary credentials without storing them (§9) |
@@ -521,27 +521,29 @@ AccessDenied tests for each.
 | Teams run MCP servers inside agent images to avoid governance | Agent egress still limits reach; agent-local servers are listed as such; policy can forbid MCP hosts in agent egress |
 | Protocol churn (four versions in two years) | Two versions per side, conformance suite with recorded fixtures |
 
-### 14.3 Open questions for J
+### 14.3 Open questions and J's answers
 
-| # | Question | Recommended answer |
-|---|---|---|
-| MCP-OQ-1 | MCP as a route type on the team gateway (PR #24), or a separate MCP gateway? | Route type, with `placement` to split per team (MCP-D1). If PR #24's per-namespace gateway is not approved, still per namespace |
-| MCP-OQ-2 | Build in `afs-gateway`, or adopt an MCP-native gateway as the data plane? | Build; reassess agentgateway as a data plane only if protocol churn makes upkeep too costly |
-| MCP-OQ-3 | Enterprise servers opt-in per team, or join *All* like models? | Opt-in, with an optional *default for new teams* flag per server |
-| MCP-OQ-4 | Who approves `elevated` and `high` team servers? | Security operators or service admins; `low` by team-admins |
-| MCP-OQ-5 | On description-only drift with a compatible schema, keep serving the old approved definition, or hold the tool? | Hold for enterprise servers set to `hold`; keep the old one callable for team servers until a team-admin decides |
-| MCP-OQ-6 | Embedding search in 1.2.0? | No; BM25 first, embeddings through a metered model route later |
-| MCP-OQ-7 | Adopt the Progressive Disclosure WG's reference extension when published? | Yes, beside the meta-tools |
-| MCP-OQ-8 | User-delegated OAuth: whose account do agents act as (a named person, or a service account in that SaaS)? Allow URL elicitation to become a *Connect* request? | Service accounts where the SaaS has them; named-person delegation only on `elevated` review with the person's consent recorded; yes to the *Connect* request |
-| MCP-OQ-9 | Any content capture (arguments, results, search queries) for audit? | No by default; time-boxed query-text capture for tuning by service admins; argument hashes optional per server |
-| MCP-OQ-10 | Offer per-agent federated identity (projected OIDC tokens per audience) for agents' own CLIs and SDKs (§9 case 6) in the same release? | Yes; small, independent, useful beyond MCP |
-| MCP-OQ-11 | Serve AFS's catalog through the MCP Registry API as a private registry for runtimes that read registries? | Later; import `server.json` now |
-| MCP-OQ-12 | Which upstream protocol versions? | 2026-07-28 and 2025-11-25; older Streamable HTTP versions only on demand |
-| MCP-OQ-13 | Hosted stdio servers: per team or per agent by default? | Per team; per agent when the server keeps caller state |
-| MCP-OQ-14 | Resource URIs in the ledger: full URI, template, or prefix? | Template when known, else scheme + host + first path segment |
-| MCP-OQ-15 | Recheck spec, SDK and product facts (§3, §5.2, §11.2, EMA extension) before contracts | Yes, at contract time |
-| MCP-OQ-16 | Does the orchestration agent (Hermes with Paperclip AI or Buzz) get MCP like any agent? Buzz's ACP agents use MCP tools today | Yes, same MCP tab; Buzz-connected workers point their MCP config at `/etc/afs/mcp.json` |
-| MCP-OQ-17 | Ship MCP in the same release as model routes (1.2.0) or the next? | Same release if PR #24 is approved, built after the team gateway lands |
+All answered. Cards were tapped by J in the project thread; MCP-OQ-4 was answered in words; MCP-OQ-6, 7 and 11 to 16 were accepted together.
+
+| # | Question | Recommended | J's answer (2026-11-24/25) |
+|---|---|---|---|
+| MCP-OQ-1 | MCP as a route type on the team gateway (PR #24), or a separate MCP gateway? | Route type, with `placement` to split per team (MCP-D1). If PR #24's per-namespace gateway is not approved, still per namespace | **Route type on the team gateway** (card) |
+| MCP-OQ-2 | Build in `afs-gateway`, or adopt an MCP-native gateway as the data plane? | Build; reassess agentgateway as a data plane only if protocol churn makes upkeep too costly | **Build in `afs-gateway`** (the adopt option was declined on the OQ-1 card) |
+| MCP-OQ-3 | Enterprise servers opt-in per team, or join *All* like models? | Opt-in, with an optional *default for new teams* flag per server | **Opt-in, with a *default for new teams* flag** per server (card) |
+| MCP-OQ-4 | Who approves `elevated` and `high` team servers? | Security operators or service admins; `low` by team-admins | **Three-level policy chosen by service admins; `team_all` is the default** (in words): see §8 |
+| MCP-OQ-5 | On description-only drift with a compatible schema, keep serving the old approved definition, or hold the tool? | Hold for enterprise servers set to `hold`; keep the old one callable for team servers until a team-admin decides | **Per-server drift setting**; team servers keep serving the approved definition until a team-admin decides (card) |
+| MCP-OQ-6 | Embedding search in 1.2.0? | No; BM25 first, embeddings through a metered model route later | No; BM25 first (accepted) |
+| MCP-OQ-7 | Adopt the Progressive Disclosure WG's reference extension when published? | Yes, beside the meta-tools | Yes, beside the meta-tools (accepted) |
+| MCP-OQ-8 | User-delegated OAuth: whose account do agents act as (a named person, or a service account in that SaaS)? Allow URL elicitation to become a *Connect* request? | Service accounts where the SaaS has them; named-person delegation only on `elevated` review with the person's consent recorded; yes to the *Connect* request | **Service accounts only**: agents never act as a named person; servers whose SaaS has no service account cannot use user-delegated OAuth (card). URL elicitation for OAuth becomes a *Connect* request |
+| MCP-OQ-9 | Any content capture (arguments, results, search queries) for audit? | No by default; time-boxed query-text capture for tuning by service admins; argument hashes optional per server | **No content**; time-boxed, audited query-text capture for tuning; argument hashes optional per server (card) |
+| MCP-OQ-10 | Offer per-agent federated identity (projected OIDC tokens per audience) for agents' own CLIs and SDKs (§9 case 6) in the same release? | Yes; small, independent, useful beyond MCP | **Yes, in the same release** (card) |
+| MCP-OQ-11 | Serve AFS's catalog through the MCP Registry API as a private registry for runtimes that read registries? | Later; import `server.json` now | Later; import `server.json` now (accepted) |
+| MCP-OQ-12 | Which upstream protocol versions? | 2026-07-28 and 2025-11-25; older Streamable HTTP versions only on demand | 2026-07-28 and 2025-11-25 (accepted) |
+| MCP-OQ-13 | Hosted stdio servers: per team or per agent by default? | Per team; per agent when the server keeps caller state | Per team; per agent when the server keeps caller state (accepted) |
+| MCP-OQ-14 | Resource URIs in the ledger: full URI, template, or prefix? | Template when known, else scheme + host + first path segment | Template when known, else scheme + host + first path segment (accepted) |
+| MCP-OQ-15 | Recheck spec, SDK and product facts (§3, §5.2, §11.2, EMA extension) before contracts | Yes, at contract time | Yes, at contract time (accepted) |
+| MCP-OQ-16 | Does the orchestration agent (Hermes with Paperclip AI or Buzz) get MCP like any agent? Buzz's ACP agents use MCP tools today | Yes, same MCP tab; Buzz-connected workers point their MCP config at `/etc/afs/mcp.json` | Yes, same MCP tab (accepted) |
+| MCP-OQ-17 | Ship MCP in the same release as model routes (1.2.0) or the next? | Same release if PR #24 is approved, built after the team gateway lands | **Next release, 1.3.0** (card) |
 
 ## 15. User stories and acceptance criteria
 
@@ -604,8 +606,11 @@ with the same proxying and audit as enterprise servers.
   console disables the button with "Requires service admin permission for this team".
 - **AC-4.2** Given a registration, when automatic checks finish, then a risk tier (`low`, `elevated`, `high`) is
   assigned with the reason for each check.
-- **AC-4.3** Given risk `low`, when I approve, then the server is available to my team only and the approval is
-  audited. Given `elevated` or `high`, then only a security operator or service admin can approve.
+- **AC-4.3** Given the service policy `team_all` (default), when I approve a server of any tier, then it is available
+  to my team only and the approval is audited. Given `team_low_security_higher`, only `low` is approvable by me; given
+  `security_all`, none is; in both cases the others need a security operator or service admin.
+- **AC-4.6** Given I am a service admin, when I change `mcp.team_server_approval`, then the change is audited and applies
+  to reviews still pending; servers already approved stay approved.
 - **AC-4.4** Given an approved team server, when any agent calls it, then the call is in `mcp_events` and the
   service-wide MCP report with kind *Team-managed*.
 - **AC-4.5** Given a slug already used by an enterprise server, when I register, then it is refused.
@@ -726,7 +731,8 @@ Playwright), **cli** (goldens and httptest), **e2e** (kind or EKS cluster). Each
 | TC-13 | ui | Switch on a per-team-credential server | Credential prompt; status `Credential required` until set | 3.4 |
 | TC-14 | api, ui | Register with `may_add_mcp_servers = false` | API 403; button disabled with tooltip | 4.1 |
 | TC-15 | gw | Registration of external host with open-world tools | Risk `elevated`, reasons listed | 4.2 |
-| TC-16 | api | TA approves low; TA approves elevated; SO approves elevated | 200; 403; 200 | 4.3 |
+| TC-16 | api | Under each of the three approval policies: TA approves low, TA approves elevated, SO approves elevated | `team_all`: 200, 200, 200; `team_low_security_higher`: 200, 403, 200; `security_all`: 403, 403, 200 | 4.3 |
+| TC-16a | api | SA changes approval policy; TA, TV, SO try the same | SA 200 + audit row; others 403; pending reviews follow the new policy | 4.6 |
 | TC-17 | db | Team server rows | RLS: invisible and unwritable from another team (`seedOtherTeams` rows added) | 4.3, 9.3 |
 | TC-18 | gw | Call to approved team server | `mcp_events` row with kind `team`; appears in service report | 4.4 |
 | TC-19 | api | Team server slug equals enterprise slug | 409 / validation error | 4.5 |
@@ -810,3 +816,4 @@ AWS-console style, from `docs/ui/source/mcp_screens.py` (run by `gen.py`, render
 - 2026-11-24: J asked about OIDC temporary credentials for MCP servers and for agents' own CLIs; section 9 answers it
   (cases 4 and 6, MCP-D6, MCP-OQ-10).
 - 2026-11-24: J asked for UI, use cases and test cases to review; sections 15 to 17 and mockups 46 to 55 added.
+- 2026-11-25: J answered all open questions (section 14.3). MCP moves to release 1.3.0; team server approval becomes a three-level service policy with team approval by default; user-delegated OAuth uses service accounts only; per-agent OIDC tokens ship with MCP.

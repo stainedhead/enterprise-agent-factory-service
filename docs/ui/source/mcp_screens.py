@@ -183,7 +183,7 @@ mpage("48-admin-add-mcp-server", "admin", mcp_admin_nav("mcp"), f"""
 <div class="tile"><b>Static API key</b><span>Value in Secrets Manager, gateway-only path. One per team by default.</span></div>
 <div class="tile on"><b>OAuth client credentials</b><span>Gateway is a machine client; access token with resource = this server.</span></div>
 <div class="tile"><b>Workload federation</b><span>OIDC temporary credentials: the gateway exchanges its projected token (RFC 8693). Nothing stored.</span></div>
-<div class="tile"><b>User-delegated OAuth</b><span>A person connects once; the gateway holds the refresh token and mints access tokens.</span></div>
+<div class="tile"><b>User-delegated OAuth</b><span>A service account in the SaaS is connected once; the gateway holds the refresh token and mints access tokens. Never a named person.</span></div>
 <div class="tile"><b>AWS IAM (SigV4)</b><span>For AWS-hosted MCP servers, signed with the team gateway's role.</span></div></div>
 <div class="grid g2" style="margin-top:14px">
 <div class="field"><label>Authorization server</label><div class="hint">Discovered from the server's protected resource metadata (RFC 9728)</div><div class="input ro mono">https://corp.okta.com/oauth2/aus1snow</div></div>
@@ -214,7 +214,7 @@ mpage("49-so-mcp-review", "so2", mcp_admin_nav("mcpreview"), f"""
 <div class="check">{st('ok','')}<span>Data classification Confidential ≤ team ceiling Confidential</span><span class="r muted">passed</span></div>
 <div class="check">{st('ok','')}<span>Credential: static API key, stored at the gateway-only path; agents cannot read it</span><span class="r muted">passed</span></div>
 </div></div>
-<div class="card"><div class="ch"><h2>Why elevated</h2></div><div class="cb small">External host and open-world tools need a security operator or service admin (team-admins approve only low-risk servers). Approving publishes it to <b>claims-modernization only</b>; it is proxied, pinned and logged like enterprise servers.</div></div>
+<div class="card"><div class="ch"><h2>Why elevated</h2></div><div class="cb small">Service approval policy: <b>team approves low, security approves higher</b> (set by service admins; the default lets teams approve all tiers). External host and open-world tools make this elevated, so it needs a security operator or service admin. Approving publishes it to <b>claims-modernization only</b>; it is proxied, pinned and logged like enterprise servers.</div></div>
 </div><div style="flex:1;min-width:0">
 <div class="card"><div class="ch"><h2>Inventory <span class="cnt">(9)</span></h2></div>
 <table><tr><th>Name</th><th>Kind</th><th>Annotations</th><th>Decision</th></tr>

@@ -194,7 +194,7 @@ tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--blue)}
 <div class="tile"><b>Static API key</b><span>Value in Secrets Manager, gateway-only path. One per team by default.</span></div>
 <div class="tile on"><b>OAuth client credentials</b><span>Gateway is a machine client; access token with resource = this server.</span></div>
 <div class="tile"><b>Workload federation</b><span>OIDC temporary credentials: the gateway exchanges its projected token (RFC 8693). Nothing stored.</span></div>
-<div class="tile"><b>User-delegated OAuth</b><span>A person connects once; the gateway holds the refresh token and mints access tokens.</span></div>
+<div class="tile"><b>User-delegated OAuth</b><span>A service account in the SaaS is connected once; the gateway holds the refresh token and mints access tokens. Never a named person.</span></div>
 <div class="tile"><b>AWS IAM (SigV4)</b><span>For AWS-hosted MCP servers, signed with the team gateway's role.</span></div></div>
 <div class="grid g2" style="margin-top:14px">
 <div class="field"><label>Authorization server</label><div class="hint">Discovered from the server's protected resource metadata (RFC 9728)</div><div class="input ro mono">https://corp.okta.com/oauth2/aus1snow</div></div>
